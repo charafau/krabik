@@ -145,6 +145,40 @@ fn check_ios() {
     }
 }
 
+fn create_rust(name: &str) {
+    Command::new("cargo")
+        .args(["new", &format!("{name}/rust")])
+        .status()
+        .expect("failed to run cargo");
+
+    let cargo_toml_path = format!("{name}/rust/Cargo.toml");
+    let buf = fs::read_to_string(&cargo_toml_path).expect("failed to read Cargo.toml");
+
+    let mut lines: Vec<&str> = buf.lines().collect();
+    lines.truncate(lines.len().saturating_sub(2));
+    lines.push("");
+    lines.push("[lib]");
+    lines.push("crate-type = [\"cdylib\"]");
+    lines.push("");
+    lines.push("[dependencies]");
+
+    fs::write(&cargo_toml_path, lines.join("\n"))
+        .expect("failed to write to file");
+}
+
+fn create_android(name: &str) {
+    Command::new("android")
+        .args([
+            "create",
+            "--name",
+            name,
+            "-o",
+            &format!("./{name}/android/"),
+        ])
+        .status()
+        .expect("failed to run android CLI");
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -162,38 +196,9 @@ fn main() {
 
             //create subdir
             fs::create_dir(&format!("./{name}/")).expect("failed to create folder");
-            // for rust
 
-            Command::new("cargo")
-                .args(["new", &format!("{name}/rust")])
-                .status()
-                .expect("failed to run cargo");
-
-            let cargo_toml_path = format!("{name}/rust/Cargo.toml");
-            let buf = fs::read_to_string(&cargo_toml_path).expect("failed to read Cargo.toml");
-
-            let mut lines: Vec<&str> = buf.lines().collect();
-            lines.truncate(lines.len().saturating_sub(2));
-            lines.push("");
-            lines.push("[lib]");
-            lines.push("crate-type = [\"cdylib\"]");
-            lines.push("");
-            lines.push("[dependencies]");
-
-            fs::write(&cargo_toml_path, lines.join("\n"))
-                .expect("failed to write to file");
-
-            // for android
-            Command::new("android")
-                .args([
-                    "create",
-                    "--name",
-                    &format!("{name}"),
-                    "-o",
-                    &format!("./{name}/android/"),
-                ])
-                .status()
-                .expect("failed to run flutter");
+            create_rust(&name);
+            create_android(&name);
         }
     }
 }
