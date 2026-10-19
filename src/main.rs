@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 
 use std::fs;
-use std::intrinsics::copy;
+
 use std::process::Command;
 
 fn command_exists(command: &str) -> bool {
@@ -52,6 +52,9 @@ enum Commands {
 
     /// Build release build
     Release,
+
+    /// Generate UniFFI Android (Kotlin) bindings
+    Bindings,
     // Package the project
     // Package {
     //     name: String,
@@ -167,7 +170,7 @@ fn create_rust(name: &str) {
         .status()
         .expect("failed to run cargo");
 
-    fs::rename(&format!("{name}/{name}"), &format!("{name}/rust")).unwrap();
+    fs::rename(format!("{name}/{name}"), format!("{name}/rust")).unwrap();
 
     let cargo_toml_path = format!("{name}/rust/Cargo.toml");
     let buf = fs::read_to_string(&cargo_toml_path).expect("failed to read Cargo.toml");
@@ -178,9 +181,68 @@ fn create_rust(name: &str) {
     lines.push("[lib]");
     lines.push("crate-type = [\"cdylib\"]");
     lines.push("");
-    lines.push("[dependencies]");
-
     fs::write(&cargo_toml_path, lines.join("\n")).expect("failed to write to file");
+
+    Command::new("cargo")
+        .args(["add", "uniffi", "--features", "cli", "--manifest-path", &cargo_toml_path])
+        .status()
+        .expect("failed to add uniffi dependency");
+
+    Command::new("cargo")
+        .args(["add", "--build", "uniffi", "--features", "build", "--manifest-path", &cargo_toml_path])
+        .status()
+        .expect("failed to add uniffi build-dependency");
+
+    // Command::new("cargo")
+    //     .args(["add", "uniffi_bindgen", "--manifest-path", &cargo_toml_path])
+    //     .status()
+    //     .expect("failed to add uniffi_bindgen dependency");
+
+    create_cargo_config(name).expect("failed to create cargo config");
+
+    // Append [[bin]] target for uniffi-bindgen to Cargo.toml
+    let mut cargo_toml_content = fs::read_to_string(&cargo_toml_path).expect("failed to read Cargo.toml");
+    cargo_toml_content.push_str(
+        "\n[[bin]]\nname = \"uniffi-bindgen\"\npath = \"src/uniffi-bindgen.rs\"\n"
+    );
+    fs::write(&cargo_toml_path, cargo_toml_content).expect("failed to update Cargo.toml with uniffi-bindgen bin target");
+
+    // // Create build.rs
+    // let build_rs_path = format!("{name}/rust/build.rs");
+    // let build_rs_content = "fn main() {\n    uniffi::setup_scaffolding(\"src/lib.rs\").unwrap();\n}\n";
+    // fs::write(build_rs_path, build_rs_content).expect("failed to write build.rs");
+
+    // Create src/uniffi-bindgen.rs
+    let bindgen_rs_path = format!("{name}/rust/src/uniffi-bindgen.rs");
+    let bindgen_rs_content = "fn main() {\n    uniffi::uniffi_bindgen_main();\n}\n";
+    fs::write(bindgen_rs_path, bindgen_rs_content).expect("failed to write uniffi-bindgen.rs");
+}
+
+fn create_cargo_config(name: &str) -> Result<()> {
+    let cargo_dir = format!("./{name}/rust/.cargo");
+    fs::create_dir_all(&cargo_dir)?;
+
+    let config_path = format!("{cargo_dir}/config.toml");
+    let ndk_root = std::env::var("ANDROID_NDK_HOME")
+        .unwrap_or_else(|_| "/Users/charafau/Utils/android-sdk/ndk/30.0.14904198".to_string());
+
+    let config_content = format!(
+        r#"[target.aarch64-linux-android]
+linker = "{ndk_root}/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android24-clang"
+
+[target.armv7-linux-androideabi]
+linker = "{ndk_root}/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi24-clang"
+
+[target.i686-linux-android]
+linker = "{ndk_root}/toolchains/llvm/prebuilt/darwin-x86_64/bin/i686-linux-android24-clang"
+
+[target.x86_64-linux-android]
+linker = "{ndk_root}/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android24-clang"
+"#
+    );
+
+    fs::write(config_path, config_content)?;
+    Ok(())
 }
 
 const ANDROID_JNI_FOLDERS: [&str; 4] = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"];
@@ -201,6 +263,81 @@ fn create_android(name: &str) {
         let path = format!("./{name}/android/app/src/main/jniLibs/{folder}");
         fs::create_dir_all(path).expect("failed to create directory");
     }
+
+    modify_main_activity(name).expect("failed to modify main activity");
+}
+
+fn modify_main_activity(name: &str) -> Result<()> {
+    // 1. Update rust/src/lib.rs with UniFFI proc macros
+    let lib_rs_path = format!("./{name}/rust/src/lib.rs");
+    let rust_lib_content = r#"uniffi::setup_scaffolding!();
+
+#[uniffi::export]
+pub fn get_greeting() -> String {
+    "Hello from Rust!".to_string()
+}
+"#;
+    fs::write(&lib_rs_path, rust_lib_content)?;
+
+    // 2. Create activity_main.xml layout with LinearLayout and TextView
+    let layout_dir = format!("./{name}/android/app/src/main/res/layout");
+    fs::create_dir_all(&layout_dir)?;
+    let layout_xml_path = format!("{layout_dir}/activity_main.xml");
+    let layout_content = r#"<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/main_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/sample_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:text="Loading..." />
+
+</LinearLayout>
+"#;
+    fs::write(&layout_xml_path, layout_content)?;
+
+    // 3. Update MainActivity.kt to load the Rust library and set layout text
+    let main_activity_dir = format!("./{name}/android/app/src/main/java/com/example/{name}");
+    fs::create_dir_all(&main_activity_dir)?;
+    let main_activity_path = format!("{main_activity_dir}/MainActivity.kt");
+    let rust_lib_name = name.replace('-', "_");
+    let kt_content = format!(
+        r#"package com.example.{name}
+
+import android.app.Activity
+import android.os.Bundle
+import android.widget.TextView
+import uniffi.{rust_lib_name}.getGreeting
+
+class MainActivity : Activity() {{
+
+    override fun onCreate(savedInstanceState: Bundle?) {{
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        val tv = findViewById<TextView>(R.id.sample_text)
+        tv.text = getGreeting()
+    }}
+
+    companion object {{
+        init {{
+            System.loadLibrary("{rust_lib_name}")
+        }}
+    }}
+}}
+"#
+    );
+    fs::write(&main_activity_path, kt_content)?;
+
+    Ok(())
 }
 
 fn list_android_devices() {
@@ -214,7 +351,7 @@ fn list_android_devices() {
 fn launch_android_emulator(name: &str) {
     println!("Launching Adnroid Emulator...\n");
     Command::new("android")
-        .args(["emulator", "start", &format!("{name}")])
+        .args(["emulator", "start", name])
         .status()
         .expect("failed to launch emulator");
 }
@@ -272,14 +409,14 @@ fn export_ndk_variables() -> Result<()> {
                     linker, compiler_path
                 );
 
-                std::env::set_var(linker, format!("{compiler_path}"));
+                std::env::set_var(linker, compiler_path.clone());
             }
         }
 
-        return Ok(());
+        Ok(())
+    } else {
+        Err(anyhow!("Android NDK not found"))
     }
-
-    return Err(anyhow!("ANDROID_NDK_HOME is not set"));
 }
 
 fn get_lib_name() -> Result<String> {
@@ -334,15 +471,85 @@ fn launch_android_app(device: Option<&str>) -> Result<()> {
     let activity = format!("{package_name}/{package_name}.MainActivity");
     let mut cmd = Command::new("adb");
 
-    // if let Some(dev) = device {
-    //     if !dev.is_empty() {
-    //         cmd.args(["-s", dev]);
-    //     }
-    // }
+    let _ = device;
 
     // TODO - if more than 1 device, print a list and ask user to select one
     cmd.args(["shell", "am", "start", "-n", &activity]);
     cmd.status().expect("failed to launch app via adb");
+
+    Ok(())
+}
+
+fn generate_kotlin_bindings(lib_path: &str) -> Result<()> {
+    println!("\nGenerating Kotlin UniFFI bindings...");
+
+    // UniFFI bindgen needs host library (.dylib/.so/.dll) or Android .so to parse UniFFI metadata.
+    // If the given lib_path does not exist, build host target library first.
+    let mut target_lib = lib_path.to_string();
+    if !std::path::Path::new(&target_lib).exists() {
+        println!("Target lib {} not found, building host library...", target_lib);
+        Command::new("cargo")
+            .args(["build", "--lib", "--target", "aarch64-linux-android"])
+            .current_dir("./rust")
+            .status()
+            .expect("failed to build host rust library for binding generation");
+
+        let lib_name = get_lib_name()?;
+        let host_lib = format!("./rust/target/aarch64-linux-android/debug/lib{}.so", lib_name.replace('-', "_"));
+        target_lib = host_lib;
+    }
+
+    // Adjust paths for running from rust directory
+    let lib_path_for_bindgen = if target_lib.starts_with("./rust/") {
+        target_lib.replacen("./rust/", "../rust/", 1)
+    } else if target_lib.starts_with("rust/") {
+        format!("../{}", target_lib)
+    } else {
+        target_lib.clone()
+    };
+    let args = [
+        "run",
+        "--bin",
+        "uniffi-bindgen",
+        "--features=uniffi/cli",
+        "--",
+        "generate",
+        "--library",
+        &lib_path_for_bindgen,
+        "--language",
+        "kotlin", // in the future change it to uniffi-bindgen-kotlin-jni (currently experimental)
+        "--out-dir",
+        "../android",
+    ];
+
+    println!("Running command: cargo {}", args.join(" "));
+
+    Command::new("cargo")
+        .args(args)
+        .current_dir("./rust")
+        .status()
+        .expect("failed to generate UniFFI bindings");
+
+    // Copy generated bindings to Android source
+    let lib_name = get_lib_name()?;
+    let out_dir = format!("out2/uniffi/{}", lib_name);
+    if std::path::Path::new(&out_dir).exists() {
+        let kt_files = std::fs::read_dir(&out_dir)?;
+        let dest_dir = format!("android/app/src/main/java/uniffi/{}", lib_name);
+        std::fs::create_dir_all(&dest_dir)?;
+        for entry in kt_files {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "kt") {
+                let file_name = path.file_name().unwrap();
+                std::fs::copy(&path, format!("{}/{}", dest_dir, file_name.to_string_lossy()))?;
+            }
+            if path.extension().is_some_and(|ext| ext == "kt") {
+                let file_name = path.file_name().unwrap();
+                std::fs::copy(&path, format!("{}/{}", dest_dir, file_name.to_string_lossy()))?;
+            }
+        }
+    }
 
     Ok(())
 }
@@ -379,6 +586,8 @@ fn build_android_debug(name: &str) -> Result<()> {
         fs::create_dir_all(dst_dir)?;
         fs::copy(&src_path, format!("{dst_dir}/{so_filename}"))?;
 
+        generate_kotlin_bindings(&src_path)?;
+
         // Compile Android project
         Command::new("./android/gradlew")
             .args(["-p", "android", "app:installDebug"])
@@ -390,10 +599,10 @@ fn build_android_debug(name: &str) -> Result<()> {
         // Launch apk
         launch_android_app(if name.is_empty() { None } else { Some(name) })?;
 
-        return Ok(());
+        Ok(())
+    } else {
+        Err(anyhow!("Android NDK not found"))
     }
-
-    return Err(anyhow!("Android NDK not found"));
 
     // fs::copy(, to)
 
@@ -440,13 +649,20 @@ fn build_android_release() -> Result<()> {
             println!("\nAndroid build for {target} done.");
         }
 
-        return Ok(());
+        Ok(())
+    } else {
+        Err(anyhow!("Android NDK not found"))
     }
-
-    return Err(anyhow!("Android NDK not found"));
 }
 
 //TODO: add build_android_release
+
+fn generate_android_bindings() -> Result<()> {
+    let lib_name = get_lib_name()?;
+    let so_filename = format!("lib{lib_name}.so");
+    let src_path = format!("./rust/target/aarch64-linux-android/debug/{so_filename}");
+    generate_kotlin_bindings(&src_path)
+}
 
 fn main() {
     let args = Args::parse();
@@ -464,7 +680,7 @@ fn main() {
             println!("create: {}", name);
 
             //create subdir
-            fs::create_dir(&format!("./{name}/")).expect("failed to create folder");
+            fs::create_dir(format!("./{name}/")).expect("failed to create folder");
 
             create_rust(&name);
             create_android(&name);
@@ -481,12 +697,13 @@ fn main() {
             launch_android_emulator(&emulator);
         }
         Commands::Run { device } => {
-            build_android_debug(&device);
-
-            // launch_android_emulator(&device);
+            let _ = build_android_debug(&device);
         }
         Commands::Release => {
-            build_android_release();
+            let _ = build_android_release();
+        }
+        Commands::Bindings => {
+            let _ = generate_android_bindings();
         }
     }
 }
