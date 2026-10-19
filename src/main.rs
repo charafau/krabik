@@ -3,7 +3,6 @@ use clap::{Parser, Subcommand};
 use std::fs;
 use std::process::Command;
 
-
 fn command_exists(command: &str) -> bool {
     Command::new(command).arg("--version").output().is_ok()
 }
@@ -36,20 +35,28 @@ enum Commands {
 
     /// Create a new project
     Create { name: String },
-    // Package the project
-    // Package {
-    //     name: String,
-    // },
 
-    // /// Build the project
-    // Build {
-    //     name: String,
-    // },
+    /// Install necessary rust toolchains
+    Toolchain,
 
-    // /// Run the project
-    // Run {
-    //     name: String,
-    // },
+    /// List available devices
+    Devices,
+
+    /// Launch given emulator
+    Launch { emulator: String }, // Package the project
+                                 // Package {
+                                 //     name: String,
+                                 // },
+
+                                 // /// Build the project
+                                 // Build {
+                                 //     name: String,
+                                 // },
+
+                                 // /// Run the project
+                                 // Run {
+                                 //     name: String,
+                                 // },
 }
 
 fn target_installed(target: &str) -> bool {
@@ -147,9 +154,11 @@ fn check_ios() {
 
 fn create_rust(name: &str) {
     Command::new("cargo")
-        .args(["new", &format!("{name}/rust")])
+        .args(["new", &format!("{name}/{name}")])
         .status()
         .expect("failed to run cargo");
+
+    fs::rename(&format!("{name}/{name}"), &format!("{name}/rust")).unwrap();
 
     let cargo_toml_path = format!("{name}/rust/Cargo.toml");
     let buf = fs::read_to_string(&cargo_toml_path).expect("failed to read Cargo.toml");
@@ -162,8 +171,7 @@ fn create_rust(name: &str) {
     lines.push("");
     lines.push("[dependencies]");
 
-    fs::write(&cargo_toml_path, lines.join("\n"))
-        .expect("failed to write to file");
+    fs::write(&cargo_toml_path, lines.join("\n")).expect("failed to write to file");
 }
 
 fn create_android(name: &str) {
@@ -177,6 +185,22 @@ fn create_android(name: &str) {
         ])
         .status()
         .expect("failed to run android CLI");
+}
+
+fn list_android_devices() {
+    println!("Available Android Devices:\n");
+    Command::new("android")
+        .args(["emulator", "list"])
+        .status()
+        .expect("failed to list android devices");
+}
+
+fn launch_android_emulator(name: &str) {
+    println!("Launching Adnroid Emulator...\n");
+    Command::new("android")
+        .args(["emulator", "start", &format!("{name}")])
+        .status()
+        .expect("failed to launch emulator");
 }
 
 fn main() {
@@ -199,6 +223,17 @@ fn main() {
 
             create_rust(&name);
             create_android(&name);
+        }
+        Commands::Toolchain => {
+            install_android_toolchain();
+            install_ios_toolchain();
+        }
+        Commands::Devices => {
+            list_android_devices();
+            // check_ios();
+        }
+        Commands::Launch { emulator } => {
+            launch_android_emulator(&emulator);
         }
     }
 }
