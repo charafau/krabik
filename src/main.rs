@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use std::fs;
 use std::process::Command;
 
+
 fn command_exists(command: &str) -> bool {
     Command::new(command).arg("--version").output().is_ok()
 }
@@ -166,7 +167,22 @@ fn main() {
             Command::new("cargo")
                 .args(["new", &format!("{name}/rust")])
                 .status()
-                .expect("failed to run flutter");
+                .expect("failed to run cargo");
+
+            let cargo_toml_path = format!("{name}/rust/Cargo.toml");
+            let buf = fs::read_to_string(&cargo_toml_path).expect("failed to read Cargo.toml");
+
+            let mut lines: Vec<&str> = buf.lines().collect();
+            lines.truncate(lines.len().saturating_sub(2));
+            lines.push("");
+            lines.push("[lib]");
+            lines.push("crate-type = [\"cdylib\"]");
+            lines.push("");
+            lines.push("[dependencies]");
+
+            fs::write(&cargo_toml_path, lines.join("\n"))
+                .expect("failed to write to file");
+
             // for android
             Command::new("android")
                 .args([
