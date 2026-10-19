@@ -103,6 +103,11 @@ fn check_android() {
     } else {
         println!("\x1b[31m[✗]\x1b[0m android CLI is not installed");
     };
+    if std::env::var("ANDROID_NDK_HOME").is_ok() {
+        println!("\x1b[32m[✓]\x1b[0m ANDROID_NDK_HOME environment variable is set");
+    } else {
+        println!("\x1b[31m[✗]\x1b[0m ANDROID_NDK_HOME environment variable is not set");
+    };
     for target in ANDROID_TARGETS {
         println!(
             "{} target {target}",
