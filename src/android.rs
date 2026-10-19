@@ -69,16 +69,7 @@ pub fn create_android(name: &str) {
 fn modify_main_activity(name: &str) -> Result<()> {
     // 1. Update rust/src/lib.rs with UniFFI proc macros
     let lib_rs_path = format!("./{name}/rust/src/lib.rs");
-    let rust_lib_content = r#"uniffi::setup_scaffolding!();
-
-include!(concat!(env!("OUT_DIR"), "/uniffi_bindgen_kotlin_jni.uniffi.rs"));
-
-#[uniffi::export]
-pub fn get_greeting() -> String {
-    "Hello from Rust!".to_string()
-}
-"#;
-    fs::write(&lib_rs_path, rust_lib_content)?;
+    fs::write(&lib_rs_path, RUST_LIB_CONTENT)?;
 
     // 2. Create activity_main.xml layout with LinearLayout and TextView
     let layout_dir = format!("./{name}/android/app/src/main/res/layout");
@@ -109,8 +100,24 @@ pub fn get_greeting() -> String {
     let main_activity_dir = format!("./{name}/android/app/src/main/java/com/example/{name}");
     fs::create_dir_all(&main_activity_dir)?;
     let main_activity_path = format!("{main_activity_dir}/MainActivity.kt");
+    fs::write(&main_activity_path, main_activity_content(name))?;
+
+    Ok(())
+}
+
+const RUST_LIB_CONTENT: &str = r#"uniffi::setup_scaffolding!();
+
+include!(concat!(env!("OUT_DIR"), "/uniffi_bindgen_kotlin_jni.uniffi.rs"));
+
+#[uniffi::export]
+pub fn get_greeting() -> String {
+    "Hello from Rust!".to_string()
+}
+"#;
+
+fn main_activity_content(name: &str) -> String {
     let rust_lib_name = name.replace('-', "_");
-    let kt_content = format!(
+    format!(
         r#"package com.example.{name}
 
 import android.app.Activity
@@ -129,10 +136,7 @@ class MainActivity : Activity() {{
     }}
 }}
 "#
-    );
-    fs::write(&main_activity_path, kt_content)?;
-
-    Ok(())
+    )
 }
 
 pub fn list_android_devices() {
@@ -263,17 +267,7 @@ fn generate_kotlin_bindings() -> Result<()> {
     // uniffi-bindgen-kotlin-jni parses the Rust sources directly (`src:<crate>`),
     // so no compiled library is needed. Output goes straight into the Android source set
     // (`uniffi/Uniffi.kt` and `uniffi/<crate>/uniffi.<crate>.kt`).
-    let lib_name = rust::get_lib_name()?;
-    let source = format!("src:{lib_name}");
-    let args = [
-        "run",
-        "-p",
-        "uniffi-bindgen",
-        "--",
-        "bindings",
-        &source,
-        "../android/app/src/main/java",
-    ];
+    let args = bindgen_args(&rust::get_lib_name()?);
 
     println!("Running command: cargo {}", args.join(" "));
 
@@ -288,6 +282,20 @@ fn generate_kotlin_bindings() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn bindgen_args(lib_name: &str) -> Vec<String> {
+    [
+        "run",
+        "-p",
+        "uniffi-bindgen",
+        "--",
+        "bindings",
+        &format!("src:{lib_name}"),
+        "../android/app/src/main/java",
+    ]
+    .map(String::from)
+    .to_vec()
 }
 
 /// builds Android library (only debug), one target
@@ -369,12 +377,8 @@ pub fn build_android_release() -> Result<()> {
                 .status()
                 .expect("failed to build");
 
-            let jni_folder = match target {
-                "aarch64-linux-android" => "arm64-v8a",
-                "armv7-linux-androideabi" => "armeabi-v7a",
-                "x86_64-linux-android" => "x86_64",
-                "i686-linux-android" => "x86",
-                _ => continue,
+            let Some(jni_folder) = jni_folder_for_target(target) else {
+                continue;
             };
 
             let src_path = format!("./rust/target/{target}/release/{so_filename}");
@@ -388,6 +392,16 @@ pub fn build_android_release() -> Result<()> {
         Ok(())
     } else {
         Err(anyhow!("Android NDK not found"))
+    }
+}
+
+fn jni_folder_for_target(target: &str) -> Option<&'static str> {
+    match target {
+        "aarch64-linux-android" => Some("arm64-v8a"),
+        "armv7-linux-androideabi" => Some("armeabi-v7a"),
+        "x86_64-linux-android" => Some("x86_64"),
+        "i686-linux-android" => Some("x86"),
+        _ => None,
     }
 }
 
@@ -453,5 +467,123 @@ dependencies {
 
         let pkg = parse_android_package_name(sample_gradle_kts).unwrap();
         assert_eq!(pkg, "com.example.isitgood");
+    }
+
+    #[test]
+    fn test_parse_android_package_name_groovy() {
+        let gradle = "android {\n    namespace 'com.example.groovy'\n}\n";
+        assert_eq!(parse_android_package_name(gradle).unwrap(), "com.example.groovy");
+    }
+
+    #[test]
+    fn test_parse_android_package_name_application_id_only() {
+        let gradle = "defaultConfig {\n    applicationId = \"com.example.appid\"\n}\n";
+        assert_eq!(parse_android_package_name(gradle).unwrap(), "com.example.appid");
+    }
+
+    #[test]
+    fn test_parse_android_package_name_skips_empty_value() {
+        let gradle = "namespace = \"\"\napplicationId = \"com.example.fallback\"\n";
+        assert_eq!(parse_android_package_name(gradle).unwrap(), "com.example.fallback");
+    }
+
+    #[test]
+    fn test_parse_android_package_name_missing() {
+        assert!(parse_android_package_name("android {\n    compileSdk = 34\n}\n").is_err());
+    }
+
+    #[test]
+    fn test_get_ndk_toolchain_compilers() {
+        let compilers = get_ndk_toolchain_compilers(28).unwrap();
+        assert_eq!(compilers.len(), 4);
+        assert_eq!(
+            compilers["CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"],
+            "aarch64-linux-android28-clang"
+        );
+        assert_eq!(
+            compilers["CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER"],
+            "armv7a-linux-androideabi28-clang"
+        );
+        assert_eq!(
+            compilers["CARGO_TARGET_I686_LINUX_ANDROID_LINKER"],
+            "i686-linux-android28-clang"
+        );
+        assert_eq!(
+            compilers["CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER"],
+            "x86_64-linux-android28-clang"
+        );
+    }
+
+    #[test]
+    fn test_ndk_linker_env_vars_match_targets() {
+        // CARGO_TARGET_<TRIPLE>_LINKER, triple upper-cased with '-' -> '_'
+        for target in ANDROID_TARGETS {
+            let env_var = format!(
+                "CARGO_TARGET_{}_LINKER",
+                target.to_uppercase().replace('-', "_")
+            );
+            assert!(
+                ANDROID_NDK_LINKERS.iter().any(|(var, _)| *var == env_var),
+                "missing linker for {target}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_jni_folder_for_target() {
+        assert_eq!(jni_folder_for_target("aarch64-linux-android"), Some("arm64-v8a"));
+        assert_eq!(jni_folder_for_target("armv7-linux-androideabi"), Some("armeabi-v7a"));
+        assert_eq!(jni_folder_for_target("x86_64-linux-android"), Some("x86_64"));
+        assert_eq!(jni_folder_for_target("i686-linux-android"), Some("x86"));
+        assert_eq!(jni_folder_for_target("aarch64-apple-ios"), None);
+    }
+
+    #[test]
+    fn test_every_target_has_jni_folder() {
+        for target in ANDROID_TARGETS {
+            let folder = jni_folder_for_target(target).unwrap();
+            assert!(ANDROID_JNI_FOLDERS.contains(&folder), "{folder}");
+        }
+    }
+
+    #[test]
+    fn test_bindgen_args() {
+        assert_eq!(
+            bindgen_args("demo"),
+            [
+                "run",
+                "-p",
+                "uniffi-bindgen",
+                "--",
+                "bindings",
+                "src:demo",
+                "../android/app/src/main/java",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_main_activity_content() {
+        let kt = main_activity_content("demo");
+        assert!(kt.starts_with("package com.example.demo\n"));
+        assert!(kt.contains("import uniffi.demo.getGreeting"));
+        assert!(kt.contains("tv.text = getGreeting()"));
+        // the generated bindings load the native library themselves
+        assert!(!kt.contains("System.loadLibrary"));
+    }
+
+    #[test]
+    fn test_main_activity_content_hyphenated_name() {
+        let kt = main_activity_content("my-app");
+        assert!(kt.contains("import uniffi.my_app.getGreeting"));
+    }
+
+    #[test]
+    fn test_rust_lib_content() {
+        assert!(RUST_LIB_CONTENT.contains("uniffi::setup_scaffolding!();"));
+        assert!(RUST_LIB_CONTENT.contains(
+            r#"include!(concat!(env!("OUT_DIR"), "/uniffi_bindgen_kotlin_jni.uniffi.rs"));"#
+        ));
+        assert!(RUST_LIB_CONTENT.contains("#[uniffi::export]\npub fn get_greeting() -> String"));
     }
 }
