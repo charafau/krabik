@@ -92,28 +92,26 @@ fn main() {
 
     match args.command {
         Commands::Doctor => {
-            println!("doctor");
-            if command_exists("android") {
-                println!("\x1b[32m[✓]\x1b[0m android is installed");
-            } else {
-                println!("\x1b[31m[✗]\x1b[0m android is not installed");
-            };
+            println!("doctor\n");
 
-            if command_exists("xcodegen") {
-                println!("\x1b[32m[✓]\x1b[0m xcodegen is installed");
-            } else {
-                println!("\x1b[31m[✗]\x1b[0m xcodegen is not installed");
-            };
-
+            // Rust checks
+            println!("[Rust]");
             if command_exists("cargo") {
                 println!("\x1b[32m[✓]\x1b[0m cargo is installed");
             } else {
                 println!("\x1b[31m[✗]\x1b[0m cargo is not installed");
             };
 
+            // Android checks
+            println!("\n[Android]");
+            if command_exists("android") {
+                println!("\x1b[32m[✓]\x1b[0m android CLI is installed");
+            } else {
+                println!("\x1b[31m[✗]\x1b[0m android CLI is not installed");
+            };
             for target in ANDROID_TARGETS {
                 println!(
-                    "{} {target}",
+                    "{} target {target}",
                     if target_installed(target) {
                         "\x1b[32m[✓]\x1b[0m"
                     } else {
@@ -122,9 +120,21 @@ fn main() {
                 );
             }
 
+            // iOS checks
+            println!("\n[iOS]");
+            if command_exists("xcodebuild") {
+                println!("\x1b[32m[✓]\x1b[0m xcode is installed");
+            } else {
+                println!("\x1b[31m[✗]\x1b[0m xcode is not installed");
+            };
+            if command_exists("xcodegen") {
+                println!("\x1b[32m[✓]\x1b[0m xcodegen is installed");
+            } else {
+                println!("\x1b[31m[✗]\x1b[0m xcodegen is not installed");
+            };
             for target in IOS_TARGETS {
                 println!(
-                    "{} {target}",
+                    "{} target {target}",
                     if target_installed(target) {
                         "\x1b[32m[✓]\x1b[0m"
                     } else {
