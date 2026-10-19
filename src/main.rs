@@ -174,6 +174,13 @@ fn create_rust(name: &str) {
     fs::write(&cargo_toml_path, lines.join("\n")).expect("failed to write to file");
 }
 
+const ANDROID_JNI_FOLDERS: [&str; 4] = [
+    "arm64-v8a",
+    "armeabi-v7a",
+    "x86",
+    "x86_64",
+];
+
 fn create_android(name: &str) {
     Command::new("android")
         .args([
@@ -185,6 +192,12 @@ fn create_android(name: &str) {
         ])
         .status()
         .expect("failed to run android CLI");
+
+
+    for folder in ANDROID_JNI_FOLDERS {
+        let path = format!("./{name}/android/app/src/main/jniLibs/{folder}");
+        fs::create_dir_all(path).expect("failed to create directory");
+    }
 }
 
 fn list_android_devices() {
@@ -230,7 +243,7 @@ fn main() {
         }
         Commands::Devices => {
             list_android_devices();
-            // check_ios();
+            // list_ios_devices();
         }
         Commands::Launch { emulator } => {
             launch_android_emulator(&emulator);
