@@ -1,6 +1,8 @@
+use anyhow::{Ok, Result, anyhow};
 use clap::{Parser, Subcommand};
 
 use std::fs;
+use std::intrinsics::copy;
 use std::process::Command;
 
 fn command_exists(command: &str) -> bool {
@@ -43,20 +45,27 @@ enum Commands {
     Devices,
 
     /// Launch given emulator
-    Launch { emulator: String }, // Package the project
-                                 // Package {
-                                 //     name: String,
-                                 // },
+    Launch { emulator: String },
 
-                                 // /// Build the project
-                                 // Build {
-                                 //     name: String,
-                                 // },
+    /// Run on given device (build and launch)
+    Run { device: String },
 
-                                 // /// Run the project
-                                 // Run {
-                                 //     name: String,
-                                 // },
+    /// Build release build
+    Release,
+    // Package the project
+    // Package {
+    //     name: String,
+    // },
+
+    // /// Build the project
+    // Build {
+    //     name: String,
+    // },
+
+    // /// Run the project
+    // Run {
+    //     name: String,
+    // },
 }
 
 fn target_installed(target: &str) -> bool {
@@ -154,7 +163,7 @@ fn check_ios() {
 
 fn create_rust(name: &str) {
     Command::new("cargo")
-        .args(["new", &format!("{name}/{name}")])
+        .args(["new", &format!("{name}/{name}"), "--lib"])
         .status()
         .expect("failed to run cargo");
 
@@ -174,12 +183,7 @@ fn create_rust(name: &str) {
     fs::write(&cargo_toml_path, lines.join("\n")).expect("failed to write to file");
 }
 
-const ANDROID_JNI_FOLDERS: [&str; 4] = [
-    "arm64-v8a",
-    "armeabi-v7a",
-    "x86",
-    "x86_64",
-];
+const ANDROID_JNI_FOLDERS: [&str; 4] = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"];
 
 fn create_android(name: &str) {
     Command::new("android")
@@ -192,7 +196,6 @@ fn create_android(name: &str) {
         ])
         .status()
         .expect("failed to run android CLI");
-
 
     for folder in ANDROID_JNI_FOLDERS {
         let path = format!("./{name}/android/app/src/main/jniLibs/{folder}");
@@ -215,6 +218,185 @@ fn launch_android_emulator(name: &str) {
         .status()
         .expect("failed to launch emulator");
 }
+
+//NDK_TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin"
+
+// for now only this for debug
+// export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$NDK_TOOLCHAIN/aarch64-linux-android28-clang"
+// export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$NDK_TOOLCHAIN/armv7a-linux-androideabi28-clang"
+// export CARGO_TARGET_I686_LINUX_ANDROID_LINKER="$NDK_TOOLCHAIN/i686-linux-android28-clang"
+// export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$NDK_TOOLCHAIN/x86_64-linux-android28-clang"
+
+const ANDROID_NDK_LINKERS: [(&str, &str); 4] = [
+    (
+        "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER",
+        "aarch64-linux-android",
+    ),
+    (
+        "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER",
+        "armv7a-linux-androideabi",
+    ),
+    (
+        "CARGO_TARGET_I686_LINUX_ANDROID_LINKER",
+        "i686-linux-android",
+    ),
+    (
+        "CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER",
+        "x86_64-linux-android",
+    ),
+];
+
+fn get_ndk_toolchain_compilers(
+    sdk_version: u32,
+) -> Result<std::collections::HashMap<&'static str, String>> {
+    let mut compilers = std::collections::HashMap::new();
+
+    for (env_var, compiler_prefix) in ANDROID_NDK_LINKERS {
+        compilers.insert(env_var, format!("{compiler_prefix}{sdk_version}-clang"));
+    }
+
+    Ok(compilers)
+}
+
+fn export_ndk_variables() -> Result<()> {
+    if std::env::var("ANDROID_NDK_HOME").is_ok() {
+        let ndk_root = std::env::var("ANDROID_NDK_HOME").expect("ANDROID_NDK_HOME not set");
+
+        for (linker, compiler) in get_ndk_toolchain_compilers(28)? {
+            unsafe {
+                //TODO: support linux and windows
+                let compiler_path =
+                    format!("{ndk_root}/toolchains/llvm/prebuilt/darwin-x86_64/bin/{compiler}");
+                println!(
+                    "Setting enviroment variable: linker: {} ; value: {}",
+                    linker, compiler_path
+                );
+
+                std::env::set_var(linker, format!("{compiler_path}"));
+            }
+        }
+
+        return Ok(());
+    }
+
+    return Err(anyhow!("ANDROID_NDK_HOME is not set"));
+}
+
+fn get_lib_name() -> Result<String> {
+    let cargo_toml = fs::read_to_string("./rust/Cargo.toml")?;
+        let lib_name = cargo_toml
+            .lines()
+            .find_map(|line| {
+                let line = line.trim();
+                if line.starts_with("name =") || line.starts_with("name=") {
+                    line.split('=').nth(1).map(|s| s.trim().trim_matches('"'))
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+            .replace('-', "_");
+
+    Ok(lib_name)
+}
+
+/// builds Android library (only debug), one target
+fn build_android_debug(name: &str) -> Result<()> {
+    println!("\nBuilding android...");
+
+    if std::env::var("ANDROID_NDK_HOME").is_ok() {
+        // let ndk_toolchain_path = std::env::var("ANDROID_NDK_HOME")? + "/aarch64-linux-android28-clang";
+        export_ndk_variables()?;
+
+        // cargo build --release --manifest-path "$RUST_DIR/Cargo.toml" --target aarch64-linux-android
+
+        println!("\nBuilding rust lib...");
+        Command::new("cargo")
+            .args([
+                "build",
+                "--manifest-path",
+                "./rust/Cargo.toml",
+                "--target",
+                "aarch64-linux-android",
+            ])
+            .status()
+            .expect("failed to build");
+
+        // Copy rust libs
+        let lib_name = get_lib_name()?;
+
+        let so_filename = format!("lib{lib_name}.so");
+        let src_path = format!("./rust/target/aarch64-linux-android/debug/{so_filename}");
+        let dst_dir = "android/app/src/main/jniLibs/arm64-v8a";
+
+        fs::create_dir_all(dst_dir)?;
+        fs::copy(&src_path, format!("{dst_dir}/{so_filename}"))?;
+
+        // Compile Android project
+        Command::new("./android/gradlew")
+            .arg("app:installDebug")
+            .status()
+            .expect("failed to build android project");
+
+        println!("\nAndroid build done.");
+
+        return Ok(());
+    }
+
+    return Err(anyhow!("Android NDK not found"));
+
+    // fs::copy(, to)
+
+    // add gradle launch
+}
+
+fn build_android_release() -> Result<()> {
+    println!("\nBuilding android release...");
+
+    if std::env::var("ANDROID_NDK_HOME").is_ok() {
+        export_ndk_variables()?;
+
+        println!("\nBuilding rust lib...");
+
+        let lib_name = get_lib_name()?;
+        let so_filename = format!("lib{lib_name}.so");
+
+        for target in ANDROID_TARGETS {
+            Command::new("cargo")
+                .args([
+                    "build",
+                    "--manifest-path",
+                    "./rust/Cargo.toml",
+                    "--target",
+                    target,
+                    "--release",
+                ])
+                .status()
+                .expect("failed to build");
+
+            let jni_folder = match target {
+                "aarch64-linux-android" => "arm64-v8a",
+                "armv7-linux-androideabi" => "armeabi-v7a",
+                "x86_64-linux-android" => "x86_64",
+                "i686-linux-android" => "x86",
+                _ => continue,
+            };
+
+            let src_path = format!("./rust/target/{target}/release/{so_filename}");
+            let dst_dir = format!("android/app/src/main/jniLibs/{jni_folder}");
+
+            fs::create_dir_all(&dst_dir)?;
+            fs::copy(&src_path, format!("{dst_dir}/{so_filename}"))?;
+            println!("\nAndroid build for {target} done.");
+        }
+
+        return Ok(());
+    }
+
+    return Err(anyhow!("Android NDK not found"));
+}
+
+//TODO: add build_android_release
 
 fn main() {
     let args = Args::parse();
@@ -247,6 +429,14 @@ fn main() {
         }
         Commands::Launch { emulator } => {
             launch_android_emulator(&emulator);
+        }
+        Commands::Run { device } => {
+            build_android_debug(&device);
+
+            // launch_android_emulator(&device);
+        }
+        Commands::Release => {
+            build_android_release();
         }
     }
 }
