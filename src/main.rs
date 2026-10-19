@@ -193,6 +193,11 @@ fn create_rust(name: &str) {
         .status()
         .expect("failed to add uniffi build-dependency");
 
+    Command::new("cargo")
+        .args(["add", "uniffi-bindgen-kotlin-jni", "--manifest-path", &cargo_toml_path])
+        .status()
+        .expect("failed to add uniffi-bindgen-kotlin-jni dependency");
+
     // Command::new("cargo")
     //     .args(["add", "uniffi_bindgen", "--manifest-path", &cargo_toml_path])
     //     .status()
@@ -214,7 +219,7 @@ fn create_rust(name: &str) {
 
     // Create src/uniffi-bindgen.rs
     let bindgen_rs_path = format!("{name}/rust/src/uniffi-bindgen.rs");
-    let bindgen_rs_content = "fn main() {\n    uniffi::uniffi_bindgen_main();\n}\n";
+    let bindgen_rs_content = "fn main() {\n    let _ = uniffi_bindgen_kotlin_jni::main();\n}\n";
     fs::write(bindgen_rs_path, bindgen_rs_content).expect("failed to write uniffi-bindgen.rs");
 }
 
@@ -511,14 +516,9 @@ fn generate_kotlin_bindings(lib_path: &str) -> Result<()> {
         "run",
         "--bin",
         "uniffi-bindgen",
-        "--features=uniffi/cli",
         "--",
-        "generate",
-        "--library",
+        "bindings",
         &lib_path_for_bindgen,
-        "--language",
-        "kotlin", // in the future change it to uniffi-bindgen-kotlin-jni (currently experimental)
-        "--out-dir",
         "../android",
     ];
 
@@ -530,24 +530,42 @@ fn generate_kotlin_bindings(lib_path: &str) -> Result<()> {
         .status()
         .expect("failed to generate UniFFI bindings");
 
-    // Copy generated bindings to Android source
+    // Generated bindings are placed according to the new bindgen; copy as needed
     let lib_name = get_lib_name()?;
-    let out_dir = format!("out2/uniffi/{}", lib_name);
-    if std::path::Path::new(&out_dir).exists() {
-        let kt_files = std::fs::read_dir(&out_dir)?;
-        let dest_dir = format!("android/app/src/main/java/uniffi/{}", lib_name);
-        std::fs::create_dir_all(&dest_dir)?;
-        for entry in kt_files {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "kt") {
-                let file_name = path.file_name().unwrap();
-                std::fs::copy(&path, format!("{}/{}", dest_dir, file_name.to_string_lossy()))?;
+    let android_java = format!("android/app/src/main/java");
+    // Try various possible output locations for the new bindgen
+    let candidates = vec![
+        format!("android/uniffi"),
+        format!("android/app/src/main/java/uniffi"),
+        format!("android/src/main/java/uniffi"),
+    ];
+    for c in &candidates {
+        if std::path::Path::new(c).exists() {
+            // Copy the whole uniffi directory
+            let entries = std::fs::read_dir(c)?;
+            for entry in entries.flatten() {
+                let src_path = entry.path();
+                if src_path.is_dir() {
+                    let dir_name = src_path.file_name().unwrap();
+                    let dest_dir = format!("{}/uniffi/{}", android_java, dir_name.to_string_lossy());
+                    std::fs::create_dir_all(&dest_dir)?;
+                    if let Ok(kt_files) = std::fs::read_dir(&src_path) {
+                        for kentry in kt_files.flatten() {
+                            let kpath = kentry.path();
+                            if kpath.extension().is_some_and(|ext| ext == "kt") {
+                                let fname = kpath.file_name().unwrap();
+                                std::fs::copy(&kpath, format!("{}/{}", dest_dir, fname.to_string_lossy()))?;
+                            }
+                        }
+                    }
+                } else if src_path.extension().is_some_and(|ext| ext == "kt") {
+                    let fname = src_path.file_name().unwrap();
+                    let dest_dir = format!("{}/uniffi", android_java);
+                    std::fs::create_dir_all(&dest_dir)?;
+                    std::fs::copy(&src_path, format!("{}/{}", dest_dir, fname.to_string_lossy()))?;
+                }
             }
-            if path.extension().is_some_and(|ext| ext == "kt") {
-                let file_name = path.file_name().unwrap();
-                std::fs::copy(&path, format!("{}/{}", dest_dir, file_name.to_string_lossy()))?;
-            }
+            break;
         }
     }
 
