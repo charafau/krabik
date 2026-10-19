@@ -1,4 +1,4 @@
-use anyhow::{Ok, Result, anyhow};
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 
 use std::fs;
@@ -300,6 +300,53 @@ fn get_lib_name() -> Result<String> {
     Ok(lib_name)
 }
 
+fn parse_android_package_name(content: &str) -> Result<String> {
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with("namespace") || line.starts_with("applicationId") {
+            let value_part = if line.contains('=') {
+                line.split('=').nth(1)
+            } else {
+                line.split_whitespace().nth(1)
+            };
+
+            if let Some(val) = value_part {
+                let pkg = val.trim().trim_matches('"').trim_matches('\'');
+                if !pkg.is_empty() {
+                    return Ok(pkg.to_string());
+                }
+            }
+        }
+    }
+
+    Err(anyhow!("Could not find Android package name in build.gradle.kts"))
+}
+
+fn get_android_package_name() -> Result<String> {
+    let content = fs::read_to_string("./android/app/build.gradle.kts")?;
+    parse_android_package_name(&content)
+}
+
+fn launch_android_app(device: Option<&str>) -> Result<()> {
+    let package_name = get_android_package_name()?;
+    println!("\nLaunching app {package_name} via adb...");
+
+    let activity = format!("{package_name}/{package_name}.MainActivity");
+    let mut cmd = Command::new("adb");
+
+    // if let Some(dev) = device {
+    //     if !dev.is_empty() {
+    //         cmd.args(["-s", dev]);
+    //     }
+    // }
+
+    // TODO - if more than 1 device, print a list and ask user to select one
+    cmd.args(["shell", "am", "start", "-n", &activity]);
+    cmd.status().expect("failed to launch app via adb");
+
+    Ok(())
+}
+
 /// builds Android library (only debug), one target
 fn build_android_debug(name: &str) -> Result<()> {
     println!("\nBuilding android...");
@@ -334,11 +381,14 @@ fn build_android_debug(name: &str) -> Result<()> {
 
         // Compile Android project
         Command::new("./android/gradlew")
-            .arg("app:installDebug")
+            .args(["-p", "android", "app:installDebug"])
             .status()
             .expect("failed to build android project");
 
         println!("\nAndroid build done.");
+
+        // Launch apk
+        launch_android_app(if name.is_empty() { None } else { Some(name) })?;
 
         return Ok(());
     }
@@ -438,5 +488,64 @@ fn main() {
         Commands::Release => {
             build_android_release();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_android_package_name() {
+        let sample_gradle_kts = r#"
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+}
+
+android {
+    namespace = "com.example.isitgood"
+    compileSdk = 34
+
+    defaultConfig {
+        applicationId = "com.example.isitgood"
+        minSdk = 24
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+}
+
+dependencies {
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+}
+"#;
+
+        let pkg = parse_android_package_name(sample_gradle_kts).unwrap();
+        assert_eq!(pkg, "com.example.isitgood");
     }
 }
