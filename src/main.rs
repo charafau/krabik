@@ -87,61 +87,69 @@ fn install_ios_toolchain() {
         .expect("failed to run rustup");
 }
 
+fn check_rust() {
+    println!("[Rust]");
+    if command_exists("cargo") {
+        println!("\x1b[32m[✓]\x1b[0m cargo is installed");
+    } else {
+        println!("\x1b[31m[✗]\x1b[0m cargo is not installed");
+    };
+}
+
+fn check_android() {
+    println!("[Android]");
+    if command_exists("android") {
+        println!("\x1b[32m[✓]\x1b[0m android CLI is installed");
+    } else {
+        println!("\x1b[31m[✗]\x1b[0m android CLI is not installed");
+    };
+    for target in ANDROID_TARGETS {
+        println!(
+            "{} target {target}",
+            if target_installed(target) {
+                "\x1b[32m[✓]\x1b[0m"
+            } else {
+                "\x1b[31m[✗]\x1b[0m"
+            }
+        );
+    }
+}
+
+fn check_ios() {
+    println!("[iOS]");
+    if command_exists("xcodebuild") {
+        println!("\x1b[32m[✓]\x1b[0m xcode is installed");
+    } else {
+        println!("\x1b[31m[✗]\x1b[0m xcode is not installed");
+    };
+    if command_exists("xcodegen") {
+        println!("\x1b[32m[✓]\x1b[0m xcodegen is installed");
+    } else {
+        println!("\x1b[31m[✗]\x1b[0m xcodegen is not installed");
+    };
+    for target in IOS_TARGETS {
+        println!(
+            "{} target {target}",
+            if target_installed(target) {
+                "\x1b[32m[✓]\x1b[0m"
+            } else {
+                "\x1b[31m[✗]\x1b[0m"
+            }
+        );
+    }
+}
+
 fn main() {
     let args = Args::parse();
 
     match args.command {
         Commands::Doctor => {
             println!("doctor\n");
-
-            // Rust checks
-            println!("[Rust]");
-            if command_exists("cargo") {
-                println!("\x1b[32m[✓]\x1b[0m cargo is installed");
-            } else {
-                println!("\x1b[31m[✗]\x1b[0m cargo is not installed");
-            };
-
-            // Android checks
-            println!("\n[Android]");
-            if command_exists("android") {
-                println!("\x1b[32m[✓]\x1b[0m android CLI is installed");
-            } else {
-                println!("\x1b[31m[✗]\x1b[0m android CLI is not installed");
-            };
-            for target in ANDROID_TARGETS {
-                println!(
-                    "{} target {target}",
-                    if target_installed(target) {
-                        "\x1b[32m[✓]\x1b[0m"
-                    } else {
-                        "\x1b[31m[✗]\x1b[0m"
-                    }
-                );
-            }
-
-            // iOS checks
-            println!("\n[iOS]");
-            if command_exists("xcodebuild") {
-                println!("\x1b[32m[✓]\x1b[0m xcode is installed");
-            } else {
-                println!("\x1b[31m[✗]\x1b[0m xcode is not installed");
-            };
-            if command_exists("xcodegen") {
-                println!("\x1b[32m[✓]\x1b[0m xcodegen is installed");
-            } else {
-                println!("\x1b[31m[✗]\x1b[0m xcodegen is not installed");
-            };
-            for target in IOS_TARGETS {
-                println!(
-                    "{} target {target}",
-                    if target_installed(target) {
-                        "\x1b[32m[✓]\x1b[0m"
-                    } else {
-                        "\x1b[31m[✗]\x1b[0m"
-                    }
-                );
-            }
+            check_rust();
+            println!();
+            check_android();
+            println!();
+            check_ios();
         }
         Commands::Create { name } => {
             println!("create: {}", name);
