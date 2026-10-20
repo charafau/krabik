@@ -45,7 +45,8 @@ pub fn create_rust(name: &str) {
     fs::write(&cargo_toml_path, cargo_toml_content).expect("failed to write Cargo.toml");
 
     let build_rs_path = format!("{name}/rust/build.rs");
-    let build_rs_content = "fn main() {\n    uniffi_bindgen_kotlin_jni::generate_scaffolding();\n}\n";
+    let build_rs_content =
+        "fn main() {\n    uniffi_bindgen_kotlin_jni::generate_scaffolding();\n}\n";
     fs::write(build_rs_path, build_rs_content).expect("failed to write build.rs");
 
     create_cargo_config(name).expect("failed to create cargo config");
@@ -59,6 +60,22 @@ pub fn create_rust(name: &str) {
     let bindgen_rs_content = "fn main() -> uniffi_bindgen_kotlin_jni::Result<()> {\n    uniffi_bindgen_kotlin_jni::main()\n}\n";
     fs::write(format!("{bindgen_dir}/src/main.rs"), bindgen_rs_content)
         .expect("failed to write uniffi-bindgen main.rs");
+
+    // Separate bindgen crate for Swift bindings (uses the standard UniFFI generator)
+    let swift_bindgen_dir = format!("{name}/rust/uniffi-bindgen-swift");
+    fs::create_dir_all(format!("{swift_bindgen_dir}/src"))
+        .expect("failed to create uniffi-bindgen-swift dir");
+    fs::write(
+        format!("{swift_bindgen_dir}/Cargo.toml"),
+        bindgen_swift_cargo_toml(),
+    )
+    .expect("failed to write uniffi-bindgen-swift Cargo.toml");
+    let swift_bindgen_rs_content = "fn main() {\n    uniffi::uniffi_bindgen_swift()\n}\n";
+    fs::write(
+        format!("{swift_bindgen_dir}/src/main.rs"),
+        swift_bindgen_rs_content,
+    )
+    .expect("failed to write uniffi-bindgen-swift main.rs");
 }
 
 fn lib_cargo_toml(name: &str) -> String {
@@ -69,7 +86,13 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "staticlib"]
+
+# macro-scaffolding is required by the standard Swift bindings generator. It is opt-in so it
+# doesn't clash with the JNI scaffolding used by Android.
+[features]
+default = []
+ios = ["uniffi/macro-scaffolding"]
 
 [dependencies]
 uniffi = {{ git = "{UNIFFI_GIT}", rev = "{UNIFFI_REV}", default-features = false }}
@@ -79,7 +102,7 @@ uniffi-bindgen-kotlin-jni-runtime = {{ git = "{UNIFFI_GIT}", rev = "{UNIFFI_REV}
 uniffi-bindgen-kotlin-jni = {{ git = "{UNIFFI_GIT}", rev = "{UNIFFI_REV}" }}
 
 [workspace]
-members = ["uniffi-bindgen"]
+members = ["uniffi-bindgen", "uniffi-bindgen-swift"]
 "#
     )
 }
@@ -94,6 +117,20 @@ publish = false
 
 [dependencies]
 uniffi-bindgen-kotlin-jni = {{ git = "{UNIFFI_GIT}", rev = "{UNIFFI_REV}" }}
+"#
+    )
+}
+
+fn bindgen_swift_cargo_toml() -> String {
+    format!(
+        r#"[package]
+name = "uniffi-bindgen-swift"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+uniffi = {{ git = "{UNIFFI_GIT}", rev = "{UNIFFI_REV}", default-features = false, features = ["cli", "cargo-metadata"] }}
 "#
     )
 }
@@ -183,16 +220,20 @@ mod tests {
 
     #[test]
     fn test_parse_lib_name_from_generated_cargo_toml() {
-        assert_eq!(parse_lib_name(&lib_cargo_toml("hello-world")).unwrap(), "hello_world");
+        assert_eq!(
+            parse_lib_name(&lib_cargo_toml("hello-world")).unwrap(),
+            "hello_world"
+        );
     }
 
     #[test]
     fn test_lib_cargo_toml() {
         let toml = lib_cargo_toml("demo");
         assert!(toml.contains("name = \"demo\""));
-        assert!(toml.contains("crate-type = [\"cdylib\"]"));
-        assert!(toml.contains("members = [\"uniffi-bindgen\"]"));
+        assert!(toml.contains("crate-type = [\"cdylib\", \"staticlib\"]"));
+        assert!(toml.contains("members = [\"uniffi-bindgen\", \"uniffi-bindgen-swift\"]"));
         assert!(toml.contains("default-features = false"));
+        assert!(toml.contains("ios = [\"uniffi/macro-scaffolding\"]"));
         for dep in [
             "uniffi = ",
             "uniffi-bindgen-kotlin-jni-runtime = ",
@@ -219,11 +260,24 @@ mod tests {
     }
 
     #[test]
+    fn test_bindgen_swift_cargo_toml() {
+        let toml = bindgen_swift_cargo_toml();
+        assert!(toml.contains("name = \"uniffi-bindgen-swift\""));
+        assert!(toml.contains("publish = false"));
+        assert!(toml.contains(&format!(
+            "uniffi = {{ git = \"{UNIFFI_GIT}\", rev = \"{UNIFFI_REV}\", default-features = false, features = [\"cli\", \"cargo-metadata\"] }}"
+        )));
+    }
+
+    #[test]
     fn test_cargo_config() {
         let config = cargo_config("/ndk");
         for (target, compiler) in [
             ("aarch64-linux-android", "aarch64-linux-android24-clang"),
-            ("armv7-linux-androideabi", "armv7a-linux-androideabi24-clang"),
+            (
+                "armv7-linux-androideabi",
+                "armv7a-linux-androideabi24-clang",
+            ),
             ("i686-linux-android", "i686-linux-android24-clang"),
             ("x86_64-linux-android", "x86_64-linux-android24-clang"),
         ] {

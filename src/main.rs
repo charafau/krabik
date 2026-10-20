@@ -1,7 +1,8 @@
 mod android;
+mod ios;
 mod rust;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 use std::fs;
 
@@ -32,6 +33,12 @@ struct Args {
     // run: Option<String>,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum Platform {
+    Android,
+    Ios,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Check the development environment
@@ -44,19 +51,37 @@ enum Commands {
     Toolchain,
 
     /// List available devices
-    Devices,
+    Devices {
+        #[arg(long, value_enum, default_value_t = Platform::Android)]
+        platform: Platform,
+    },
 
     /// Launch given emulator
-    Launch { emulator: String },
+    Launch {
+        emulator: String,
+        #[arg(long, value_enum, default_value_t = Platform::Android)]
+        platform: Platform,
+    },
 
     /// Run on given device (build and launch)
-    Run { device: String },
+    Run {
+        #[arg(default_value = "")]
+        device: String,
+        #[arg(long, value_enum, default_value_t = Platform::Android)]
+        platform: Platform,
+    },
 
     /// Build release build
-    Release,
+    Release {
+        #[arg(long, value_enum, default_value_t = Platform::Android)]
+        platform: Platform,
+    },
 
-    /// Generate UniFFI Android (Kotlin) bindings
-    Bindings,
+    /// Generate UniFFI bindings
+    Bindings {
+        #[arg(long, value_enum, default_value_t = Platform::Android)]
+        platform: Platform,
+    },
     // Package the project
     // Package {
     //     name: String,
@@ -73,40 +98,6 @@ enum Commands {
     // },
 }
 
-const IOS_TARGETS: [&str; 2] = ["aarch64-apple-ios", "aarch64-apple-ios-sim"];
-
-fn install_ios_toolchain() {
-    Command::new("rustup")
-        .args(["target", "add"])
-        .args(IOS_TARGETS)
-        .status()
-        .expect("failed to run rustup");
-}
-
-fn check_ios() {
-    println!("[iOS]");
-    if command_exists("xcodebuild") {
-        println!("\x1b[32m[✓]\x1b[0m xcode is installed");
-    } else {
-        println!("\x1b[31m[✗]\x1b[0m xcode is not installed");
-    };
-    if command_exists("xcodegen") {
-        println!("\x1b[32m[✓]\x1b[0m xcodegen is installed");
-    } else {
-        println!("\x1b[31m[✗]\x1b[0m xcodegen is not installed");
-    };
-    for target in IOS_TARGETS {
-        println!(
-            "{} target {target}",
-            if rust::target_installed(target) {
-                "\x1b[32m[✓]\x1b[0m"
-            } else {
-                "\x1b[31m[✗]\x1b[0m"
-            }
-        );
-    }
-}
-
 fn main() {
     let args = Args::parse();
 
@@ -117,7 +108,7 @@ fn main() {
             println!();
             android::check_android();
             println!();
-            check_ios();
+            ios::check_ios();
         }
         Commands::Create { name } => {
             println!("create: {}", name);
@@ -127,26 +118,49 @@ fn main() {
 
             rust::create_rust(&name);
             android::create_android(&name);
+            ios::create_ios(&name);
         }
         Commands::Toolchain => {
             android::install_android_toolchain();
-            install_ios_toolchain();
+            ios::install_ios_toolchain();
         }
-        Commands::Devices => {
-            android::list_android_devices();
-            // list_ios_devices();
+        Commands::Devices { platform } => match platform {
+            Platform::Android => android::list_android_devices(),
+            Platform::Ios => ios::list_ios_devices(),
+        },
+        Commands::Launch { emulator, platform } => match platform {
+            Platform::Android => android::launch_android_emulator(&emulator),
+            Platform::Ios => ios::launch_ios_emulator(&emulator),
+        },
+        Commands::Run { device, platform } => {
+            let result = match platform {
+                Platform::Android => android::build_android_debug(&device),
+                Platform::Ios => ios::build_ios_debug(&device),
+            };
+
+            if let Err(e) = result {
+                eprintln!("{e}");
+            }
         }
-        Commands::Launch { emulator } => {
-            android::launch_android_emulator(&emulator);
+        Commands::Release { platform } => {
+            let result = match platform {
+                Platform::Android => android::build_android_release(),
+                Platform::Ios => ios::build_ios_release(),
+            };
+
+            if let Err(e) = result {
+                eprintln!("{e}");
+            }
         }
-        Commands::Run { device } => {
-            let _ = android::build_android_debug(&device);
-        }
-        Commands::Release => {
-            let _ = android::build_android_release();
-        }
-        Commands::Bindings => {
-            let _ = android::generate_android_bindings();
+        Commands::Bindings { platform } => {
+            let result = match platform {
+                Platform::Android => android::generate_android_bindings(),
+                Platform::Ios => ios::generate_ios_bindings(),
+            };
+
+            if let Err(e) = result {
+                eprintln!("{e}");
+            }
         }
     }
 }
