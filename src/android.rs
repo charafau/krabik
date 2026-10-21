@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 
 use crate::{command_exists, rust};
@@ -58,15 +59,45 @@ pub fn create_android(name: &str) {
         .status()
         .expect("failed to run android CLI");
 
+    remove_kotlin_files(format!("./{name}/android")).expect("failed to remove kotlin files");
+
     for folder in ANDROID_JNI_FOLDERS {
         let path = format!("./{name}/android/app/src/main/jniLibs/{folder}");
         fs::create_dir_all(path).expect("failed to create directory");
     }
 
-    modify_main_activity(name).expect("failed to modify main activity");
+    create_main_activity(name).expect("failed to create main activity");
 }
 
-fn modify_main_activity(name: &str) -> Result<()> {
+fn remove_kotlin_files<P: AsRef<Path>>(path: P) -> Result<()> {
+    let path = path.as_ref();
+    if !path.exists() {
+        return Ok(());
+    }
+
+    if path.is_dir() {
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                remove_kotlin_files(&entry_path)?;
+                if !entry_path.components().any(|c| c.as_os_str() == "jniLibs")
+                    && fs::read_dir(&entry_path)?.next().is_none()
+                {
+                    let _ = fs::remove_dir(&entry_path);
+                }
+            } else if entry_path.extension().and_then(|ext| ext.to_str()) == Some("kt") {
+                fs::remove_file(&entry_path)?;
+            }
+        }
+    } else if path.extension().and_then(|ext| ext.to_str()) == Some("kt") {
+        fs::remove_file(path)?;
+    }
+
+    Ok(())
+}
+
+fn create_main_activity(name: &str) -> Result<()> {
     // 1. Update rust/src/lib.rs with UniFFI proc macros
     let lib_rs_path = format!("./{name}/rust/src/lib.rs");
     fs::write(&lib_rs_path, RUST_LIB_CONTENT)?;
@@ -96,13 +127,18 @@ fn modify_main_activity(name: &str) -> Result<()> {
 "#;
     fs::write(&layout_xml_path, layout_content)?;
 
-    // 3. Update MainActivity.kt to load the Rust library and set layout text
+    // 3. Create MainActivity.kt to load the Rust library and set layout text
     let main_activity_dir = format!("./{name}/android/app/src/main/java/com/example/{name}");
     fs::create_dir_all(&main_activity_dir)?;
     let main_activity_path = format!("{main_activity_dir}/MainActivity.kt");
     fs::write(&main_activity_path, main_activity_content(name))?;
 
     Ok(())
+}
+
+#[allow(dead_code)]
+fn modify_main_activity(name: &str) -> Result<()> {
+    create_main_activity(name)
 }
 
 const RUST_LIB_CONTENT: &str = r#"uniffi::setup_scaffolding!();
@@ -139,12 +175,150 @@ class MainActivity : Activity() {{
     )
 }
 
-pub fn list_android_devices() {
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct AndroidDevice {
+    pub name: String,
+    pub id: Option<String>,
+    pub state: String,
+}
+
+pub fn list_android_devices(all: bool) {
     println!("Available Android Devices:\n");
-    Command::new("android")
-        .args(["emulator", "list"])
-        .status()
-        .expect("failed to list android devices");
+
+    let online_devices = get_online_android_devices();
+    let mut devices = online_devices.clone();
+
+    if all {
+        let offline_avds = get_offline_android_emulators();
+        for avd in offline_avds {
+            if !devices.iter().any(|d| d.name == avd) {
+                devices.push(AndroidDevice {
+                    name: avd,
+                    id: None,
+                    state: "offline".to_string(),
+                });
+            }
+        }
+    }
+
+    println!("{}", format_android_devices(&devices, all));
+}
+
+fn get_online_android_devices() -> Vec<AndroidDevice> {
+    let output = Command::new("adb").args(["devices", "-l"]).output();
+    let stdout = match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
+        _ => return Vec::new(),
+    };
+
+    let mut devices = parse_adb_devices(&stdout);
+
+    for dev in &mut devices {
+        if let Some(id) = &dev.id {
+            if id.starts_with("emulator-")
+                && let Some(avd_name) = get_emulator_avd_name(id)
+            {
+                dev.name = avd_name;
+            }
+        } else if dev.name.starts_with("emulator-")
+            && let Some(avd_name) = get_emulator_avd_name(&dev.name)
+        {
+            dev.id = Some(dev.name.clone());
+            dev.name = avd_name;
+        }
+    }
+
+    devices
+}
+
+fn get_emulator_avd_name(serial: &str) -> Option<String> {
+    let output = Command::new("adb")
+        .args(["-s", serial, "emu", "avd", "name"])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let first_line = stdout.lines().next()?.trim();
+        if !first_line.is_empty() && first_line != "OK" {
+            return Some(first_line.to_string());
+        }
+    }
+    None
+}
+
+fn get_offline_android_emulators() -> Vec<String> {
+    let output = Command::new("android").args(["emulator", "list"]).output();
+    let stdout = match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
+        _ => return Vec::new(),
+    };
+
+    parse_emulator_list(&stdout)
+}
+
+fn parse_adb_devices(output: &str) -> Vec<AndroidDevice> {
+    let mut devices = Vec::new();
+
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty()
+            || line.starts_with("List of devices attached")
+            || line.starts_with('*')
+        {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let id = parts[0];
+            let status = parts[1];
+            if status == "device" {
+                let model = parts
+                    .iter()
+                    .find_map(|p| p.strip_prefix("model:"))
+                    .unwrap_or(id);
+                devices.push(AndroidDevice {
+                    name: model.to_string(),
+                    id: if model != id {
+                        Some(id.to_string())
+                    } else {
+                        None
+                    },
+                    state: "online".to_string(),
+                });
+            }
+        }
+    }
+
+    devices
+}
+
+fn parse_emulator_list(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+fn format_android_devices(devices: &[AndroidDevice], all: bool) -> String {
+    if devices.is_empty() {
+        if all {
+            return "  No Android devices found".to_string();
+        } else {
+            return "  No online Android devices found".to_string();
+        }
+    }
+
+    devices
+        .iter()
+        .map(|d| match &d.id {
+            Some(id) => format!("  • {} ({}) [{}]", d.name, id, d.state),
+            None => format!("  • {} [{}]", d.name, d.state),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub fn launch_android_emulator(name: &str) {
@@ -585,5 +759,113 @@ dependencies {
             r#"include!(concat!(env!("OUT_DIR"), "/uniffi_bindgen_kotlin_jni.uniffi.rs"));"#
         ));
         assert!(RUST_LIB_CONTENT.contains("#[uniffi::export]\npub fn get_greeting() -> String"));
+    }
+
+    #[test]
+    fn test_remove_kotlin_files() {
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("test_remove_kt_{unique_id}"));
+        let sub_dir = temp_dir.join("app/src/main/java/com/example/demo/theme");
+        let jni_dir = temp_dir.join("app/src/main/jniLibs/arm64-v8a");
+        let res_dir = temp_dir.join("app/src/main/res");
+        fs::create_dir_all(&sub_dir).unwrap();
+        fs::create_dir_all(&jni_dir).unwrap();
+        fs::create_dir_all(&res_dir).unwrap();
+
+        let kt_file1 = temp_dir.join("app/src/main/java/com/example/demo/MainActivity.kt");
+        let kt_file2 = sub_dir.join("Theme.kt");
+        let kts_file = temp_dir.join("build.gradle.kts");
+        let xml_file = res_dir.join("AndroidManifest.xml");
+
+        fs::write(&kt_file1, "package com.example.demo").unwrap();
+        fs::write(&kt_file2, "package com.example.demo.theme").unwrap();
+        fs::write(&kts_file, "plugins {}").unwrap();
+        fs::write(&xml_file, "<manifest/>").unwrap();
+
+        assert!(kt_file1.exists());
+        assert!(kt_file2.exists());
+        assert!(kts_file.exists());
+        assert!(xml_file.exists());
+        assert!(jni_dir.exists());
+
+        remove_kotlin_files(&temp_dir).unwrap();
+
+        assert!(!kt_file1.exists(), "MainActivity.kt should be removed");
+        assert!(!kt_file2.exists(), "Theme.kt should be removed");
+        assert!(!sub_dir.exists(), "empty theme package directory should be removed");
+        assert!(
+            !temp_dir.join("app/src/main/java").exists(),
+            "empty java directory tree should be removed"
+        );
+        assert!(kts_file.exists(), "build.gradle.kts should NOT be removed");
+        assert!(xml_file.exists(), "AndroidManifest.xml should NOT be removed");
+        assert!(res_dir.exists(), "directory with non-kt files should NOT be removed");
+        assert!(jni_dir.exists(), "jniLibs directory should be preserved");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_remove_kotlin_files_nonexistent_path() {
+        let temp_dir = std::env::temp_dir().join("nonexistent_path_test_12345");
+        assert!(remove_kotlin_files(&temp_dir).is_ok());
+    }
+
+    #[test]
+    fn test_parse_adb_devices() {
+        let sample = "List of devices attached\nemulator-5554          device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emulator64_arm64 transport_id:1\n";
+        let devices = parse_adb_devices(sample);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].name, "sdk_gphone64_arm64");
+        assert_eq!(devices[0].id.as_deref(), Some("emulator-5554"));
+        assert_eq!(devices[0].state, "online");
+    }
+
+    #[test]
+    fn test_parse_adb_devices_empty() {
+        let sample = "List of devices attached\n\n";
+        let devices = parse_adb_devices(sample);
+        assert!(devices.is_empty());
+    }
+
+    #[test]
+    fn test_parse_emulator_list() {
+        let sample = "Pixel_10\nPixel_Fold\n";
+        let avds = parse_emulator_list(sample);
+        assert_eq!(avds, vec!["Pixel_10", "Pixel_Fold"]);
+    }
+
+    #[test]
+    fn test_format_android_devices() {
+        let devices = vec![
+            AndroidDevice {
+                name: "Pixel_10".to_string(),
+                id: Some("emulator-5554".to_string()),
+                state: "online".to_string(),
+            },
+            AndroidDevice {
+                name: "Pixel_Fold".to_string(),
+                id: None,
+                state: "offline".to_string(),
+            },
+        ];
+
+        let formatted = format_android_devices(&devices, true);
+        assert_eq!(
+            formatted,
+            "  • Pixel_10 (emulator-5554) [online]\n  • Pixel_Fold [offline]"
+        );
+
+        assert_eq!(
+            format_android_devices(&[], false),
+            "  No online Android devices found"
+        );
+        assert_eq!(
+            format_android_devices(&[], true),
+            "  No Android devices found"
+        );
     }
 }

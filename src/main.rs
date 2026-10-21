@@ -50,10 +50,10 @@ enum Commands {
     /// Install necessary rust toolchains
     Toolchain,
 
-    /// List available devices
+    /// List available devices (use -a / --all to include offline devices too)
     Devices {
-        #[arg(long, value_enum, default_value_t = Platform::Android)]
-        platform: Platform,
+        #[arg(short, long, visible_alias = "offline")]
+        all: bool,
     },
 
     /// Launch given emulator
@@ -124,10 +124,11 @@ fn main() {
             android::install_android_toolchain();
             ios::install_ios_toolchain();
         }
-        Commands::Devices { platform } => match platform {
-            Platform::Android => android::list_android_devices(),
-            Platform::Ios => ios::list_ios_devices(),
-        },
+        Commands::Devices { all } => {
+            android::list_android_devices(all);
+            println!();
+            ios::list_ios_devices(all);
+        }
         Commands::Launch { emulator, platform } => match platform {
             Platform::Android => android::launch_android_emulator(&emulator),
             Platform::Ios => ios::launch_ios_emulator(&emulator),

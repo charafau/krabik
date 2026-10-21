@@ -202,12 +202,97 @@ struct ContentView: View {
     .to_string()
 }
 
-pub fn list_ios_devices() {
-    println!("Available iOS Simulators:\n");
-    Command::new("xcrun")
-        .args(["simctl", "list", "devices", "available"])
-        .status()
-        .expect("failed to list iOS simulators");
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct IosDevice {
+    pub name: String,
+    pub udid: String,
+    pub runtime: Option<String>,
+    pub state: String,
+}
+
+pub fn list_ios_devices(all: bool) {
+    println!("Available iOS Devices:\n");
+
+    let subcmd = if all { "available" } else { "booted" };
+    let output = Command::new("xcrun")
+        .args(["simctl", "list", "devices", subcmd])
+        .output();
+
+    let listing = match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
+        _ => {
+            if all {
+                println!("  No iOS devices found");
+            } else {
+                println!("  No online iOS devices found");
+            }
+            return;
+        }
+    };
+
+    let devices = parse_ios_devices(&listing, all);
+    println!("{}", format_ios_devices(&devices, all));
+}
+
+fn parse_ios_devices(listing: &str, all: bool) -> Vec<IosDevice> {
+    let mut devices = Vec::new();
+    let mut current_runtime = None;
+
+    for line in listing.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("-- ") && trimmed.ends_with(" --") {
+            let section = trimmed.trim_matches('-').trim();
+            if !section.starts_with("Unavailable") {
+                current_runtime = Some(section.to_string());
+            } else {
+                current_runtime = None;
+            }
+            continue;
+        }
+
+        let is_booted = trimmed.contains("(Booted)");
+        let is_shutdown = trimmed.contains("(Shutdown)");
+
+        if (is_booted || (all && is_shutdown))
+            && let Some(udid) = find_udid(trimmed)
+            && let Some((name, _)) = trimmed.split_once(&format!("({udid})"))
+        {
+            let state = if is_booted {
+                "Booted".to_string()
+            } else {
+                "Shutdown".to_string()
+            };
+
+            devices.push(IosDevice {
+                name: name.trim().to_string(),
+                udid: udid.to_string(),
+                runtime: current_runtime.clone(),
+                state,
+            });
+        }
+    }
+
+    devices
+}
+
+fn format_ios_devices(devices: &[IosDevice], all: bool) -> String {
+    if devices.is_empty() {
+        if all {
+            return "  No iOS devices found".to_string();
+        } else {
+            return "  No online iOS devices found".to_string();
+        }
+    }
+
+    devices
+        .iter()
+        .map(|d| match &d.runtime {
+            Some(rt) => format!("  • {} ({}) [{rt}] ({})", d.name, d.udid, d.state),
+            None => format!("  • {} ({}) ({})", d.name, d.udid, d.state),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub fn launch_ios_emulator(name: &str) {
@@ -270,12 +355,14 @@ fn parse_simulator_udid(listing: &str, preferred: &str) -> Option<String> {
 
     for line in listing.lines() {
         let line = line.trim();
-        let Some((name, rest)) = line.split_once(" (") else {
+        let Some(udid) = find_udid(line) else {
             continue;
         };
-        let Some(udid) = find_udid(rest) else {
+        let udid_pattern = format!("({udid})");
+        let Some((name, _)) = line.split_once(&udid_pattern) else {
             continue;
         };
+        let name = name.trim();
 
         if !preferred.is_empty() {
             if name == preferred || udid == preferred {
@@ -291,23 +378,23 @@ fn parse_simulator_udid(listing: &str, preferred: &str) -> Option<String> {
     first
 }
 
-/// Find a UDID-shaped token in the parenthesized parts of a simulator listing line, e.g.
-/// `5268B420-2975-4800-821D-4B2A2C19846D) (Booted)`.
-fn find_udid(rest: &str) -> Option<&str> {
-    let mut remaining = rest;
+/// Find a UDID-shaped token in the parenthesized parts of a simulator listing line.
+fn find_udid(line: &str) -> Option<&str> {
+    let mut remaining = line;
 
-    loop {
-        let end = remaining.find(')')?;
-        let token = &remaining[..end];
-
+    while let Some(start) = remaining.find('(') {
+        let after = &remaining[start + 1..];
+        let Some(end) = after.find(')') else {
+            break;
+        };
+        let token = &after[..end];
         if token.len() == 36 && token.contains('-') {
             return Some(token);
         }
-
-        let after = &remaining[end + 1..];
-        let start = after.find('(')?;
-        remaining = &after[start + 1..];
+        remaining = &after[end + 1..];
     }
+
+    None
 }
 
 fn generate_swift_bindings() -> Result<()> {
@@ -675,5 +762,66 @@ mod tests {
     fn test_parse_simulator_udid_missing() {
         assert!(parse_simulator_udid(SIMULATOR_LISTING, "Pixel").is_none());
         assert!(parse_simulator_udid("", "").is_none());
+    }
+
+    #[test]
+    fn test_parse_ios_devices_booted_only() {
+        let devices = parse_ios_devices(SIMULATOR_LISTING, false);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].name, "iPhone 16");
+        assert_eq!(devices[0].udid, "EC1AB375-83C3-4763-95FC-A48C0827B315");
+        assert_eq!(devices[0].runtime.as_deref(), Some("iOS 18.3"));
+        assert_eq!(devices[0].state, "Booted");
+    }
+
+    #[test]
+    fn test_parse_ios_devices_all() {
+        let devices = parse_ios_devices(SIMULATOR_LISTING, true);
+        assert_eq!(devices.len(), 3);
+        assert_eq!(devices[0].name, "iPhone 16 Pro");
+        assert_eq!(devices[0].state, "Shutdown");
+        assert_eq!(devices[1].name, "iPhone 16");
+        assert_eq!(devices[1].state, "Booted");
+        assert_eq!(devices[2].name, "iPad Pro 11-inch (M4)");
+        assert_eq!(devices[2].state, "Shutdown");
+        assert_eq!(devices[2].runtime.as_deref(), Some("iOS 18.5"));
+    }
+
+    #[test]
+    fn test_parse_ios_devices_none_booted() {
+        let listing = SIMULATOR_LISTING.replace("(Booted)", "(Shutdown)");
+        let devices = parse_ios_devices(&listing, false);
+        assert!(devices.is_empty());
+    }
+
+    #[test]
+    fn test_format_ios_devices() {
+        let devices = vec![
+            IosDevice {
+                name: "iPhone 16".to_string(),
+                udid: "EC1AB375-83C3-4763-95FC-A48C0827B315".to_string(),
+                runtime: Some("iOS 18.3".to_string()),
+                state: "Booted".to_string(),
+            },
+            IosDevice {
+                name: "iPhone 16 Pro".to_string(),
+                udid: "5268B420-2975-4800-821D-4B2A2C19846D".to_string(),
+                runtime: Some("iOS 18.3".to_string()),
+                state: "Shutdown".to_string(),
+            },
+        ];
+        assert_eq!(
+            format_ios_devices(&devices, true),
+            "  • iPhone 16 (EC1AB375-83C3-4763-95FC-A48C0827B315) [iOS 18.3] (Booted)\n  • iPhone 16 Pro (5268B420-2975-4800-821D-4B2A2C19846D) [iOS 18.3] (Shutdown)"
+        );
+
+        assert_eq!(
+            format_ios_devices(&[], false),
+            "  No online iOS devices found"
+        );
+        assert_eq!(
+            format_ios_devices(&[], true),
+            "  No iOS devices found"
+        );
     }
 }
