@@ -99,8 +99,13 @@ my_app/
 
 Notes:
 
+- The project is created in a staging directory and only moved into place once
+  every part was generated successfully, so a failed `create` leaves nothing
+  behind and can simply be retried.
 - The generated crates pin all `uniffi` crates to the same git revision
   (`uniffi-bindgen-kotlin-jni` is not published on crates.io).
+- The Rust crate is not a repository of its own — the project is a single
+  repository, so `git init` in the project root is all that is needed.
 - Android builds link against NDK API 24, matching the generated `minSdk`.
   Linker paths are resolved from `ANDROID_NDK_HOME` at build time — nothing
   machine-specific is written into the project.

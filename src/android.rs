@@ -82,45 +82,48 @@ pub fn check_android() -> bool {
 }
 
 /// Creates the Android project template, cleans up default files, and configures jniLibs and MainActivity.
-pub fn create_android(name: &ProjectName, package_prefix: &str) -> Result<()> {
-    let dir = name.dir_name();
+pub fn create_android(name: &ProjectName, package_prefix: &str, root: &Path) -> Result<()> {
     let package_id = name.java_package(package_prefix);
+    let android_dir = root.join("android");
 
     // The `android` CLI puts the Kotlin sources into the namespace it is given,
     // so the package of the generated sources always matches the one we write.
+    let mut output = android_dir.clone().into_os_string();
+    output.push("/");
+
     let mut cmd = Command::new("android");
-    cmd.args([
-        "create",
-        "--name",
-        dir,
-        "--namespace",
-        &package_id,
-        "--application-id",
-        &package_id,
-        "-o",
-        &format!("./{dir}/android/"),
-    ]);
+    cmd.arg("create")
+        .arg("--name")
+        .arg(name.dir_name())
+        .arg("--namespace")
+        .arg(&package_id)
+        .arg("--application-id")
+        .arg(&package_id)
+        .arg("-o")
+        .arg(output);
     run_command(&mut cmd, "android create")?;
 
-    let android_dir = format!("./{dir}/android");
     remove_kotlin_files(&android_dir).context("failed to remove Kotlin files")?;
 
-    verify_android_package(&format!("{android_dir}/app/build.gradle.kts"), &package_id)?;
+    verify_android_package(&android_dir.join("app/build.gradle.kts"), &package_id)?;
 
     for target in ANDROID_TARGETS {
-        let path = format!("{android_dir}/app/src/main/jniLibs/{}", target.jni_folder);
-        fs::create_dir_all(&path).with_context(|| format!("failed to create {path}"))?;
+        let path = android_dir
+            .join("app/src/main/jniLibs")
+            .join(target.jni_folder);
+        fs::create_dir_all(&path)
+            .with_context(|| format!("failed to create {}", path.display()))?;
     }
 
-    create_main_activity(name, package_prefix).context("failed to create MainActivity")?;
+    create_main_activity(name, package_prefix, root).context("failed to create MainActivity")?;
 
     Ok(())
 }
 
 /// Verifies that the generated Gradle project uses the package id we asked for.
-fn verify_android_package(gradle_path: &str, expected: &str) -> Result<()> {
-    let content =
-        fs::read_to_string(gradle_path).with_context(|| format!("failed to read {gradle_path}"))?;
+fn verify_android_package(gradle_path: &Path, expected: &str) -> Result<()> {
+    let content = fs::read_to_string(gradle_path)
+        .with_context(|| format!("failed to read {}", gradle_path.display()))?;
     let (namespace, application_id) = parse_android_packages(&content);
 
     for (label, actual) in [
@@ -135,7 +138,10 @@ fn verify_android_package(gradle_path: &str, expected: &str) -> Result<()> {
                 ));
             }
             None => {
-                return Err(anyhow!("could not find {label} in {gradle_path}"));
+                return Err(anyhow!(
+                    "could not find {label} in {}",
+                    gradle_path.display()
+                ));
             }
         }
     }
@@ -173,18 +179,17 @@ fn remove_kotlin_files<P: AsRef<Path>>(path: P) -> Result<()> {
 }
 
 /// Creates the Android `MainActivity` and layout XML that load the Rust shared library and display a greeting.
-fn create_main_activity(name: &ProjectName, package_prefix: &str) -> Result<()> {
-    let dir = name.dir_name();
-
+fn create_main_activity(name: &ProjectName, package_prefix: &str, root: &Path) -> Result<()> {
     // 1. Update rust/src/lib.rs with UniFFI proc macros
-    let lib_rs_path = format!("./{dir}/rust/src/lib.rs");
+    let lib_rs_path = root.join("rust/src/lib.rs");
     fs::write(&lib_rs_path, RUST_LIB_CONTENT)
-        .with_context(|| format!("failed to write {lib_rs_path}"))?;
+        .with_context(|| format!("failed to write {}", lib_rs_path.display()))?;
 
     // 2. Create activity_main.xml layout with LinearLayout and TextView
-    let layout_dir = format!("./{dir}/android/app/src/main/res/layout");
-    fs::create_dir_all(&layout_dir).with_context(|| format!("failed to create {layout_dir}"))?;
-    let layout_xml_path = format!("{layout_dir}/activity_main.xml");
+    let layout_dir = root.join("android/app/src/main/res/layout");
+    fs::create_dir_all(&layout_dir)
+        .with_context(|| format!("failed to create {}", layout_dir.display()))?;
+    let layout_xml_path = layout_dir.join("activity_main.xml");
     let layout_content = r#"<?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/main_layout"
@@ -205,22 +210,21 @@ fn create_main_activity(name: &ProjectName, package_prefix: &str) -> Result<()> 
 </LinearLayout>
 "#;
     fs::write(&layout_xml_path, layout_content)
-        .with_context(|| format!("failed to write {layout_xml_path}"))?;
+        .with_context(|| format!("failed to write {}", layout_xml_path.display()))?;
 
     // 3. Create MainActivity.kt to load the Rust library and set layout text
     //    The source directory has to mirror the package of the file.
-    let main_activity_dir = format!(
-        "./{dir}/android/app/src/main/java/{}",
-        name.java_package_path(package_prefix)
-    );
+    let main_activity_dir = root
+        .join("android/app/src/main/java")
+        .join(name.java_package_path(package_prefix));
     fs::create_dir_all(&main_activity_dir)
-        .with_context(|| format!("failed to create {main_activity_dir}"))?;
-    let main_activity_path = format!("{main_activity_dir}/MainActivity.kt");
+        .with_context(|| format!("failed to create {}", main_activity_dir.display()))?;
+    let main_activity_path = main_activity_dir.join("MainActivity.kt");
     fs::write(
         &main_activity_path,
         main_activity_content(name, package_prefix),
     )
-    .with_context(|| format!("failed to write {main_activity_path}"))?;
+    .with_context(|| format!("failed to write {}", main_activity_path.display()))?;
 
     Ok(())
 }
@@ -1002,7 +1006,7 @@ dependencies {
         )
         .unwrap();
 
-        verify_android_package(path.to_str().unwrap(), "com.example.my_app").unwrap();
+        verify_android_package(&path, "com.example.my_app").unwrap();
 
         fs::remove_file(&path).unwrap();
     }
@@ -1020,7 +1024,7 @@ dependencies {
         )
         .unwrap();
 
-        let err = verify_android_package(path.to_str().unwrap(), "io.acme.my_app")
+        let err = verify_android_package(&path, "io.acme.my_app")
             .unwrap_err()
             .to_string();
         assert!(err.contains("com.example.my_app"), "{err}");

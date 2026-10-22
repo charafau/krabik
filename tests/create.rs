@@ -242,3 +242,45 @@ fn create_fails_when_the_android_cli_uses_another_package() {
         .stderr(predicate::str::contains("com.example.legacy"))
         .stderr(predicate::str::contains("io.acme.my_app"));
 }
+
+#[test]
+fn a_failed_create_leaves_nothing_behind() {
+    let tools = FakeToolchain::new(FAKE_ANDROID_LEGACY);
+    let work = TempDir::new().unwrap();
+
+    cli(&tools)
+        .current_dir(work.path())
+        .args(["create", "my-app", "--package", "io.acme"])
+        .assert()
+        .failure()
+        .code(1);
+
+    // neither the project nor the staging directory may be left over
+    let leftovers: Vec<_> = fs::read_dir(work.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(leftovers.is_empty(), "left over: {leftovers:?}");
+}
+
+#[test]
+fn a_failed_create_can_be_retried() {
+    let tools = FakeToolchain::new(FAKE_ANDROID_LEGACY);
+    let work = TempDir::new().unwrap();
+
+    cli(&tools)
+        .current_dir(work.path())
+        .args(["create", "my-app"])
+        .assert()
+        .failure()
+        .code(1);
+
+    // the retry must not be blocked by the failed attempt
+    cli(&tools)
+        .current_dir(work.path())
+        .args(["create", "my-app"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("already exists").not());
+}

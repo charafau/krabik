@@ -58,18 +58,17 @@ pub fn check_ios() -> bool {
 }
 
 /// Sets up the iOS project directory, generating SwiftUI files and Xcode project configuration.
-pub fn create_ios(name: &ProjectName, package_prefix: &str) -> Result<()> {
-    let dir = name.dir_name();
-    let ios_dir = format!("./{dir}/ios");
-    fs::create_dir_all(format!("{ios_dir}/Sources"))
-        .with_context(|| format!("failed to create {ios_dir}/Sources"))?;
-    fs::create_dir_all(format!("{ios_dir}/Generated"))
-        .with_context(|| format!("failed to create {ios_dir}/Generated"))?;
+pub fn create_ios(name: &ProjectName, package_prefix: &str, root: &Path) -> Result<()> {
+    let ios_dir = root.join("ios");
+    fs::create_dir_all(ios_dir.join("Sources"))
+        .with_context(|| format!("failed to create {}/Sources", ios_dir.display()))?;
+    fs::create_dir_all(ios_dir.join("Generated"))
+        .with_context(|| format!("failed to create {}/Generated", ios_dir.display()))?;
 
     let app = name.swift_type_name();
     let lib_name = name.identifier();
 
-    let project_yml_path = format!("{ios_dir}/project.yml");
+    let project_yml_path = ios_dir.join("project.yml");
     fs::write(
         &project_yml_path,
         project_yml(
@@ -79,19 +78,19 @@ pub fn create_ios(name: &ProjectName, package_prefix: &str) -> Result<()> {
             &name.bundle_id(package_prefix),
         ),
     )
-    .with_context(|| format!("failed to write {project_yml_path}"))?;
+    .with_context(|| format!("failed to write {}", project_yml_path.display()))?;
 
-    let app_swift_path = format!("{ios_dir}/Sources/{app}App.swift");
+    let app_swift_path = ios_dir.join("Sources").join(format!("{app}App.swift"));
     fs::write(&app_swift_path, app_swift(&app))
-        .with_context(|| format!("failed to write {app_swift_path}"))?;
+        .with_context(|| format!("failed to write {}", app_swift_path.display()))?;
 
-    let content_view_path = format!("{ios_dir}/Sources/ContentView.swift");
+    let content_view_path = ios_dir.join("Sources/ContentView.swift");
     fs::write(&content_view_path, content_view_swift())
-        .with_context(|| format!("failed to write {content_view_path}"))?;
+        .with_context(|| format!("failed to write {}", content_view_path.display()))?;
 
-    let gitignore_path = format!("{ios_dir}/.gitignore");
+    let gitignore_path = ios_dir.join(".gitignore");
     fs::write(&gitignore_path, IOS_GITIGNORE)
-        .with_context(|| format!("failed to write {gitignore_path}"))?;
+        .with_context(|| format!("failed to write {}", gitignore_path.display()))?;
 
     let mut cmd = Command::new("xcodegen");
     cmd.arg("generate").current_dir(&ios_dir);
@@ -277,13 +276,21 @@ pub fn launch_ios_emulator(name: &str) -> Result<()> {
 
     let udid = resolve_simulator(name)?;
 
-    // Ignore failures here: the simulator may already be booted.
-    let _ = Command::new("xcrun")
-        .args(["simctl", "boot", &udid])
-        .output();
     open_simulator_app();
+    boot_simulator(&udid)?;
 
     Ok(())
+}
+
+/// Boots the simulator and waits until it is fully booted.
+///
+/// `simctl boot` only starts the boot, so an app installed right after it
+/// would fail with "Invalid device state". `bootstatus -b` boots the device
+/// if needed and returns once it is ready.
+fn boot_simulator(udid: &str) -> Result<()> {
+    let mut cmd = Command::new("xcrun");
+    cmd.args(["simctl", "bootstatus", udid, "-b"]);
+    run_command(&mut cmd, "xcrun simctl bootstatus")
 }
 
 /// Locates and opens macOS `Simulator.app`.
@@ -552,11 +559,9 @@ fn build_ios(
     )?;
 
     if let Some((simulator, bundle_id)) = launch {
-        // Ignore failures here: the simulator may already be booted.
-        let _ = Command::new("xcrun")
-            .args(["simctl", "boot", simulator])
-            .output();
         open_simulator_app();
+        // the simulator has to be fully booted before an app can be installed
+        boot_simulator(simulator)?;
 
         let app_path = format!("./ios/build/Build/Products/Debug-iphonesimulator/{project}.app");
         let mut cmd = Command::new("xcrun");

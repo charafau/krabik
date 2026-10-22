@@ -11,6 +11,7 @@ use crate::naming::ProjectName;
 use std::fs;
 
 use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Checks whether an executable command is available on the system PATH by invoking it with `--version`.
@@ -118,6 +119,53 @@ pub enum Commands {
     },
 }
 
+/// Creates the Rust, Android and iOS parts of the project in `root`.
+fn create_project(project: &ProjectName, package_prefix: &str, root: &Path) -> Result<()> {
+    rust::create_rust(project, root)?;
+    android::create_android(project, package_prefix, root)?;
+    ios::create_ios(project, package_prefix, root)?;
+    Ok(())
+}
+
+/// A directory that holds the project while it is being created.
+///
+/// The project is only moved to its final location once it was created
+/// successfully, so a failure never leaves a half-created project behind.
+struct StagingDir {
+    path: PathBuf,
+}
+
+impl StagingDir {
+    /// Creates a staging directory next to the final project directory.
+    ///
+    /// The directory is created in the current working directory so that
+    /// moving it to its final location is a rename within the same
+    /// filesystem, which is atomic.
+    fn create(name: &str) -> Result<Self> {
+        let path = PathBuf::from(format!(".mobile_cli-{name}-{}.tmp", std::process::id()));
+
+        // a directory of a previous, interrupted run may still be around
+        if path.exists() {
+            fs::remove_dir_all(&path).with_context(|| {
+                format!("failed to remove the stale directory {}", path.display())
+            })?;
+        }
+
+        fs::create_dir(&path).with_context(|| format!("failed to create {}", path.display()))?;
+        Ok(Self { path })
+    }
+
+    /// The path of the staging directory.
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Removes the staging directory and everything in it.
+    fn cleanup(&self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
 /// Main CLI dispatcher that executes the requested subcommand.
 pub fn run(args: Args) -> Result<()> {
     match args.command {
@@ -141,15 +189,26 @@ pub fn run(args: Args) -> Result<()> {
             // invalid name never leaves a half-created project behind.
             let project = ProjectName::parse(&name)?;
 
-            let dir = format!("./{}", project.dir_name());
-            if fs::metadata(&dir).is_ok() {
-                return Err(anyhow!("{dir} already exists"));
+            let target = PathBuf::from(format!("./{}", project.dir_name()));
+            if fs::metadata(&target).is_ok() {
+                return Err(anyhow!("{} already exists", target.display()));
             }
-            fs::create_dir(&dir).with_context(|| format!("failed to create {dir}"))?;
 
-            rust::create_rust(&project)?;
-            android::create_android(&project, &package)?;
-            ios::create_ios(&project, &package)?;
+            // The project is built in a staging directory and only moved to
+            // its final location once every part was created successfully.
+            let staging = StagingDir::create(project.dir_name())?;
+            if let Err(err) = create_project(&project, &package, staging.path()) {
+                staging.cleanup();
+                return Err(err);
+            }
+
+            fs::rename(staging.path(), &target).with_context(|| {
+                format!(
+                    "failed to move {} to {}",
+                    staging.path().display(),
+                    target.display()
+                )
+            })?;
         }
         Commands::Toolchain => {
             android::install_android_toolchain()?;
