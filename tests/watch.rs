@@ -20,7 +20,7 @@ use tempfile::TempDir;
 /// Unlike [`cli`] this can be spawned, which is needed for a command that runs
 /// until it is stopped.
 fn command(tools: &FakeToolchain) -> std::process::Command {
-    let mut cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin("mobile_cli"));
+    let mut cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin("krabik"));
     cmd.env("PATH", tools.path());
     cmd
 }

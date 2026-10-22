@@ -1,11 +1,11 @@
-//! Tests for the command line interface of `mobile_cli`.
+//! Tests for the command line interface of `krabik`.
 
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
 fn cli() -> Command {
-    Command::cargo_bin("mobile_cli").expect("binary should build")
+    Command::cargo_bin("krabik").expect("binary should build")
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn launch_unknown_ios_simulator_fails() {
 
 #[test]
 fn doctor_prints_all_sections_and_exits_zero_or_one() {
-    let output = Command::cargo_bin("mobile_cli")
+    let output = Command::cargo_bin("krabik")
         .expect("binary should build")
         .arg("doctor")
         .output()
@@ -93,7 +93,7 @@ fn doctor_prints_all_sections_and_exits_zero_or_one() {
 
 #[test]
 fn doctor_checks_the_tools_the_build_needs() {
-    let output = Command::cargo_bin("mobile_cli")
+    let output = Command::cargo_bin("krabik")
         .expect("binary should build")
         .arg("doctor")
         .output()
@@ -116,7 +116,7 @@ fn doctor_checks_the_tools_the_build_needs() {
 
 #[test]
 fn doctor_output_is_plain_when_piped() {
-    let output = Command::cargo_bin("mobile_cli")
+    let output = Command::cargo_bin("krabik")
         .expect("binary should build")
         .arg("doctor")
         .output()
@@ -127,7 +127,7 @@ fn doctor_output_is_plain_when_piped() {
 
 #[test]
 fn doctor_respects_no_color_env() {
-    let output = Command::cargo_bin("mobile_cli")
+    let output = Command::cargo_bin("krabik")
         .expect("binary should build")
         .env("NO_COLOR", "1")
         .arg("doctor")

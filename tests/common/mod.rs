@@ -38,7 +38,7 @@ impl FakeToolchain {
 
 /// The CLI under test, with the fake toolchain on the `PATH`.
 pub fn cli(tools: &FakeToolchain) -> Command {
-    let mut cmd = Command::cargo_bin("mobile_cli").expect("binary should build");
+    let mut cmd = Command::cargo_bin("krabik").expect("binary should build");
     cmd.env("PATH", tools.path());
     cmd
 }
