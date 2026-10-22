@@ -8,6 +8,7 @@ pub mod android;
 pub mod ios;
 pub mod naming;
 pub mod rust;
+pub mod watch;
 
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -126,6 +127,29 @@ pub enum Platform {
     Ios,
 }
 
+/// The platforms a command applies to.
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq, Debug)]
+pub enum Platforms {
+    /// Android only.
+    Android,
+    /// iOS only.
+    Ios,
+    /// Android and iOS.
+    Both,
+}
+
+impl Platforms {
+    /// Whether Android is included.
+    pub fn includes_android(self) -> bool {
+        matches!(self, Platforms::Android | Platforms::Both)
+    }
+
+    /// Whether iOS is included.
+    pub fn includes_ios(self) -> bool {
+        matches!(self, Platforms::Ios | Platforms::Both)
+    }
+}
+
 /// The commands of the CLI.
 #[derive(Subcommand)]
 pub enum Commands {
@@ -186,6 +210,16 @@ pub enum Commands {
         /// The platform to generate the bindings for.
         #[arg(long, value_enum, default_value_t = Platform::Android)]
         platform: Platform,
+    },
+
+    /// Watch the Rust sources and rebuild on every change
+    Watch {
+        /// The device to run on (Android) or the simulator to use (iOS)
+        #[arg(default_value = "")]
+        device: String,
+        /// The platform to build for
+        #[arg(long, value_enum, default_value = "android")]
+        platform: Platforms,
     },
 }
 
@@ -325,6 +359,7 @@ pub fn run(args: Args) -> Result<()> {
             Platform::Android => android::generate_android_bindings()?,
             Platform::Ios => ios::generate_ios_bindings()?,
         },
+        Commands::Watch { device, platform } => watch::watch(&device, platform)?,
     }
 
     Ok(())

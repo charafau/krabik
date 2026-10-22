@@ -53,6 +53,7 @@ cargo install --path .
 | `run [device]`                | Build, install and launch a debug build (`--abi` overrides the detected one) |
 | `release`                     | Build release artifacts (`--platform android\|ios`)          |
 | `bindings`                    | Generate UniFFI Kotlin/Swift bindings                        |
+| `watch [device]`              | Watch the Rust sources and rebuild on every change (`--platform android\|ios\|both`) |
 
 Typical workflow:
 
@@ -70,6 +71,31 @@ mobile_cli run             # build, install and launch on it
 `run`, `release` and `bindings` are run from inside a project directory.
 `release` builds release Rust libraries for all Android targets (assembles no
 APK) and an unsigned iOS app for physical devices.
+
+## Watching
+
+`watch` keeps the app in sync with the Rust sources: every change rebuilds
+the library, reinstalls the app and launches it again.
+
+```sh
+cd my_app
+mobile_cli watch                          # Android
+mobile_cli watch --platform ios           # iOS simulator
+mobile_cli watch --platform both         # both
+```
+
+The project is built once up front, so the app is up to date when the watch
+starts. Afterwards only the changed crate is recompiled, which takes a few
+seconds.
+
+- The Rust sources of the project are watched: `rust/src`, the manifests and
+  the build script. The target directory is not watched, the build writes to
+  it and every write would trigger another build.
+- The events of a single save are collected, so a file that is written in
+  several steps only triggers one build.
+- A build that fails is reported, but does not stop the watch. The next save
+  is picked up as usual.
+- The device is resolved once, so the watch does not ask for it again.
 
 ## Project names
 

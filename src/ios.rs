@@ -299,6 +299,14 @@ fn boot_simulator(udid: &str) -> Result<()> {
     run_command(&mut cmd, "xcrun simctl bootstatus")
 }
 
+/// Resolves the simulator to work on.
+///
+/// Matches by name or UDID when `preferred` is given, otherwise a booted
+/// simulator is used, falling back to the first available one.
+pub fn resolve_simulator_for(preferred: &str) -> Result<String> {
+    resolve_simulator(preferred)
+}
+
 /// Locates and opens macOS `Simulator.app`.
 fn open_simulator_app() {
     let developer_dir = Command::new("xcode-select")

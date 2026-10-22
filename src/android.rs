@@ -655,6 +655,19 @@ pub fn launch_android_emulator(name: &str) -> Result<()> {
     run_command(&mut cmd, "android emulator start")
 }
 
+/// Resolves the serial of the device to work on.
+///
+/// Matches by model/AVD name or serial when `wanted` is given, otherwise the
+/// only online device is used, or the user is asked when several are online.
+pub fn resolve_device(wanted: &str) -> Result<String> {
+    let wanted = if wanted.is_empty() {
+        None
+    } else {
+        Some(wanted)
+    };
+    resolve_android_device(wanted)
+}
+
 /// Resolve the adb serial of the device to run on.
 /// Matches by model/AVD name or serial when `wanted` is given; otherwise picks the
 /// only online device, or prompts interactively when several are online.
