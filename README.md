@@ -1,13 +1,17 @@
-# krabik
+<p align="center">
+  <img src="assets/krabik.svg" alt="krabik logo" width="180">
+</p>
 
-**Scaffold, build, and run cross-platform Rust mobile apps.**
+<h1 align="center">krabik</h1>
+
+<p align="center">
+  <strong>Scaffold, build, and run cross-platform Rust mobile apps.</strong>
+</p>
 
 `krabik` creates projects with a shared Rust core and native Android and iOS
 shells, then drives the rest of the toolchain for you: installing Rust targets,
 listing and booting devices, building native libraries, generating UniFFI
 bindings, and installing and launching the app.
-
-
 
 ## Quick start
 
