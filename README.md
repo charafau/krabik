@@ -1,174 +1,319 @@
-# mobile_cli
+# krabik
 
-Scaffold and build cross-platform Rust mobile apps. `create` generates a project
-containing a UniFFI-based Rust library plus Android (Gradle/Kotlin) and iOS
-(XcodeGen/Swift) app shells, and the CLI drives the rest of the toolchain:
-installing Rust targets, listing and launching emulators, building native
-libraries, generating Kotlin/Swift UniFFI bindings, and installing and
-launching the app on a device or simulator.
+**Scaffold, build, and run cross-platform Rust mobile apps.**
 
-Commands exit non-zero on failure, so they can be scripted and used in CI.
+`krabik` creates projects with a shared Rust core and native Android and iOS
+shells, then drives the rest of the toolchain for you: installing Rust targets,
+listing and booting devices, building native libraries, generating UniFFI
+bindings, and installing and launching the app.
 
-## Prerequisites
 
-- Rust toolchain (edition 2024, Rust 1.88+)
-- `rustup` (used to install the Android/iOS targets)
 
-Android:
+## Quick start
 
-- Android SDK with NDK — `ANDROID_NDK_HOME` must point at an NDK installation
-  (required by `run` and `release`)
-- `adb` on your `PATH`
-- A JDK on your `PATH` — Gradle needs it. When `JAVA_HOME` is set it has to
-  point at an existing JDK, otherwise Gradle fails with a confusing error.
-- Google's Android CLI (`android`) — used to generate the Gradle project shell
-  and to manage emulators. It must support the `--namespace` and
-  `--application-id` options of `android create`.
+```sh
+krabik doctor          # check your development environment
+krabik create my-app   # scaffold a new project in ./my-app
+cd my-app
+krabik devices -a      # list connected devices, emulators and simulators
+krabik launch Pixel_10 # boot an Android emulator
+krabik run             # build, install and launch the app
+```
 
-iOS:
+For iOS:
 
-- Xcode (`xcodebuild`, `xcrun simctl`)
-- [xcodegen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
+```sh
+krabik launch "iPhone 16" --platform ios
+krabik run --platform ios
+```
 
-Run `mobile_cli doctor` to check what is installed and what is missing. It
-reports the Rust toolchain, the Android CLI, `adb`, a JDK and a valid
-`JAVA_HOME`, the Android SDK, the NDK, the Xcode tools and the Rust
-compilation targets that are missing.
+> `run`, `release`, `bindings`, and `watch` must be executed from the root of a
+> generated project.
+
+## What you need
+
+At minimum you need Rust and `rustup`. Android and iOS builds have additional
+requirements.
+
+| Requirement | Needed for | Notes |
+| --- | --- | --- |
+| Rust 1.88+ with `rustup` | everything | Edition 2024. `rustup` installs the mobile targets. |
+| `cargo` | everything | Comes with Rust. |
+| Android CLI (`android`) | `create`, `launch`, `devices -a` | Must support `android create --namespace` and `--application-id`. |
+| Android SDK | Android builds | `ANDROID_HOME` or `ANDROID_SDK_ROOT`; also detected through `android info`. |
+| Android NDK | Android builds | `ANDROID_NDK_HOME` must point at an NDK installation. |
+| `adb` on `PATH` | Android devices, `run`, `watch` | Used to find and talk to devices. |
+| JDK on `PATH` | Android Gradle builds | If `JAVA_HOME` is set, it must point at a valid JDK. |
+| Xcode tools (`xcodebuild`, `xcrun`) | iOS builds | Requires macOS. |
+| [XcodeGen](https://github.com/yonaskolb/XcodeGen) | iOS projects and builds | `brew install xcodegen`. |
+
+Run `krabik doctor` to check everything at once. It reports the Rust toolchain,
+the Android CLI and SDK, `adb`, the JDK and `JAVA_HOME`, the NDK, the Xcode
+tools, and any missing Rust compilation targets. It exits with an error if a
+check fails.
+
+```sh
+krabik doctor
+```
 
 ## Install
 
+Install from a local checkout:
+
 ```sh
+git clone https://github.com/charafau/krabik.git
+cd krabik
 cargo install --path .
 ```
 
-## Usage
-
-| Command                       | Description                                                  |
-| ----------------------------- | ------------------------------------------------------------ |
-| `doctor`                      | Check the development environment                            |
-| `create <name> [--package <p>]` | Scaffold a new project (`./<name>/rust`, `android`, `ios`); `--package` overrides the `com.example` prefix for the app/bundle id |
-| `toolchain`                   | Install the Rust targets needed for Android and iOS          |
-| `devices [-a/--all]`          | List online devices (use `-a` to include offline ones)       |
-| `launch <emulator>`           | Boot an emulator/simulator (`--platform android\|ios`)       |
-| `run [device]`                | Build, install and launch a debug build (`--abi` overrides the detected one) |
-| `release`                     | Build release artifacts (`--platform android\|ios`)          |
-| `bindings`                    | Generate UniFFI Kotlin/Swift bindings                        |
-| `watch [device]`              | Watch the Rust sources and rebuild on every change (`--platform android\|ios\|both`) |
-
-Typical workflow:
+Or install directly from the repository:
 
 ```sh
-mobile_cli doctor          # verify your environment
-mobile_cli toolchain       # install Android/iOS Rust targets
-mobile_cli create my_app                      # scaffold a new project
-mobile_cli create my_app --package io.acme    # ...with a custom package prefix
-cd my_app
-mobile_cli devices -a      # see what is available
-mobile_cli launch Pixel_10 # boot an emulator
-mobile_cli run             # build, install and launch on it
+cargo install --git https://github.com/charafau/krabik.git
 ```
 
-`run`, `release` and `bindings` are run from inside a project directory.
-`release` builds release Rust libraries for all Android targets (assembles no
-APK) and an unsigned iOS app for physical devices.
-
-## Watching
-
-`watch` keeps the app in sync with the Rust sources: every change rebuilds
-the library, reinstalls the app and launches it again.
+This installs the `krabik` binary. Verify it with:
 
 ```sh
-cd my_app
-mobile_cli watch                          # Android
-mobile_cli watch --platform ios           # iOS simulator
-mobile_cli watch --platform both         # both
+krabik --version
 ```
 
-The project is built once up front, so the app is up to date when the watch
-starts. Afterwards only the changed crate is recompiled, which takes a few
-seconds.
+## Commands
 
-- The Rust sources of the project are watched: `rust/src`, the manifests and
-  the build script. The target directory is not watched, the build writes to
-  it and every write would trigger another build.
-- The events of a single save are collected, so a file that is written in
-  several steps only triggers one build.
-- A build that fails is reported, but does not stop the watch. The next save
-  is picked up as usual.
-- The device is resolved once, so the watch does not ask for it again.
+| Command | Description | Run from |
+| --- | --- | --- |
+| `krabik doctor` | Check the development environment. | anywhere |
+| `krabik create <name> [--package <prefix>]` | Scaffold a new project in `./<name>`. | anywhere |
+| `krabik toolchain` | Install the Rust targets needed for Android and iOS. | anywhere |
+| `krabik devices [-a]` | List devices. `-a`/`--all` also shows offline devices and shutdown simulators. | anywhere |
+| `krabik launch <device> [--platform android\|ios]` | Boot an Android emulator or an iOS simulator. | anywhere |
+| `krabik run [device] [--platform android\|ios] [--abi <abi>]` | Build, install, and launch a debug build. | project root |
+| `krabik release [--platform android\|ios]` | Build release artifacts. | project root |
+| `krabik bindings [--platform android\|ios]` | Generate Kotlin or Swift UniFFI bindings. | project root |
+| `krabik watch [device] [--platform android\|ios\|both]` | Rebuild and relaunch on every Rust change. | project root |
 
-## Project names
+### Create a project
 
-The project name has to work as a Cargo package name, as a Rust crate
-identifier, as a Java/Kotlin package segment and as part of an iOS bundle
-identifier, so it must
+```sh
+krabik create my-app
+krabik create my-app --package io.acme
+```
+
+`--package` defaults to `com.example`. It is used as the prefix for the Android
+application id and the iOS bundle id.
+
+The command creates the Rust crate, the Android Gradle project, and the iOS
+XcodeGen project. It is atomic: the project is built in a staging directory and
+only moved into place when every part was generated successfully. A failed
+`create` leaves nothing behind and can simply be retried.
+
+The target directory must not exist yet.
+
+### Work with devices
+
+```sh
+krabik devices          # online devices and booted simulators
+krabik devices -a       # also include offline AVDs and shutdown simulators
+krabik launch Pixel_10                  # Android emulator
+krabik launch "iPhone 16 Pro" --platform ios
+```
+
+`run` and `watch` pick a device automatically:
+
+- **Android:** the only online device is used. If several are online, you are
+  asked to choose. Pass a model name, AVD name, or `adb` serial to select one
+  explicitly.
+- **iOS:** the booted simulator is used, falling back to the first available
+  one. Pass a simulator name or UDID to select one explicitly.
+
+### Run a debug build
+
+```sh
+krabik run
+krabik run Pixel_7
+krabik run --platform ios
+krabik run "iPhone 16 Pro" --platform ios
+```
+
+On Android, `run` detects the ABI of the connected device
+(`ro.product.cpu.abi`) and builds the Rust library for that architecture. It
+then copies the shared library into `jniLibs`, generates Kotlin bindings,
+installs the debug app with Gradle, and launches `MainActivity`.
+
+Use `--abi` to build for a different architecture:
+
+```sh
+krabik run --abi arm64-v8a
+krabik run --abi armeabi-v7a
+krabik run --abi x86_64
+krabik run --abi x86
+```
+
+On iOS, `run` builds for the simulator, generates the Swift bindings, creates
+the Xcode project, and installs and launches the app in the simulator.
+`--abi` is only supported on Android.
+
+### Build a release
+
+```sh
+krabik release                      # Android APK
+krabik release --platform ios       # iOS .app for a physical device
+```
+
+Android release builds compile the Rust library for all four Android targets,
+generate the Kotlin bindings, and assemble the APK:
+
+```text
+android/app/build/outputs/apk/release/app-release-unsigned.apk
+```
+
+iOS release builds are compiled for physical devices and are unsigned:
+
+```text
+ios/build/Build/Products/Release-iphoneos/<App>.app
+```
+
+You will need to sign the resulting artifact before distributing it.
+
+### Generate bindings only
+
+```sh
+krabik bindings                    # Kotlin
+krabik bindings --platform ios     # Swift
+```
+
+Kotlin bindings are written to `android/app/src/main/java`; Swift bindings,
+headers, and the module map are written to `ios/Generated`.
+
+### Watch while developing
+
+`watch` keeps the app in sync with your Rust code. It builds once up front, then
+rebuilds, reinstalls, and relaunches on every change.
+
+```sh
+krabik watch                       # Android (the default)
+krabik watch --platform ios        # iOS simulator
+krabik watch --platform both       # Android and iOS
+```
+
+- Watched paths: `rust/src`, both bindgen crates' sources, their `Cargo.toml`
+  files, and `rust/build.rs`.
+- The target directory is not watched, so builds do not retrigger themselves.
+- Events from a single save are debounced into one build.
+- A build failure is reported but does not stop the watch; the next save is
+  picked up normally.
+- The Android device is resolved once and reused for the whole session. On iOS
+  the simulator is resolved on each build, so pass a simulator name or UDID to
+  keep the target stable. On Android the optional argument is a device serial,
+  model, or AVD name.
+- Native Android or iOS source changes are not watched. Rebuild those manually.
+
+## Project naming
+
+A project name has to be valid as a Cargo package name, a Rust crate identifier,
+a Java/Kotlin package segment, and part of an iOS bundle identifier. It must:
 
 - start with a lowercase ASCII letter,
-- contain only lowercase ASCII letters, digits, `-` and `_`,
+- contain only lowercase ASCII letters, digits, `-`, and `_`,
+- be at most 64 characters long,
 - not be a Rust or Java keyword.
 
-Hyphens are allowed because Cargo package names use them (`my-app`); they are
-translated to underscores wherever an identifier requires it. The identifiers
-derived from the name are used consistently across the generated project:
+Hyphens become underscores wherever an identifier is required. Underscores
+become hyphens in iOS bundle identifiers.
 
-| Name        | Cargo package | Rust/Kotlin id | Java package          | iOS bundle id         |
-| ----------- | ------------- | -------------- | --------------------- | --------------------- |
-| `my-app`    | `my-app`      | `my_app`       | `com.example.my_app`  | `com.example.my-app`  |
-| `my_app`    | `my_app`      | `my_app`       | `com.example.my_app`  | `com.example.my-app`  |
-| `demo`      | `demo`        | `demo`         | `com.example.demo`    | `com.example.demo`    |
+| Name | Directory | Cargo package | Rust/Kotlin id | Android package | iOS bundle id |
+| --- | --- | --- | --- | --- | --- |
+| `my-app` | `my-app/` | `my-app` | `my_app` | `com.example.my_app` | `com.example.my-app` |
+| `my_app` | `my_app/` | `my_app` | `my_app` | `com.example.my_app` | `com.example.my-app` |
+| `demo` | `demo/` | `demo` | `demo` | `com.example.demo` | `com.example.demo` |
+
+The `--package` prefix must be dot-separated valid Java identifiers, for example
+`com.example` or `io.acme`.
 
 ## Generated project layout
 
+```text
+my-app/
+├── rust/                          # Shared Rust library (cdylib + staticlib)
+│   ├── src/lib.rs                 # Exported UniFFI functions
+│   ├── Cargo.toml
+│   ├── build.rs                   # Generates the Android JNI scaffolding
+│   ├── uniffi-bindgen/            # Kotlin bindings generator
+│   └── uniffi-bindgen-swift/      # Swift bindings generator
+├── android/                       # Gradle app shell
+│   └── app/src/main/
+│       ├── java/…/MainActivity.kt
+│       └── jniLibs/               # Rust .so files per ABI
+├── ios/                           # XcodeGen project and SwiftUI app
+│   ├── project.yml
+│   ├── Sources/
+│   └── Generated/                 # Swift bindings and C headers
+└── rust-toolchain.toml            # Toolchain and required Rust targets
 ```
-my_app/
-├── rust/                  # UniFFI library (cdylib/staticlib)
-│   ├── uniffi-bindgen/    # Kotlin bindings generator crate
-│   └── uniffi-bindgen-swift/  # Swift bindings generator crate
-├── android/               # Gradle project (generated by the Android CLI)
-├── ios/                   # XcodeGen project.yml + Swift sources
-└── rust-toolchain.toml    # The toolchain and targets the project needs
-```
+
+Both generated apps call `get_greeting()` from Rust and display the result.
 
 Notes:
 
-- The project is created in a staging directory and only moved into place once
-  every part was generated successfully, so a failed `create` leaves nothing
-  behind and can simply be retried.
-- The generated crates pin all `uniffi` crates to the same git revision
-  (`uniffi-bindgen-kotlin-jni` is not published on crates.io).
-- The Rust crate is not a repository of its own — the project is a single
-  repository, so `git init` in the project root is all that is needed.
-- `rust-toolchain.toml` declares the Android and iOS compilation targets, so
-  rustup installs them on the first build. The project does not depend on the
-  machine being set up beforehand — `mobile_cli toolchain` is not required.
+- The generated `rust-toolchain.toml` declares all Android and iOS targets, so
+  `rustup` installs them on the first build. Running `krabik toolchain` first is
+  optional.
+- UniFFI crates are pinned to the same git revision because
+  `uniffi-bindgen-kotlin-jni` is not published on crates.io.
 - Android builds link against NDK API 24, matching the generated `minSdk`.
-  Linker paths are resolved from `ANDROID_NDK_HOME` at build time — nothing
-  machine-specific is written into the project.
-- `run` builds the Rust library for the architecture of the device it is
-  installed on. The ABI is read from the device (`ro.product.cpu.abi`), and
-  can be overridden with `--abi arm64-v8a|armeabi-v7a|x86_64|x86`.
+  Nothing machine-specific is written into the project; the NDK location is
+  read from `ANDROID_NDK_HOME` at build time.
+- The generated project is a single repository. The Rust crate is created with
+  `--vcs none`, so `git init` in the project root is all you need.
+- iOS projects target iOS 16.0 and use Swift 5.9.
 
-## Development
+## Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `ANDROID_NDK_HOME` | Path to the Android NDK. Required for Android `run` and `release`. |
+| `ANDROID_HOME` / `ANDROID_SDK_ROOT` | Android SDK location. `android info` is preferred when available. |
+| `JAVA_HOME` | JDK used by Gradle. Optional, but if set it must point at an existing JDK. |
+| `NO_COLOR` | Disables colored output. Colors are also disabled when stdout is not a terminal. |
+
+## Troubleshooting
+
+| Problem | Fix |
+| --- | --- |
+| `ANDROID_NDK_HOME is not set` | Install the NDK and export `ANDROID_NDK_HOME`. |
+| `no online Android devices found` | Start an emulator with `krabik launch <name>` or connect a device. |
+| `could not determine the ABI of …` | The device is still booting. Wait for it to be ready and retry. |
+| `JAVA_HOME points to a missing directory` | Unset `JAVA_HOME` or point it at a valid JDK. |
+| `xcodegen is not installed` | Run `brew install xcodegen`. |
+| `no Rust sources found` | Run `watch` from the root of a generated project. |
+| `… already exists` | Choose another name or remove the existing directory. |
+| Gradle cannot find the SDK | Set `ANDROID_HOME` or configure the SDK in the Android CLI. |
+
+## Developing krabik
 
 ```sh
-cargo test                          # unit + integration tests
+cargo test                            # unit and integration tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same three checks on Linux and macOS
-on every push and pull request, and additionally runs the tests against the
-minimum supported Rust version.
+The CLI is a library plus a thin binary, so behavior can be tested without
+spawning a process:
 
-The CLI logic lives in `src/lib.rs` (`mobile_cli::run`), with `src/main.rs` as
-a thin wrapper, so behavior can be tested without spawning a process. Project
-names are validated and every identifier is derived from them in `src/naming.rs`
-(`mobile_cli::naming::ProjectName`).
+- `src/lib.rs` — argument parsing and command dispatch (`krabik::run`)
+- `src/main.rs` — the `krabik` binary
+- `src/android.rs` — Android project creation, devices, build, and release
+- `src/ios.rs` — iOS project creation, simulators, build, and release
+- `src/rust.rs` — Rust crate generation and toolchain checks
+- `src/naming.rs` — project name validation and identifier derivation
+- `src/watch.rs` — the file-watching rebuild loop
 
-The toolchain this project is developed with is declared in
-`rust-toolchain.toml`, and the minimum supported version in `Cargo.toml` as
-`rust-version`.
-
-`tests/create.rs` runs `create` end to end with a fake `android`/`xcodegen`
-toolchain, so the generated project is verified without a full Android/Xcode
+Tests live in `tests/`. The `create` tests use a fake `android`/`xcodegen`
+toolchain, so project generation can be verified without a full mobile SDK
 installation.
+
+CI (`.github/workflows/ci.yml`) runs formatting, clippy, and tests on Linux and
+macOS, plus the test suite against the minimum supported Rust version (1.88).
+
+The development toolchain is declared in `rust-toolchain.toml`, and the minimum
+supported version is declared in `Cargo.toml` as `rust-version`.
