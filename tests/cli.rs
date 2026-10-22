@@ -90,6 +90,29 @@ fn doctor_prints_all_sections_and_exits_zero_or_one() {
 }
 
 #[test]
+fn doctor_checks_the_tools_the_build_needs() {
+    let output = Command::cargo_bin("mobile_cli")
+        .expect("binary should build")
+        .arg("doctor")
+        .output()
+        .expect("doctor should run");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for check in [
+        "cargo",
+        "rustup",
+        "android CLI",
+        "adb",
+        "java",
+        "Android SDK",
+        "ANDROID_NDK_HOME",
+        "xcodegen",
+    ] {
+        assert!(stdout.contains(check), "missing {check} check: {stdout}");
+    }
+}
+
+#[test]
 fn doctor_output_is_plain_when_piped() {
     let output = Command::cargo_bin("mobile_cli")
         .expect("binary should build")

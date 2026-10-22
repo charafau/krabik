@@ -5,34 +5,66 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::naming::ProjectName;
-use crate::{check_mark, command_exists, run_command};
+use crate::{command_exists, run_command};
 
-/// Checks whether a given Rustup compilation target is installed.
-pub fn target_installed(target: &str) -> bool {
-    Command::new("rustup")
-        .args(["target", "list", "--installed"])
-        .output()
-        .map(|out| {
-            out.status.success() && target_in_list(&String::from_utf8_lossy(&out.stdout), target)
-        })
-        .unwrap_or(false)
+/// The Rust compilation targets that are installed.
+///
+/// The list is read once, so checking several targets does not run `rustup`
+/// over and over again.
+#[derive(Debug, Clone, Default)]
+pub struct InstalledTargets {
+    targets: Vec<String>,
 }
 
-/// Checks whether a target matches any line in the `rustup target list --installed` output.
-fn target_in_list(installed: &str, target: &str) -> bool {
-    installed.lines().any(|line| line.trim() == target)
+impl InstalledTargets {
+    /// Reads the installed targets from `rustup target list --installed`.
+    pub fn read() -> Self {
+        let output = Command::new("rustup")
+            .args(["target", "list", "--installed"])
+            .output();
+
+        let installed = match output {
+            Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
+            _ => String::new(),
+        };
+
+        Self::from_list(&installed)
+    }
+
+    /// Parses the output of `rustup target list --installed`.
+    fn from_list(installed: &str) -> Self {
+        Self {
+            targets: installed
+                .lines()
+                .map(|line| line.trim().to_string())
+                .filter(|line| !line.is_empty())
+                .collect(),
+        }
+    }
+
+    /// Whether the given target is installed.
+    pub fn contains(&self, target: &str) -> bool {
+        self.targets.iter().any(|installed| installed == target)
+    }
 }
 
-/// Doctor check verifying whether the Rust toolchain (cargo) is installed.
+/// Doctor check verifying the Rust toolchain is installed.
 pub fn check_rust() -> bool {
     println!("[Rust]");
-    let cargo_installed = command_exists("cargo");
-    if cargo_installed {
-        println!("{} cargo is installed", check_mark(true));
-    } else {
-        println!("{} cargo is not installed", check_mark(false));
-    }
-    cargo_installed
+    let mut ok = true;
+
+    ok &= crate::report_check(
+        command_exists("cargo"),
+        "cargo is installed",
+        "cargo is not installed",
+    );
+    ok &= crate::report_check(
+        command_exists("rustup"),
+        "rustup is installed",
+        "rustup is not installed",
+    );
+
+    ok
 }
 
 const UNIFFI_GIT: &str = "https://github.com/mozilla/uniffi-rs";
@@ -194,14 +226,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_target_in_list() {
+    fn test_installed_targets_contains() {
         let installed = "aarch64-apple-darwin\naarch64-linux-android\nx86_64-linux-android\n";
-        assert!(target_in_list(installed, "aarch64-linux-android"));
-        assert!(target_in_list(installed, "x86_64-linux-android"));
-        assert!(!target_in_list(installed, "i686-linux-android"));
+        let targets = InstalledTargets::from_list(installed);
+
+        assert!(targets.contains("aarch64-linux-android"));
+        assert!(targets.contains("x86_64-linux-android"));
+        assert!(!targets.contains("i686-linux-android"));
         // must match the whole line, not a prefix
-        assert!(!target_in_list(installed, "aarch64-linux"));
-        assert!(!target_in_list("", "aarch64-linux-android"));
+        assert!(!targets.contains("aarch64-linux"));
+        assert!(!targets.contains(""));
+    }
+
+    #[test]
+    fn test_installed_targets_empty_list() {
+        let targets = InstalledTargets::from_list("");
+        assert!(!targets.contains("aarch64-linux-android"));
+
+        let targets = InstalledTargets::from_list("\n\n  \n");
+        assert!(!targets.contains("aarch64-linux-android"));
+    }
+
+    #[test]
+    fn test_installed_targets_ignores_surrounding_whitespace() {
+        let targets = InstalledTargets::from_list("  aarch64-linux-android  \n");
+        assert!(targets.contains("aarch64-linux-android"));
     }
 
     #[test]

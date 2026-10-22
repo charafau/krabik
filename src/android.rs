@@ -3,11 +3,12 @@ use clap::ValueEnum;
 
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::naming::ProjectName;
-use crate::{check_mark, command_exists, run_command, rust};
+use crate::rust::InstalledTargets;
+use crate::{check_mark, command_exists, report_check, run_command, rust};
 
 /// A Rust target that can be built for Android.
 pub struct AndroidTarget {
@@ -142,35 +143,163 @@ pub fn install_android_toolchain() -> Result<()> {
     run_command(&mut cmd, "rustup target add")
 }
 
-/// Doctor check verifying whether the Android CLI, ANDROID_NDK_HOME, and targets are available.
-pub fn check_android() -> bool {
+/// Doctor check verifying the Android toolchain: the Android CLI, adb, a JDK,
+/// the SDK, the NDK and the Rust targets.
+pub fn check_android(targets: &InstalledTargets) -> bool {
     println!("[Android]");
     let mut ok = true;
 
-    if command_exists("android") {
-        println!("{} android CLI is installed", check_mark(true));
-    } else {
-        println!("{} android CLI is not installed", check_mark(false));
-        ok = false;
-    }
-    if std::env::var("ANDROID_NDK_HOME").is_ok() {
-        println!(
-            "{} ANDROID_NDK_HOME environment variable is set",
-            check_mark(true)
-        );
-    } else {
-        println!(
-            "{} ANDROID_NDK_HOME environment variable is not set",
-            check_mark(false)
-        );
-        ok = false;
-    }
+    ok &= report_check(
+        command_exists("android"),
+        "android CLI is installed",
+        "android CLI is not installed",
+    );
+    ok &= report_check(
+        command_exists("adb"),
+        "adb is installed",
+        "adb is not installed",
+    );
+    ok &= report_check(
+        command_exists("java"),
+        "java is installed",
+        "java is not installed",
+    );
+    ok &= check_java_home();
+    ok &= check_android_sdk();
+    ok &= check_ndk();
+
     for target in ANDROID_TARGETS {
-        let installed = rust::target_installed(target.arch);
+        let installed = targets.contains(target.arch);
         println!("{} target {}", check_mark(installed), target.arch);
         ok &= installed;
     }
     ok
+}
+
+/// Checks that `JAVA_HOME` points at an existing directory when it is set.
+///
+/// Gradle fails with a confusing error when `JAVA_HOME` is set but invalid,
+/// even when a `java` binary is available on the `PATH`.
+fn check_java_home() -> bool {
+    let Some(java_home) = std::env::var_os("JAVA_HOME") else {
+        // Gradle falls back to the java binary on the PATH
+        return true;
+    };
+
+    if Path::new(&java_home).is_dir() {
+        println!(
+            "{} JAVA_HOME points at an existing directory",
+            check_mark(true)
+        );
+        true
+    } else {
+        println!(
+            "{} JAVA_HOME points to a missing directory: {}",
+            check_mark(false),
+            java_home.to_string_lossy()
+        );
+        false
+    }
+}
+
+/// The location of the Android SDK.
+fn android_sdk_dir() -> Option<PathBuf> {
+    // the Android CLI knows best where it finds the SDK
+    if let Some(dir) = sdk_from_cli_info() {
+        return Some(dir);
+    }
+
+    for var in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] {
+        if let Some(dir) = std::env::var_os(var) {
+            return Some(PathBuf::from(dir));
+        }
+    }
+
+    None
+}
+
+/// Reads the SDK location from the output of `android info`.
+fn sdk_from_cli_info() -> Option<PathBuf> {
+    let output = Command::new("android").args(["info"]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    parse_sdk_info(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Extracts the SDK path from the output of `android info`.
+fn parse_sdk_info(output: &str) -> Option<PathBuf> {
+    output.lines().find_map(|line| {
+        let value = line.trim().strip_prefix("sdk:")?.trim();
+        if value.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(value))
+        }
+    })
+}
+
+/// Checks that the Android SDK is available.
+fn check_android_sdk() -> bool {
+    match android_sdk_dir() {
+        Some(dir) if dir.is_dir() => {
+            println!(
+                "{} Android SDK is installed at {}",
+                check_mark(true),
+                dir.display()
+            );
+            true
+        }
+        Some(dir) => {
+            println!(
+                "{} Android SDK directory is missing: {}",
+                check_mark(false),
+                dir.display()
+            );
+            false
+        }
+        None => {
+            println!(
+                "{} Android SDK could not be found, set ANDROID_HOME",
+                check_mark(false)
+            );
+            false
+        }
+    }
+}
+
+/// Checks that the NDK is configured and usable.
+fn check_ndk() -> bool {
+    let Ok(ndk_root) = std::env::var("ANDROID_NDK_HOME") else {
+        println!(
+            "{} ANDROID_NDK_HOME environment variable is not set",
+            check_mark(false)
+        );
+        return false;
+    };
+
+    println!(
+        "{} ANDROID_NDK_HOME environment variable is set",
+        check_mark(true)
+    );
+
+    match find_ndk_prebuilt(&ndk_root) {
+        Ok(prebuilt) => {
+            println!(
+                "{} ANDROID_NDK_HOME points at an NDK ({prebuilt})",
+                check_mark(true)
+            );
+            true
+        }
+        Err(err) => {
+            println!(
+                "{} ANDROID_NDK_HOME does not point at an NDK: {err}",
+                check_mark(false)
+            );
+            false
+        }
+    }
 }
 
 /// Creates the Android project template, cleans up default files, and configures jniLibs and MainActivity.
@@ -960,6 +1089,29 @@ mod tests {
     fn test_clear_jni_libs_missing_directory() {
         let missing = std::env::temp_dir().join("jni_libs_missing_test_12345");
         assert!(clear_jni_libs(&missing).is_ok());
+    }
+
+    #[test]
+    fn test_parse_sdk_info() {
+        let info = "sdk: /Users/someone/Android/sdk\nversion: 1.0.0\nlauncher_version: 1.0.0\n";
+        assert_eq!(
+            parse_sdk_info(info),
+            Some(PathBuf::from("/Users/someone/Android/sdk"))
+        );
+    }
+
+    #[test]
+    fn test_parse_sdk_info_without_sdk() {
+        assert_eq!(parse_sdk_info("version: 1.0.0\n"), None);
+        assert_eq!(parse_sdk_info("sdk:\n"), None);
+        assert_eq!(parse_sdk_info("sdk:   \n"), None);
+        assert_eq!(parse_sdk_info(""), None);
+    }
+
+    #[test]
+    fn test_parse_sdk_info_ignores_other_keys() {
+        // a key that merely ends in "sdk" must not be mistaken for the sdk
+        assert_eq!(parse_sdk_info("toolsdk: /some/path\n"), None);
     }
 
     #[test]

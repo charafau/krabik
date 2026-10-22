@@ -5,7 +5,8 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::naming::ProjectName;
-use crate::{check_mark, command_exists, run_command, rust};
+use crate::rust::InstalledTargets;
+use crate::{check_mark, command_exists, report_check, run_command, rust};
 
 const IOS_TARGETS: [&str; 2] = ["aarch64-apple-ios", "aarch64-apple-ios-sim"];
 
@@ -26,31 +27,28 @@ pub fn install_ios_toolchain() -> Result<()> {
     run_command(&mut cmd, "rustup target add")
 }
 
-/// Doctor check verifying whether Xcode tools and required iOS targets are installed.
-pub fn check_ios() -> bool {
+/// Doctor check verifying Xcode tools and required iOS targets are installed.
+pub fn check_ios(targets: &InstalledTargets) -> bool {
     println!("[iOS]");
     let mut ok = true;
 
-    if command_exists("xcodebuild") {
-        println!("{} xcode is installed", check_mark(true));
-    } else {
-        println!("{} xcode is not installed", check_mark(false));
-        ok = false;
-    }
-    if command_exists("xcodegen") {
-        println!("{} xcodegen is installed", check_mark(true));
-    } else {
-        println!("{} xcodegen is not installed", check_mark(false));
-        ok = false;
-    }
-    if command_exists("xcrun") {
-        println!("{} xcrun is installed", check_mark(true));
-    } else {
-        println!("{} xcrun is not installed", check_mark(false));
-        ok = false;
-    }
+    ok &= report_check(
+        command_exists("xcodebuild"),
+        "xcode is installed",
+        "xcode is not installed",
+    );
+    ok &= report_check(
+        command_exists("xcodegen"),
+        "xcodegen is installed",
+        "xcodegen is not installed",
+    );
+    ok &= report_check(
+        command_exists("xcrun"),
+        "xcrun is installed",
+        "xcrun is not installed",
+    );
     for target in IOS_TARGETS {
-        let installed = rust::target_installed(target);
+        let installed = targets.contains(target);
         println!("{} target {target}", check_mark(installed));
         ok &= installed;
     }

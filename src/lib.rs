@@ -8,15 +8,57 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::naming::ProjectName;
 
+use std::ffi::OsStr;
 use std::fs;
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Checks whether an executable command is available on the system PATH by invoking it with `--version`.
+/// Checks whether an executable command is available in the `PATH`.
 pub(crate) fn command_exists(command: &str) -> bool {
-    Command::new(command).arg("--version").output().is_ok()
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+
+    find_in_path(&path, command)
+}
+
+/// Searches the given `PATH` for an executable with the given name.
+fn find_in_path(path: &OsStr, command: &str) -> bool {
+    std::env::split_paths(path)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .any(|dir| {
+            let candidate = dir.join(command);
+            if is_executable(&candidate) {
+                return true;
+            }
+
+            #[cfg(windows)]
+            {
+                is_executable(&dir.join(format!("{command}.exe")))
+            }
+            #[cfg(not(windows))]
+            {
+                false
+            }
+        })
+}
+
+/// Whether the given path is a file that can be executed.
+#[cfg(unix)]
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::metadata(path)
+        .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+/// Whether the given path is a file that can be executed.
+#[cfg(not(unix))]
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
 }
 
 /// Determines if terminal color output is enabled (respects `NO_COLOR` and requires a terminal stdout).
@@ -41,6 +83,12 @@ fn paint_with(colors: bool, fg: &str, text: &str) -> String {
 /// Returns a colored status checkmark: green `[✓]` for success or red `[✗]` for failure.
 pub(crate) fn check_mark(ok: bool) -> String {
     paint(if ok { "32" } else { "31" }, if ok { "[✓]" } else { "[✗]" })
+}
+
+/// Prints the result of a check and returns whether it passed.
+pub(crate) fn report_check(ok: bool, passed: &str, failed: &str) -> bool {
+    println!("{} {}", check_mark(ok), if ok { passed } else { failed });
+    ok
 }
 
 /// Executes a command synchronously, returning an error if spawning fails or the command exits with non-zero status.
@@ -176,9 +224,13 @@ pub fn run(args: Args) -> Result<()> {
             println!("doctor\n");
             let mut ok = rust::check_rust();
             println!();
-            ok &= android::check_android();
+
+            // the installed targets are read once and shared by both platforms
+            let targets = rust::InstalledTargets::read();
+
+            ok &= android::check_android(&targets);
             println!();
-            ok &= ios::check_ios();
+            ok &= ios::check_ios(&targets);
             if !ok {
                 return Err(anyhow!("one or more doctor checks failed"));
             }
@@ -264,5 +316,47 @@ mod tests {
     #[test]
     fn test_paint_without_colors() {
         assert_eq!(paint_with(false, "32", "[✓]"), "[✓]");
+    }
+
+    #[test]
+    fn test_find_in_path() {
+        let dir = std::env::temp_dir().join(format!(
+            "test_find_in_path_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let executable = dir.join("mytool");
+        std::fs::write(&executable, "#!/bin/sh\n").unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        assert!(find_in_path(dir.as_os_str(), "mytool"));
+        assert!(!find_in_path(dir.as_os_str(), "missing-tool"));
+
+        // a file that cannot be executed is not found
+        let not_executable = dir.join("data");
+        std::fs::write(&not_executable, "data").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&not_executable, std::fs::Permissions::from_mode(0o644))
+                .unwrap();
+        }
+        assert!(!find_in_path(dir.as_os_str(), "data"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_find_in_path_empty_path() {
+        assert!(!find_in_path(std::ffi::OsStr::new(""), "cargo"));
     }
 }

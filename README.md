@@ -19,6 +19,8 @@ Android:
 - Android SDK with NDK — `ANDROID_NDK_HOME` must point at an NDK installation
   (required by `run` and `release`)
 - `adb` on your `PATH`
+- A JDK on your `PATH` — Gradle needs it. When `JAVA_HOME` is set it has to
+  point at an existing JDK, otherwise Gradle fails with a confusing error.
 - Google's Android CLI (`android`) — used to generate the Gradle project shell
   and to manage emulators. It must support the `--namespace` and
   `--application-id` options of `android create`.
@@ -28,7 +30,10 @@ iOS:
 - Xcode (`xcodebuild`, `xcrun simctl`)
 - [xcodegen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
 
-Run `mobile_cli doctor` to check what is installed and what is missing.
+Run `mobile_cli doctor` to check what is installed and what is missing. It
+reports the Rust toolchain, the Android CLI, `adb`, a JDK and a valid
+`JAVA_HOME`, the Android SDK, the NDK, the Xcode tools and the Rust
+compilation targets that are missing.
 
 ## Install
 
