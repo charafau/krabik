@@ -1,10 +1,10 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{command_exists, rust};
+use crate::{check_mark, command_exists, run_command, rust};
 
 const IOS_TARGETS: [&str; 2] = ["aarch64-apple-ios", "aarch64-apple-ios-sim"];
 
@@ -18,74 +18,79 @@ Generated/
 .DS_Store
 "#;
 
-pub fn install_ios_toolchain() {
-    Command::new("rustup")
-        .args(["target", "add"])
-        .args(IOS_TARGETS)
-        .status()
-        .expect("failed to run rustup");
+/// Adds required iOS Rust compilation targets via `rustup target add`.
+pub fn install_ios_toolchain() -> Result<()> {
+    let mut cmd = Command::new("rustup");
+    cmd.args(["target", "add"]).args(IOS_TARGETS);
+    run_command(&mut cmd, "rustup target add")
 }
 
-pub fn check_ios() {
+/// Doctor check verifying whether Xcode tools and required iOS targets are installed.
+pub fn check_ios() -> bool {
     println!("[iOS]");
+    let mut ok = true;
+
     if command_exists("xcodebuild") {
-        println!("\x1b[32m[✓]\x1b[0m xcode is installed");
+        println!("{} xcode is installed", check_mark(true));
     } else {
-        println!("\x1b[31m[✗]\x1b[0m xcode is not installed");
-    };
-    if command_exists("xcodegen") {
-        println!("\x1b[32m[✓]\x1b[0m xcodegen is installed");
-    } else {
-        println!("\x1b[31m[✗]\x1b[0m xcodegen is not installed");
-    };
-    if command_exists("xcrun") {
-        println!("\x1b[32m[✓]\x1b[0m xcrun is installed");
-    } else {
-        println!("\x1b[31m[✗]\x1b[0m xcrun is not installed");
-    };
-    for target in IOS_TARGETS {
-        println!(
-            "{} target {target}",
-            if rust::target_installed(target) {
-                "\x1b[32m[✓]\x1b[0m"
-            } else {
-                "\x1b[31m[✗]\x1b[0m"
-            }
-        );
+        println!("{} xcode is not installed", check_mark(false));
+        ok = false;
     }
+    if command_exists("xcodegen") {
+        println!("{} xcodegen is installed", check_mark(true));
+    } else {
+        println!("{} xcodegen is not installed", check_mark(false));
+        ok = false;
+    }
+    if command_exists("xcrun") {
+        println!("{} xcrun is installed", check_mark(true));
+    } else {
+        println!("{} xcrun is not installed", check_mark(false));
+        ok = false;
+    }
+    for target in IOS_TARGETS {
+        let installed = rust::target_installed(target);
+        println!("{} target {target}", check_mark(installed));
+        ok &= installed;
+    }
+    ok
 }
 
-pub fn create_ios(name: &str) {
+/// Sets up the iOS project directory, generating SwiftUI files and Xcode project configuration.
+pub fn create_ios(name: &str, package_prefix: &str) -> Result<()> {
     let ios_dir = format!("./{name}/ios");
-    fs::create_dir_all(format!("{ios_dir}/Sources")).expect("failed to create iOS sources dir");
-    fs::create_dir_all(format!("{ios_dir}/Generated")).expect("failed to create generated dir");
+    fs::create_dir_all(format!("{ios_dir}/Sources"))
+        .with_context(|| format!("failed to create {ios_dir}/Sources"))?;
+    fs::create_dir_all(format!("{ios_dir}/Generated"))
+        .with_context(|| format!("failed to create {ios_dir}/Generated"))?;
 
     let app = app_name(name);
     let lib_name = lib_name(name);
 
+    let project_yml_path = format!("{ios_dir}/project.yml");
     fs::write(
-        format!("{ios_dir}/project.yml"),
-        project_yml(&app, &lib_name, name),
+        &project_yml_path,
+        project_yml(&app, &lib_name, name, package_prefix),
     )
-    .expect("failed to write project.yml");
+    .with_context(|| format!("failed to write {project_yml_path}"))?;
 
-    fs::write(format!("{ios_dir}/Sources/{app}App.swift"), app_swift(&app))
-        .expect("failed to write app swift file");
+    let app_swift_path = format!("{ios_dir}/Sources/{app}App.swift");
+    fs::write(&app_swift_path, app_swift(&app))
+        .with_context(|| format!("failed to write {app_swift_path}"))?;
 
-    fs::write(
-        format!("{ios_dir}/Sources/ContentView.swift"),
-        content_view_swift(),
-    )
-    .expect("failed to write ContentView.swift");
+    let content_view_path = format!("{ios_dir}/Sources/ContentView.swift");
+    fs::write(&content_view_path, content_view_swift())
+        .with_context(|| format!("failed to write {content_view_path}"))?;
 
-    fs::write(format!("{ios_dir}/.gitignore"), IOS_GITIGNORE)
-        .expect("failed to write iOS .gitignore");
+    let gitignore_path = format!("{ios_dir}/.gitignore");
+    fs::write(&gitignore_path, IOS_GITIGNORE)
+        .with_context(|| format!("failed to write {gitignore_path}"))?;
 
-    Command::new("xcodegen")
-        .args(["generate"])
-        .current_dir(&ios_dir)
-        .status()
-        .expect("failed to run xcodegen");
+    let mut cmd = Command::new("xcodegen");
+    cmd.arg("generate").current_dir(&ios_dir);
+    run_command(&mut cmd, "xcodegen generate")?;
+
+    Ok(())
 }
 
 /// Swift module / library name used by cargo and UniFFI.
@@ -114,7 +119,7 @@ fn app_name(name: &str) -> String {
 }
 
 /// Bundle identifiers may contain alphanumerics, hyphens and periods, but no underscores.
-fn bundle_id(name: &str) -> String {
+fn bundle_id(package_prefix: &str, name: &str) -> String {
     let sanitized: String = name
         .to_lowercase()
         .chars()
@@ -127,14 +132,15 @@ fn bundle_id(name: &str) -> String {
         })
         .collect();
 
-    format!("com.example.{sanitized}")
+    format!("{package_prefix}.{sanitized}")
 }
 
-fn project_yml(app: &str, lib_name: &str, name: &str) -> String {
+/// Generates the XcodeGen `project.yml` specification for building the iOS application.
+fn project_yml(app: &str, lib_name: &str, name: &str, package_prefix: &str) -> String {
     format!(
         r#"name: {app}
 options:
-  bundleIdPrefix: com.example
+  bundleIdPrefix: {package_prefix}
   deploymentTarget:
     iOS: "16.0"
   createIntermediateGroups: true
@@ -168,10 +174,11 @@ targets:
         OTHER_LDFLAGS:
           - -l{lib_name}
 "#,
-        bundle_id = bundle_id(name),
+        bundle_id = bundle_id(package_prefix, name),
     )
 }
 
+/// Generates the main SwiftUI App entrypoint file content.
 fn app_swift(app: &str) -> String {
     format!(
         r#"import SwiftUI
@@ -188,6 +195,7 @@ struct {app}App: App {{
     )
 }
 
+/// Generates the initial SwiftUI `ContentView` displaying the greeting from the Rust library.
 fn content_view_swift() -> String {
     r#"import SwiftUI
 
@@ -210,6 +218,8 @@ pub struct IosDevice {
     pub state: String,
 }
 
+/// Lists available iOS simulators via `xcrun simctl list devices`.
+/// If `all` is true, shutdown simulators are included alongside booted ones.
 pub fn list_ios_devices(all: bool) {
     println!("Available iOS Devices:\n");
 
@@ -220,12 +230,12 @@ pub fn list_ios_devices(all: bool) {
 
     let listing = match output {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
-        _ => {
-            if all {
-                println!("  No iOS devices found");
-            } else {
-                println!("  No online iOS devices found");
-            }
+        Ok(out) => {
+            eprintln!("xcrun simctl list failed ({})", out.status);
+            return;
+        }
+        Err(e) => {
+            eprintln!("failed to run xcrun simctl list: {e}");
             return;
         }
     };
@@ -234,6 +244,7 @@ pub fn list_ios_devices(all: bool) {
     println!("{}", format_ios_devices(&devices, all));
 }
 
+/// Parses device lines from `xcrun simctl list devices` output into a list of [`IosDevice`].
 fn parse_ios_devices(listing: &str, all: bool) -> Vec<IosDevice> {
     let mut devices = Vec::new();
     let mut current_runtime = None;
@@ -276,6 +287,7 @@ fn parse_ios_devices(listing: &str, all: bool) -> Vec<IosDevice> {
     devices
 }
 
+/// Formats a slice of [`IosDevice`] into a user-friendly list string.
 fn format_ios_devices(devices: &[IosDevice], all: bool) -> String {
     if devices.is_empty() {
         if all {
@@ -295,21 +307,22 @@ fn format_ios_devices(devices: &[IosDevice], all: bool) -> String {
         .join("\n")
 }
 
-pub fn launch_ios_emulator(name: &str) {
+/// Boots the specified iOS simulator (or the first available/booted one) and opens Simulator.app.
+pub fn launch_ios_emulator(name: &str) -> Result<()> {
     println!("Launching iOS Simulator...\n");
 
-    match resolve_simulator(name) {
-        Ok(udid) => {
-            // Ignore failures here: the simulator may already be booted.
-            let _ = Command::new("xcrun")
-                .args(["simctl", "boot", &udid])
-                .output();
-            open_simulator_app();
-        }
-        Err(e) => println!("{e}"),
-    }
+    let udid = resolve_simulator(name)?;
+
+    // Ignore failures here: the simulator may already be booted.
+    let _ = Command::new("xcrun")
+        .args(["simctl", "boot", &udid])
+        .output();
+    open_simulator_app();
+
+    Ok(())
 }
 
+/// Locates and opens macOS `Simulator.app`.
 fn open_simulator_app() {
     let developer_dir = Command::new("xcode-select")
         .arg("-p")
@@ -332,11 +345,16 @@ fn open_simulator_app() {
     }
 }
 
+/// Resolves a simulator UDID matching `preferred` name/UDID, or picks an available simulator.
 fn resolve_simulator(preferred: &str) -> Result<String> {
     let output = Command::new("xcrun")
         .args(["simctl", "list", "devices", "available"])
         .output()
-        .map_err(|e| anyhow!("failed to list iOS simulators: {e}"))?;
+        .context("failed to run xcrun simctl list")?;
+
+    if !output.status.success() {
+        return Err(anyhow!("xcrun simctl list failed ({})", output.status));
+    }
 
     let listing = String::from_utf8_lossy(&output.stdout);
     parse_simulator_udid(&listing, preferred).ok_or_else(|| {
@@ -397,6 +415,7 @@ fn find_udid(line: &str) -> Option<&str> {
     None
 }
 
+/// Invokes `uniffi-bindgen-swift` to generate Swift sources and C headers for the Rust library.
 fn generate_swift_bindings() -> Result<()> {
     println!("\nGenerating Swift UniFFI bindings...");
 
@@ -405,19 +424,12 @@ fn generate_swift_bindings() -> Result<()> {
 
     println!("Running command: cargo {}", args.join(" "));
 
-    let status = Command::new("cargo")
-        .args(args)
-        .current_dir("./rust")
-        .status()
-        .expect("failed to generate UniFFI Swift bindings");
-
-    if !status.success() {
-        return Err(anyhow!("UniFFI Swift bindings generation failed"));
-    }
-
-    Ok(())
+    let mut cmd = Command::new("cargo");
+    cmd.args(args).current_dir("./rust");
+    run_command(&mut cmd, "cargo run -p uniffi-bindgen-swift")
 }
 
+/// Builds the cargo arguments vector for invoking the Swift UniFFI bindgen binary crate.
 fn bindgen_args(lib_name: &str) -> Vec<String> {
     vec![
         "run".to_string(),
@@ -436,16 +448,20 @@ fn bindgen_args(lib_name: &str) -> Vec<String> {
     ]
 }
 
+/// Generates iOS Swift bindings by invoking [`generate_swift_bindings`].
 pub fn generate_ios_bindings() -> Result<()> {
     generate_swift_bindings()
 }
 
+/// Reads `./ios/project.yml` and returns the configured project name.
 fn get_project_name() -> Result<String> {
-    let content = fs::read_to_string("./ios/project.yml")?;
+    let content =
+        fs::read_to_string("./ios/project.yml").context("failed to read ./ios/project.yml")?;
     parse_project_name(&content)
         .ok_or_else(|| anyhow!("Could not find project name in project.yml"))
 }
 
+/// Extracts the project name from `project.yml` content.
 fn parse_project_name(project_yml: &str) -> Option<String> {
     project_yml.lines().find_map(|line| {
         line.trim()
@@ -456,12 +472,15 @@ fn parse_project_name(project_yml: &str) -> Option<String> {
     })
 }
 
+/// Reads `./ios/project.yml` and returns the `PRODUCT_BUNDLE_IDENTIFIER`.
 fn get_bundle_id() -> Result<String> {
-    let content = fs::read_to_string("./ios/project.yml")?;
+    let content =
+        fs::read_to_string("./ios/project.yml").context("failed to read ./ios/project.yml")?;
     parse_bundle_id(&content)
         .ok_or_else(|| anyhow!("Could not find PRODUCT_BUNDLE_IDENTIFIER in project.yml"))
 }
 
+/// Extracts the `PRODUCT_BUNDLE_IDENTIFIER` from `project.yml` content.
 fn parse_bundle_id(project_yml: &str) -> Option<String> {
     project_yml.lines().find_map(|line| {
         line.trim()
@@ -480,84 +499,12 @@ pub fn build_ios_debug(device: &str) -> Result<()> {
     let bundle_id = get_bundle_id()?;
     let simulator = resolve_simulator(device)?;
 
-    println!("\nBuilding rust lib...");
-    let status = Command::new("cargo")
-        .args([
-            "build",
-            "--manifest-path",
-            "./rust/Cargo.toml",
-            "--target",
-            IOS_SIM_TARGET,
-            "--features",
-            "ios",
-        ])
-        .status()
-        .expect("failed to build rust lib");
-
-    if !status.success() {
-        return Err(anyhow!("Rust build failed"));
-    }
-
-    generate_swift_bindings()?;
-
-    println!("\nGenerating Xcode project...");
-    let status = Command::new("xcodegen")
-        .arg("generate")
-        .current_dir("./ios")
-        .status()
-        .expect("failed to run xcodegen");
-
-    if !status.success() {
-        return Err(anyhow!("xcodegen failed"));
-    }
-
-    println!("\nBuilding iOS app...");
-    let status = Command::new("xcodebuild")
-        .args([
-            "-project",
-            &format!("{project}.xcodeproj"),
-            "-scheme",
-            &project,
-            "-sdk",
-            "iphonesimulator",
-            "-destination",
-            &format!("platform=iOS Simulator,id={simulator}"),
-            "-derivedDataPath",
-            "build",
-            "build",
-        ])
-        .current_dir("./ios")
-        .status()
-        .expect("failed to build iOS app");
-
-    if !status.success() {
-        return Err(anyhow!("xcodebuild failed"));
-    }
-
-    // Ignore failures here: the simulator may already be booted.
-    let _ = Command::new("xcrun")
-        .args(["simctl", "boot", &simulator])
-        .output();
-    open_simulator_app();
-
-    let app_path = format!("./ios/build/Build/Products/Debug-iphonesimulator/{project}.app");
-    let status = Command::new("xcrun")
-        .args(["simctl", "install", &simulator, &app_path])
-        .status()
-        .expect("failed to install iOS app");
-
-    if !status.success() {
-        return Err(anyhow!("failed to install iOS app"));
-    }
-
-    Command::new("xcrun")
-        .args(["simctl", "launch", &simulator, &bundle_id])
-        .status()
-        .expect("failed to launch iOS app");
-
-    println!("\niOS build done.");
-
-    Ok(())
+    build_ios(
+        &project,
+        IOS_SIM_TARGET,
+        false,
+        Some((&simulator, &bundle_id)),
+    )
 }
 
 /// Build a release app for physical devices. The resulting app is unsigned.
@@ -566,65 +513,98 @@ pub fn build_ios_release() -> Result<()> {
 
     let project = get_project_name()?;
 
-    println!("\nBuilding rust lib...");
-    let status = Command::new("cargo")
-        .args([
-            "build",
-            "--manifest-path",
-            "./rust/Cargo.toml",
-            "--target",
-            IOS_DEVICE_TARGET,
-            "--features",
-            "ios",
-            "--release",
-        ])
-        .status()
-        .expect("failed to build rust lib");
+    build_ios(&project, IOS_DEVICE_TARGET, true, None)
+}
 
-    if !status.success() {
-        return Err(anyhow!("Rust build failed"));
+/// Builds the Rust library, regenerates bindings and Xcode project, and runs `xcodebuild`.
+fn build_ios(
+    project: &str,
+    rust_target: &str,
+    release: bool,
+    launch: Option<(&str, &str)>,
+) -> Result<()> {
+    println!("\nBuilding rust lib...");
+    let mut cmd = Command::new("cargo");
+    cmd.args([
+        "build",
+        "--manifest-path",
+        "./rust/Cargo.toml",
+        "--target",
+        rust_target,
+        "--features",
+        "ios",
+    ]);
+    if release {
+        cmd.arg("--release");
     }
+    run_command(
+        &mut cmd,
+        if release {
+            "cargo build --release"
+        } else {
+            "cargo build"
+        },
+    )?;
 
     generate_swift_bindings()?;
 
     println!("\nGenerating Xcode project...");
-    let status = Command::new("xcodegen")
-        .arg("generate")
-        .current_dir("./ios")
-        .status()
-        .expect("failed to run xcodegen");
-
-    if !status.success() {
-        return Err(anyhow!("xcodegen failed"));
-    }
+    let mut cmd = Command::new("xcodegen");
+    cmd.arg("generate").current_dir("./ios");
+    run_command(&mut cmd, "xcodegen generate")?;
 
     println!("\nBuilding iOS app...");
-    let status = Command::new("xcodebuild")
-        .args([
-            "-project",
-            &format!("{project}.xcodeproj"),
-            "-scheme",
-            &project,
-            "-sdk",
-            "iphoneos",
-            "-configuration",
-            "Release",
-            "-destination",
-            "generic/platform=iOS",
-            "-derivedDataPath",
-            "build",
-            &format!("RUST_TARGET={IOS_DEVICE_TARGET}"),
-            "build",
-        ])
-        .current_dir("./ios")
-        .status()
-        .expect("failed to build iOS app");
+    let (sdk, destination) = match launch {
+        Some((simulator, _)) => (
+            "iphonesimulator",
+            format!("platform=iOS Simulator,id={simulator}"),
+        ),
+        None => ("iphoneos", "generic/platform=iOS".to_string()),
+    };
+    let mut cmd = Command::new("xcodebuild");
+    cmd.args([
+        "-project",
+        &format!("{project}.xcodeproj"),
+        "-scheme",
+        project,
+    ]);
+    cmd.args(["-sdk", sdk]);
+    if release {
+        cmd.args(["-configuration", "Release"]);
+    }
+    cmd.args(["-destination", &destination, "-derivedDataPath", "build"]);
+    if release {
+        cmd.arg(format!("RUST_TARGET={IOS_DEVICE_TARGET}"));
+    }
+    cmd.arg("build");
+    cmd.current_dir("./ios");
+    run_command(
+        &mut cmd,
+        if release {
+            "xcodebuild release"
+        } else {
+            "xcodebuild"
+        },
+    )?;
 
-    if !status.success() {
-        return Err(anyhow!("xcodebuild failed"));
+    if let Some((simulator, bundle_id)) = launch {
+        // Ignore failures here: the simulator may already be booted.
+        let _ = Command::new("xcrun")
+            .args(["simctl", "boot", simulator])
+            .output();
+        open_simulator_app();
+
+        let app_path = format!("./ios/build/Build/Products/Debug-iphonesimulator/{project}.app");
+        let mut cmd = Command::new("xcrun");
+        cmd.args(["simctl", "install", simulator, &app_path]);
+        run_command(&mut cmd, "xcrun simctl install")?;
+
+        let mut cmd = Command::new("xcrun");
+        cmd.args(["simctl", "launch", simulator, bundle_id]);
+        run_command(&mut cmd, "xcrun simctl launch")?;
     }
 
-    println!("\niOS release build done.");
+    println!("\niOS {}build done.", if release { "release " } else { "" });
 
     Ok(())
 }
@@ -644,22 +624,31 @@ mod tests {
 
     #[test]
     fn test_bundle_id() {
-        assert_eq!(bundle_id("demo"), "com.example.demo");
-        assert_eq!(bundle_id("my-app"), "com.example.my-app");
-        assert_eq!(bundle_id("my_app"), "com.example.my-app");
-        assert_eq!(bundle_id("MyApp"), "com.example.myapp");
+        assert_eq!(bundle_id("com.example", "demo"), "com.example.demo");
+        assert_eq!(bundle_id("com.example", "my-app"), "com.example.my-app");
+        assert_eq!(bundle_id("com.example", "my_app"), "com.example.my-app");
+        assert_eq!(bundle_id("com.example", "MyApp"), "com.example.myapp");
+        assert_eq!(bundle_id("io.acme", "demo"), "io.acme.demo");
     }
 
     #[test]
     fn test_project_yml() {
-        let yml = project_yml("Demo", "demo", "demo");
+        let yml = project_yml("Demo", "demo", "demo", "com.example");
         assert!(yml.contains("name: Demo"));
+        assert!(yml.contains("bundleIdPrefix: com.example"));
         assert!(yml.contains("PRODUCT_BUNDLE_IDENTIFIER: com.example.demo"));
         assert!(yml.contains("RUST_TARGET: aarch64-apple-ios-sim"));
         assert!(yml.contains("$(SRCROOT)/../rust/target/$(RUST_TARGET)/$(CONFIGURATION:lower)"));
         assert!(yml.contains("- -ldemo"));
         assert!(yml.contains("path: Generated"));
         assert!(yml.contains("$(SRCROOT)/Generated"));
+    }
+
+    #[test]
+    fn test_project_yml_custom_package() {
+        let yml = project_yml("Demo", "demo", "demo", "io.acme");
+        assert!(yml.contains("bundleIdPrefix: io.acme"));
+        assert!(yml.contains("PRODUCT_BUNDLE_IDENTIFIER: io.acme.demo"));
     }
 
     #[test]
@@ -684,14 +673,14 @@ mod tests {
 
     #[test]
     fn test_parse_project_name() {
-        let yml = project_yml("Demo", "demo", "demo");
+        let yml = project_yml("Demo", "demo", "demo", "com.example");
         assert_eq!(parse_project_name(&yml).unwrap(), "Demo");
         assert!(parse_project_name("options:\n  bundleIdPrefix: com.example\n").is_none());
     }
 
     #[test]
     fn test_parse_bundle_id() {
-        let yml = project_yml("Demo", "demo", "demo");
+        let yml = project_yml("Demo", "demo", "demo", "com.example");
         assert_eq!(parse_bundle_id(&yml).unwrap(), "com.example.demo");
         assert!(parse_bundle_id("options:\n  bundleIdPrefix: com.example\n").is_none());
     }
@@ -819,9 +808,6 @@ mod tests {
             format_ios_devices(&[], false),
             "  No online iOS devices found"
         );
-        assert_eq!(
-            format_ios_devices(&[], true),
-            "  No iOS devices found"
-        );
+        assert_eq!(format_ios_devices(&[], true), "  No iOS devices found");
     }
 }

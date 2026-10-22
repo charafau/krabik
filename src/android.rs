@@ -1,74 +1,132 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 
 use std::fs;
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command;
 
-use crate::{command_exists, rust};
+use crate::{check_mark, command_exists, run_command, rust};
 
-const ANDROID_TARGETS: [&str; 4] = [
-    "aarch64-linux-android",
-    "armv7-linux-androideabi",
-    "x86_64-linux-android",
-    "i686-linux-android",
+pub struct AndroidTarget {
+    pub arch: &'static str,
+    pub jni_folder: &'static str,
+    pub linker_env: &'static str,
+    pub clang: &'static str,
+}
+
+const ANDROID_TARGETS: [AndroidTarget; 4] = [
+    AndroidTarget {
+        arch: "aarch64-linux-android",
+        jni_folder: "arm64-v8a",
+        linker_env: "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER",
+        clang: "aarch64-linux-android",
+    },
+    AndroidTarget {
+        arch: "armv7-linux-androideabi",
+        jni_folder: "armeabi-v7a",
+        linker_env: "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER",
+        clang: "armv7a-linux-androideabi",
+    },
+    AndroidTarget {
+        arch: "x86_64-linux-android",
+        jni_folder: "x86_64",
+        linker_env: "CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER",
+        clang: "x86_64-linux-android",
+    },
+    AndroidTarget {
+        arch: "i686-linux-android",
+        jni_folder: "x86",
+        linker_env: "CARGO_TARGET_I686_LINUX_ANDROID_LINKER",
+        clang: "i686-linux-android",
+    },
 ];
 
-pub fn install_android_toolchain() {
-    Command::new("rustup")
-        .args(["target", "add"])
-        .args(ANDROID_TARGETS)
-        .status()
-        .expect("failed to run rustup");
+/// Adds required Android Rust compilation targets via `rustup target add`.
+pub fn install_android_toolchain() -> Result<()> {
+    let mut cmd = Command::new("rustup");
+    cmd.args(["target", "add"])
+        .args(ANDROID_TARGETS.iter().map(|t| t.arch));
+    run_command(&mut cmd, "rustup target add")
 }
 
-pub fn check_android() {
+/// Doctor check verifying whether the Android CLI, ANDROID_NDK_HOME, and targets are available.
+pub fn check_android() -> bool {
     println!("[Android]");
+    let mut ok = true;
+
     if command_exists("android") {
-        println!("\x1b[32m[✓]\x1b[0m android CLI is installed");
+        println!("{} android CLI is installed", check_mark(true));
     } else {
-        println!("\x1b[31m[✗]\x1b[0m android CLI is not installed");
-    };
+        println!("{} android CLI is not installed", check_mark(false));
+        ok = false;
+    }
     if std::env::var("ANDROID_NDK_HOME").is_ok() {
-        println!("\x1b[32m[✓]\x1b[0m ANDROID_NDK_HOME environment variable is set");
-    } else {
-        println!("\x1b[31m[✗]\x1b[0m ANDROID_NDK_HOME environment variable is not set");
-    };
-    for target in ANDROID_TARGETS {
         println!(
-            "{} target {target}",
-            if rust::target_installed(target) {
-                "\x1b[32m[✓]\x1b[0m"
-            } else {
-                "\x1b[31m[✗]\x1b[0m"
-            }
+            "{} ANDROID_NDK_HOME environment variable is set",
+            check_mark(true)
         );
+    } else {
+        println!(
+            "{} ANDROID_NDK_HOME environment variable is not set",
+            check_mark(false)
+        );
+        ok = false;
     }
+    for target in ANDROID_TARGETS {
+        let installed = rust::target_installed(target.arch);
+        println!("{} target {}", check_mark(installed), target.arch);
+        ok &= installed;
+    }
+    ok
 }
 
-const ANDROID_JNI_FOLDERS: [&str; 4] = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"];
+/// Creates the Android project template, cleans up default files, and configures jniLibs and MainActivity.
+pub fn create_android(name: &str, package_prefix: &str) -> Result<()> {
+    let mut cmd = Command::new("android");
+    cmd.args([
+        "create",
+        "--name",
+        name,
+        "-o",
+        &format!("./{name}/android/"),
+    ]);
+    run_command(&mut cmd, "android create")?;
 
-pub fn create_android(name: &str) {
-    Command::new("android")
-        .args([
-            "create",
-            "--name",
+    remove_kotlin_files(format!("./{name}/android")).context("failed to remove Kotlin files")?;
+
+    if package_prefix != "com.example" {
+        set_android_package(
+            &format!("./{name}/android/app/build.gradle.kts"),
             name,
-            "-o",
-            &format!("./{name}/android/"),
-        ])
-        .status()
-        .expect("failed to run android CLI");
-
-    remove_kotlin_files(format!("./{name}/android")).expect("failed to remove kotlin files");
-
-    for folder in ANDROID_JNI_FOLDERS {
-        let path = format!("./{name}/android/app/src/main/jniLibs/{folder}");
-        fs::create_dir_all(path).expect("failed to create directory");
+            package_prefix,
+        )?;
     }
 
-    create_main_activity(name).expect("failed to create main activity");
+    for target in ANDROID_TARGETS {
+        let path = format!(
+            "./{name}/android/app/src/main/jniLibs/{}",
+            target.jni_folder
+        );
+        fs::create_dir_all(&path).with_context(|| format!("failed to create {path}"))?;
+    }
+
+    create_main_activity(name, package_prefix).context("failed to create MainActivity")?;
+
+    Ok(())
 }
 
+/// Rewrite the package generated by `android create` (namespace + applicationId)
+/// in the given build.gradle.kts to `{package_prefix}.{name}`.
+fn set_android_package(gradle_path: &str, name: &str, package_prefix: &str) -> Result<()> {
+    let gradle =
+        fs::read_to_string(gradle_path).with_context(|| format!("failed to read {gradle_path}"))?;
+    let old_package = parse_android_package_name(&gradle)?;
+    let new_package = format!("{package_prefix}.{name}");
+    fs::write(gradle_path, gradle.replace(&old_package, &new_package))
+        .with_context(|| format!("failed to write {gradle_path}"))
+}
+
+/// The `android create` command creates a template with sample Kotlin files; this removes them.
 fn remove_kotlin_files<P: AsRef<Path>>(path: P) -> Result<()> {
     let path = path.as_ref();
     if !path.exists() {
@@ -97,14 +155,16 @@ fn remove_kotlin_files<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
-fn create_main_activity(name: &str) -> Result<()> {
+/// Creates the Android `MainActivity` and layout XML that load the Rust shared library and display a greeting.
+fn create_main_activity(name: &str, package_prefix: &str) -> Result<()> {
     // 1. Update rust/src/lib.rs with UniFFI proc macros
     let lib_rs_path = format!("./{name}/rust/src/lib.rs");
-    fs::write(&lib_rs_path, RUST_LIB_CONTENT)?;
+    fs::write(&lib_rs_path, RUST_LIB_CONTENT)
+        .with_context(|| format!("failed to write {lib_rs_path}"))?;
 
     // 2. Create activity_main.xml layout with LinearLayout and TextView
     let layout_dir = format!("./{name}/android/app/src/main/res/layout");
-    fs::create_dir_all(&layout_dir)?;
+    fs::create_dir_all(&layout_dir).with_context(|| format!("failed to create {layout_dir}"))?;
     let layout_xml_path = format!("{layout_dir}/activity_main.xml");
     let layout_content = r#"<?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -125,20 +185,24 @@ fn create_main_activity(name: &str) -> Result<()> {
 
 </LinearLayout>
 "#;
-    fs::write(&layout_xml_path, layout_content)?;
+    fs::write(&layout_xml_path, layout_content)
+        .with_context(|| format!("failed to write {layout_xml_path}"))?;
 
     // 3. Create MainActivity.kt to load the Rust library and set layout text
-    let main_activity_dir = format!("./{name}/android/app/src/main/java/com/example/{name}");
-    fs::create_dir_all(&main_activity_dir)?;
+    let main_activity_dir = format!(
+        "./{name}/android/app/src/main/java/{}/{name}",
+        package_prefix.replace('.', "/")
+    );
+    fs::create_dir_all(&main_activity_dir)
+        .with_context(|| format!("failed to create {main_activity_dir}"))?;
     let main_activity_path = format!("{main_activity_dir}/MainActivity.kt");
-    fs::write(&main_activity_path, main_activity_content(name))?;
+    fs::write(
+        &main_activity_path,
+        main_activity_content(name, package_prefix),
+    )
+    .with_context(|| format!("failed to write {main_activity_path}"))?;
 
     Ok(())
-}
-
-#[allow(dead_code)]
-fn modify_main_activity(name: &str) -> Result<()> {
-    create_main_activity(name)
 }
 
 const RUST_LIB_CONTENT: &str = r#"uniffi::setup_scaffolding!();
@@ -151,10 +215,11 @@ pub fn get_greeting() -> String {
 }
 "#;
 
-fn main_activity_content(name: &str) -> String {
+/// Generates the Kotlin source code for `MainActivity` loading and calling the Rust library.
+fn main_activity_content(name: &str, package_prefix: &str) -> String {
     let rust_lib_name = name.replace('-', "_");
     format!(
-        r#"package com.example.{name}
+        r#"package {package_prefix}.{name}
 
 import android.app.Activity
 import android.os.Bundle
@@ -175,6 +240,7 @@ class MainActivity : Activity() {{
     )
 }
 
+/// Android device information.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct AndroidDevice {
     pub name: String,
@@ -182,6 +248,8 @@ pub struct AndroidDevice {
     pub state: String,
 }
 
+/// Lists connected Android devices and running emulators using `adb devices -l`.
+/// If `all` is true, offline AVD emulators are also queried and listed.
 pub fn list_android_devices(all: bool) {
     println!("Available Android Devices:\n");
 
@@ -204,6 +272,7 @@ pub fn list_android_devices(all: bool) {
     println!("{}", format_android_devices(&devices, all));
 }
 
+/// Queries `adb devices -l` and returns a list of online Android devices and emulators.
 fn get_online_android_devices() -> Vec<AndroidDevice> {
     let output = Command::new("adb").args(["devices", "-l"]).output();
     let stdout = match output {
@@ -231,6 +300,7 @@ fn get_online_android_devices() -> Vec<AndroidDevice> {
     devices
 }
 
+/// Queries the AVD name for an emulator serial via `adb -s <serial> emu avd name`.
 fn get_emulator_avd_name(serial: &str) -> Option<String> {
     let output = Command::new("adb")
         .args(["-s", serial, "emu", "avd", "name"])
@@ -247,6 +317,7 @@ fn get_emulator_avd_name(serial: &str) -> Option<String> {
     None
 }
 
+/// Queries the Android CLI for known emulator AVD names.
 fn get_offline_android_emulators() -> Vec<String> {
     let output = Command::new("android").args(["emulator", "list"]).output();
     let stdout = match output {
@@ -257,14 +328,13 @@ fn get_offline_android_emulators() -> Vec<String> {
     parse_emulator_list(&stdout)
 }
 
+/// Parses the stdout of `adb devices -l` into a vector of [`AndroidDevice`].
 fn parse_adb_devices(output: &str) -> Vec<AndroidDevice> {
     let mut devices = Vec::new();
 
     for line in output.lines() {
         let line = line.trim();
-        if line.is_empty()
-            || line.starts_with("List of devices attached")
-            || line.starts_with('*')
+        if line.is_empty() || line.starts_with("List of devices attached") || line.starts_with('*')
         {
             continue;
         }
@@ -294,6 +364,7 @@ fn parse_adb_devices(output: &str) -> Vec<AndroidDevice> {
     devices
 }
 
+/// Parses output from `android emulator list` into a list of AVD names.
 fn parse_emulator_list(output: &str) -> Vec<String> {
     output
         .lines()
@@ -302,6 +373,7 @@ fn parse_emulator_list(output: &str) -> Vec<String> {
         .collect()
 }
 
+/// Formats a slice of [`AndroidDevice`] into a user-friendly list string.
 fn format_android_devices(devices: &[AndroidDevice], all: bool) -> String {
     if devices.is_empty() {
         if all {
@@ -321,77 +393,147 @@ fn format_android_devices(devices: &[AndroidDevice], all: bool) -> String {
         .join("\n")
 }
 
-pub fn launch_android_emulator(name: &str) {
-    println!("Launching Adnroid Emulator...\n");
-    Command::new("android")
-        .args(["emulator", "start", name])
-        .status()
-        .expect("failed to launch emulator");
+/// Starts an Android emulator by name via `android emulator start <name>`.
+pub fn launch_android_emulator(name: &str) -> Result<()> {
+    println!("Launching Android Emulator...\n");
+    let mut cmd = Command::new("android");
+    cmd.args(["emulator", "start", name]);
+    run_command(&mut cmd, "android emulator start")
 }
 
-//NDK_TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin"
+/// Resolve the adb serial of the device to run on.
+/// Matches by model/AVD name or serial when `wanted` is given; otherwise picks the
+/// only online device, or prompts interactively when several are online.
+fn resolve_android_device(wanted: Option<&str>) -> Result<String> {
+    let devices: Vec<(String, String)> = get_online_android_devices()
+        .into_iter()
+        .filter(|d| d.state == "online")
+        .map(|d| {
+            let serial = d.id.clone().unwrap_or_else(|| d.name.clone());
+            (d.name, serial)
+        })
+        .collect();
 
-// for now only this for debug
-// export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$NDK_TOOLCHAIN/aarch64-linux-android28-clang"
-// export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$NDK_TOOLCHAIN/armv7a-linux-androideabi28-clang"
-// export CARGO_TARGET_I686_LINUX_ANDROID_LINKER="$NDK_TOOLCHAIN/i686-linux-android28-clang"
-// export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$NDK_TOOLCHAIN/x86_64-linux-android28-clang"
+    let index = select_device_index(&devices, wanted)?;
+    Ok(devices[index].1.clone())
+}
 
-const ANDROID_NDK_LINKERS: [(&str, &str); 4] = [
-    (
-        "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER",
-        "aarch64-linux-android",
-    ),
-    (
-        "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER",
-        "armv7a-linux-androideabi",
-    ),
-    (
-        "CARGO_TARGET_I686_LINUX_ANDROID_LINKER",
-        "i686-linux-android",
-    ),
-    (
-        "CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER",
-        "x86_64-linux-android",
-    ),
-];
+/// Selects a device from the list, prompting the user interactively if multiple devices are available.
+fn select_device_index(devices: &[(String, String)], wanted: Option<&str>) -> Result<usize> {
+    if let Some(wanted) = wanted {
+        return devices
+            .iter()
+            .position(|(name, serial)| name == wanted || serial == wanted)
+            .ok_or_else(|| anyhow!("no online Android device named {wanted}"));
+    }
 
+    match devices.len() {
+        0 => Err(anyhow!(
+            "no online Android devices found; connect a device or start an emulator"
+        )),
+        1 => Ok(0),
+        _ => {
+            println!("More than one Android device is online:");
+            for (i, (name, serial)) in devices.iter().enumerate() {
+                println!("  {}. {name} ({serial})", i + 1);
+            }
+            print!("\nSelect a device [1-{}]: ", devices.len());
+            io::stdout()
+                .flush()
+                .context("failed to flush device prompt")?;
+
+            let mut input = String::new();
+            io::stdin()
+                .read_line(&mut input)
+                .context("failed to read device selection")?;
+            let index = parse_device_selection(&input, devices.len())?;
+            Ok(index - 1)
+        }
+    }
+}
+
+/// Parses a 1-based numerical device selection string from user input.
+fn parse_device_selection(input: &str, count: usize) -> Result<usize> {
+    let selection: usize = input
+        .trim()
+        .parse()
+        .map_err(|_| anyhow!("invalid device selection: {}", input.trim()))?;
+    if selection == 0 || selection > count {
+        return Err(anyhow!(
+            "device selection {selection} is out of range 1-{count}"
+        ));
+    }
+    Ok(selection)
+}
+
+const ANDROID_API_LEVEL: u32 = 24;
+
+/// Maps Cargo linker environment variables to NDK clang compiler names for the given SDK level.
 fn get_ndk_toolchain_compilers(
     sdk_version: u32,
-) -> Result<std::collections::HashMap<&'static str, String>> {
+) -> std::collections::HashMap<&'static str, String> {
     let mut compilers = std::collections::HashMap::new();
 
-    for (env_var, compiler_prefix) in ANDROID_NDK_LINKERS {
-        compilers.insert(env_var, format!("{compiler_prefix}{sdk_version}-clang"));
+    for target in ANDROID_TARGETS {
+        compilers.insert(
+            target.linker_env,
+            format!("{}{sdk_version}-clang", target.clang),
+        );
     }
 
-    Ok(compilers)
+    compilers
 }
 
-fn export_ndk_variables() -> Result<()> {
-    if std::env::var("ANDROID_NDK_HOME").is_ok() {
-        let ndk_root = std::env::var("ANDROID_NDK_HOME").expect("ANDROID_NDK_HOME not set");
+/// Locates the NDK toolchain and returns the map of Cargo linker environment variables.
+fn ndk_linker_env() -> Result<std::collections::HashMap<&'static str, String>> {
+    let ndk_root = std::env::var("ANDROID_NDK_HOME")
+        .map_err(|_| anyhow!("ANDROID_NDK_HOME is not set; point it at your Android NDK"))?;
+    let prebuilt = find_ndk_prebuilt(&ndk_root)?;
 
-        for (linker, compiler) in get_ndk_toolchain_compilers(28)? {
-            unsafe {
-                //TODO: support linux and windows
-                let compiler_path =
-                    format!("{ndk_root}/toolchains/llvm/prebuilt/darwin-x86_64/bin/{compiler}");
-                println!(
-                    "Setting enviroment variable: linker: {} ; value: {}",
-                    linker, compiler_path
-                );
+    Ok(get_ndk_toolchain_compilers(ANDROID_API_LEVEL)
+        .into_iter()
+        .map(|(env_var, compiler)| {
+            (
+                env_var,
+                format!("{ndk_root}/toolchains/llvm/prebuilt/{prebuilt}/bin/{compiler}"),
+            )
+        })
+        .collect())
+}
 
-                std::env::set_var(linker, compiler_path.clone());
-            }
-        }
-
-        Ok(())
+/// Locates the prebuilt host toolchain directory inside `$ANDROID_NDK_HOME`.
+fn find_ndk_prebuilt(ndk_root: &str) -> Result<String> {
+    let prebuilt_dir = format!("{ndk_root}/toolchains/llvm/prebuilt");
+    let host = if cfg!(target_os = "macos") {
+        "darwin"
+    } else if cfg!(target_os = "windows") {
+        "windows"
     } else {
-        Err(anyhow!("Android NDK not found"))
-    }
+        "linux"
+    };
+
+    let entries: Vec<String> = fs::read_dir(&prebuilt_dir)
+        .with_context(|| format!("NDK toolchains not found at {prebuilt_dir}"))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(host))
+        .collect();
+
+    let arch = if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "x86_64"
+    };
+
+    entries
+        .iter()
+        .find(|name| name.contains(arch))
+        .or_else(|| entries.first())
+        .cloned()
+        .ok_or_else(|| anyhow!("no {host} prebuilt toolchain in {prebuilt_dir}"))
 }
 
+/// Extracts the Android package identifier (namespace or applicationId) from `build.gradle.kts`.
 fn parse_android_package_name(content: &str) -> Result<String> {
     for line in content.lines() {
         let line = line.trim();
@@ -411,30 +553,30 @@ fn parse_android_package_name(content: &str) -> Result<String> {
         }
     }
 
-    Err(anyhow!("Could not find Android package name in build.gradle.kts"))
+    Err(anyhow!(
+        "Could not find Android package name in build.gradle.kts"
+    ))
 }
 
+/// Reads `./android/app/build.gradle.kts` and returns the parsed Android package identifier.
 fn get_android_package_name() -> Result<String> {
-    let content = fs::read_to_string("./android/app/build.gradle.kts")?;
+    let content = fs::read_to_string("./android/app/build.gradle.kts")
+        .context("failed to read ./android/app/build.gradle.kts")?;
     parse_android_package_name(&content)
 }
 
-fn launch_android_app(device: Option<&str>) -> Result<()> {
+/// Launches the app on a connected Android device or emulator using `adb shell am start`.
+fn launch_android_app(serial: &str) -> Result<()> {
     let package_name = get_android_package_name()?;
     println!("\nLaunching app {package_name} via adb...");
 
     let activity = format!("{package_name}/{package_name}.MainActivity");
     let mut cmd = Command::new("adb");
-
-    let _ = device;
-
-    // TODO - if more than 1 device, print a list and ask user to select one
-    cmd.args(["shell", "am", "start", "-n", &activity]);
-    cmd.status().expect("failed to launch app via adb");
-
-    Ok(())
+    cmd.args(["-s", serial, "shell", "am", "start", "-n", &activity]);
+    run_command(&mut cmd, "adb shell am start")
 }
 
+/// Generates Kotlin UniFFI bindings using `uniffi-bindgen`.
 fn generate_kotlin_bindings() -> Result<()> {
     println!("\nGenerating Kotlin UniFFI bindings...");
 
@@ -445,19 +587,12 @@ fn generate_kotlin_bindings() -> Result<()> {
 
     println!("Running command: cargo {}", args.join(" "));
 
-    let status = Command::new("cargo")
-        .args(args)
-        .current_dir("./rust")
-        .status()
-        .expect("failed to generate UniFFI bindings");
-
-    if !status.success() {
-        return Err(anyhow!("UniFFI bindings generation failed"));
-    }
-
-    Ok(())
+    let mut cmd = Command::new("cargo");
+    cmd.args(args).current_dir("./rust");
+    run_command(&mut cmd, "cargo run -p uniffi-bindgen")
 }
 
+/// Builds the cargo command arguments for generating Kotlin UniFFI bindings.
 fn bindgen_args(lib_name: &str) -> Vec<String> {
     [
         "run",
@@ -472,115 +607,109 @@ fn bindgen_args(lib_name: &str) -> Vec<String> {
     .to_vec()
 }
 
-/// builds Android library (only debug), one target
-pub fn build_android_debug(name: &str) -> Result<()> {
+/// Builds the Rust library for ARM64 debug, generates Kotlin bindings, installs, and launches the app.
+pub fn build_android_debug(device: &str) -> Result<()> {
     println!("\nBuilding android...");
 
-    if std::env::var("ANDROID_NDK_HOME").is_ok() {
-        // let ndk_toolchain_path = std::env::var("ANDROID_NDK_HOME")? + "/aarch64-linux-android28-clang";
-        export_ndk_variables()?;
-
-        // cargo build --release --manifest-path "$RUST_DIR/Cargo.toml" --target aarch64-linux-android
-
-        println!("\nBuilding rust lib...");
-        Command::new("cargo")
-            .args([
-                "build",
-                "--manifest-path",
-                "./rust/Cargo.toml",
-                "--target",
-                "aarch64-linux-android",
-            ])
-            .status()
-            .expect("failed to build");
-
-        // Copy rust libs
-        let lib_name = rust::get_lib_name()?;
-
-        let so_filename = format!("lib{lib_name}.so");
-        let src_path = format!("./rust/target/aarch64-linux-android/debug/{so_filename}");
-        let dst_dir = "android/app/src/main/jniLibs/arm64-v8a";
-
-        fs::create_dir_all(dst_dir)?;
-        fs::copy(&src_path, format!("{dst_dir}/{so_filename}"))?;
-
-        generate_kotlin_bindings()?;
-
-        // Compile Android project
-        Command::new("./android/gradlew")
-            .args(["-p", "android", "app:installDebug"])
-            .status()
-            .expect("failed to build android project");
-
-        println!("\nAndroid build done.");
-
-        // Launch apk
-        launch_android_app(if name.is_empty() { None } else { Some(name) })?;
-
-        Ok(())
+    let wanted = if device.is_empty() {
+        None
     } else {
-        Err(anyhow!("Android NDK not found"))
-    }
+        Some(device)
+    };
+    let serial = resolve_android_device(wanted)?;
 
-    // fs::copy(, to)
+    let ndk_linkers = ndk_linker_env()?;
 
-    // add gradle launch
+    println!("\nBuilding rust lib...");
+    let mut cmd = Command::new("cargo");
+    cmd.args([
+        "build",
+        "--manifest-path",
+        "./rust/Cargo.toml",
+        "--target",
+        "aarch64-linux-android",
+    ])
+    .envs(&ndk_linkers);
+    run_command(&mut cmd, "cargo build")?;
+
+    // Copy rust libs
+    let lib_name = rust::get_lib_name()?;
+
+    let so_filename = format!("lib{lib_name}.so");
+    let src_path = format!("./rust/target/aarch64-linux-android/debug/{so_filename}");
+    let dst_dir = "android/app/src/main/jniLibs/arm64-v8a";
+
+    fs::create_dir_all(dst_dir).with_context(|| format!("failed to create {dst_dir}"))?;
+    fs::copy(&src_path, format!("{dst_dir}/{so_filename}"))
+        .with_context(|| format!("failed to copy {src_path} to {dst_dir}"))?;
+
+    generate_kotlin_bindings()?;
+
+    // Compile Android project
+    let mut gradle = Command::new("./android/gradlew");
+    gradle
+        .args(["-p", "android", "app:installDebug"])
+        .env("ANDROID_SERIAL", &serial);
+    run_command(&mut gradle, "gradlew app:installDebug")?;
+
+    println!("\nAndroid build done.");
+
+    launch_android_app(&serial)?;
+
+    Ok(())
 }
 
+/// Builds release Rust shared libraries for all Android targets, generates bindings, and assembles the release APK.
 pub fn build_android_release() -> Result<()> {
     println!("\nBuilding android release...");
 
-    if std::env::var("ANDROID_NDK_HOME").is_ok() {
-        export_ndk_variables()?;
+    let ndk_linkers = ndk_linker_env()?;
 
-        println!("\nBuilding rust lib...");
+    println!("\nBuilding rust lib...");
 
-        let lib_name = rust::get_lib_name()?;
-        let so_filename = format!("lib{lib_name}.so");
+    let lib_name = rust::get_lib_name()?;
+    let so_filename = format!("lib{lib_name}.so");
 
-        for target in ANDROID_TARGETS {
-            Command::new("cargo")
-                .args([
-                    "build",
-                    "--manifest-path",
-                    "./rust/Cargo.toml",
-                    "--target",
-                    target,
-                    "--release",
-                ])
-                .status()
-                .expect("failed to build");
+    for target in ANDROID_TARGETS {
+        let mut cmd = Command::new("cargo");
+        cmd.args([
+            "build",
+            "--manifest-path",
+            "./rust/Cargo.toml",
+            "--target",
+            target.arch,
+            "--release",
+        ])
+        .envs(&ndk_linkers);
+        run_command(
+            &mut cmd,
+            &format!("cargo build --release --target {}", target.arch),
+        )?;
 
-            let Some(jni_folder) = jni_folder_for_target(target) else {
-                continue;
-            };
+        let src_path = format!("./rust/target/{}/release/{so_filename}", target.arch);
+        let dst_dir = format!("android/app/src/main/jniLibs/{}", target.jni_folder);
 
-            let src_path = format!("./rust/target/{target}/release/{so_filename}");
-            let dst_dir = format!("android/app/src/main/jniLibs/{jni_folder}");
-
-            fs::create_dir_all(&dst_dir)?;
-            fs::copy(&src_path, format!("{dst_dir}/{so_filename}"))?;
-            println!("\nAndroid build for {target} done.");
-        }
-
-        Ok(())
-    } else {
-        Err(anyhow!("Android NDK not found"))
+        fs::create_dir_all(&dst_dir).with_context(|| format!("failed to create {dst_dir}"))?;
+        fs::copy(&src_path, format!("{dst_dir}/{so_filename}"))
+            .with_context(|| format!("failed to copy {src_path} to {dst_dir}"))?;
+        println!("\nAndroid build for {} done.", target.arch);
     }
+
+    generate_kotlin_bindings()?;
+
+    println!("\nBuilding release APK...");
+    let mut gradle = Command::new("./android/gradlew");
+    gradle.args(["-p", "android", "app:assembleRelease"]);
+    run_command(&mut gradle, "gradlew app:assembleRelease")?;
+
+    println!(
+        "\nAndroid release APK: android/app/build/outputs/apk/release/app-release-unsigned.apk"
+    );
+
+    Ok(())
 }
 
-fn jni_folder_for_target(target: &str) -> Option<&'static str> {
-    match target {
-        "aarch64-linux-android" => Some("arm64-v8a"),
-        "armv7-linux-androideabi" => Some("armeabi-v7a"),
-        "x86_64-linux-android" => Some("x86_64"),
-        "i686-linux-android" => Some("x86"),
-        _ => None,
-    }
-}
-
-//TODO: add build_android_release
-
+/// Generates Android Kotlin bindings by invoking [`generate_kotlin_bindings`].
 pub fn generate_android_bindings() -> Result<()> {
     generate_kotlin_bindings()
 }
@@ -646,19 +775,28 @@ dependencies {
     #[test]
     fn test_parse_android_package_name_groovy() {
         let gradle = "android {\n    namespace 'com.example.groovy'\n}\n";
-        assert_eq!(parse_android_package_name(gradle).unwrap(), "com.example.groovy");
+        assert_eq!(
+            parse_android_package_name(gradle).unwrap(),
+            "com.example.groovy"
+        );
     }
 
     #[test]
     fn test_parse_android_package_name_application_id_only() {
         let gradle = "defaultConfig {\n    applicationId = \"com.example.appid\"\n}\n";
-        assert_eq!(parse_android_package_name(gradle).unwrap(), "com.example.appid");
+        assert_eq!(
+            parse_android_package_name(gradle).unwrap(),
+            "com.example.appid"
+        );
     }
 
     #[test]
     fn test_parse_android_package_name_skips_empty_value() {
         let gradle = "namespace = \"\"\napplicationId = \"com.example.fallback\"\n";
-        assert_eq!(parse_android_package_name(gradle).unwrap(), "com.example.fallback");
+        assert_eq!(
+            parse_android_package_name(gradle).unwrap(),
+            "com.example.fallback"
+        );
     }
 
     #[test]
@@ -668,7 +806,7 @@ dependencies {
 
     #[test]
     fn test_get_ndk_toolchain_compilers() {
-        let compilers = get_ndk_toolchain_compilers(28).unwrap();
+        let compilers = get_ndk_toolchain_compilers(28);
         assert_eq!(compilers.len(), 4);
         assert_eq!(
             compilers["CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"],
@@ -694,29 +832,24 @@ dependencies {
         for target in ANDROID_TARGETS {
             let env_var = format!(
                 "CARGO_TARGET_{}_LINKER",
-                target.to_uppercase().replace('-', "_")
+                target.arch.to_uppercase().replace('-', "_")
             );
-            assert!(
-                ANDROID_NDK_LINKERS.iter().any(|(var, _)| *var == env_var),
-                "missing linker for {target}"
-            );
+            assert_eq!(target.linker_env, env_var, "{}", target.arch);
         }
     }
 
     #[test]
-    fn test_jni_folder_for_target() {
-        assert_eq!(jni_folder_for_target("aarch64-linux-android"), Some("arm64-v8a"));
-        assert_eq!(jni_folder_for_target("armv7-linux-androideabi"), Some("armeabi-v7a"));
-        assert_eq!(jni_folder_for_target("x86_64-linux-android"), Some("x86_64"));
-        assert_eq!(jni_folder_for_target("i686-linux-android"), Some("x86"));
-        assert_eq!(jni_folder_for_target("aarch64-apple-ios"), None);
-    }
-
-    #[test]
-    fn test_every_target_has_jni_folder() {
-        for target in ANDROID_TARGETS {
-            let folder = jni_folder_for_target(target).unwrap();
-            assert!(ANDROID_JNI_FOLDERS.contains(&folder), "{folder}");
+    fn test_android_target_table() {
+        let expected = [
+            ("aarch64-linux-android", "arm64-v8a"),
+            ("armv7-linux-androideabi", "armeabi-v7a"),
+            ("x86_64-linux-android", "x86_64"),
+            ("i686-linux-android", "x86"),
+        ];
+        assert_eq!(ANDROID_TARGETS.len(), expected.len());
+        for (target, (triple, folder)) in ANDROID_TARGETS.iter().zip(expected) {
+            assert_eq!(target.arch, triple);
+            assert_eq!(target.jni_folder, folder, "{triple}");
         }
     }
 
@@ -738,7 +871,7 @@ dependencies {
 
     #[test]
     fn test_main_activity_content() {
-        let kt = main_activity_content("demo");
+        let kt = main_activity_content("demo", "com.example");
         assert!(kt.starts_with("package com.example.demo\n"));
         assert!(kt.contains("import uniffi.demo.getGreeting"));
         assert!(kt.contains("tv.text = getGreeting()"));
@@ -747,9 +880,37 @@ dependencies {
     }
 
     #[test]
+    fn test_main_activity_content_custom_package() {
+        let kt = main_activity_content("demo", "io.acme");
+        assert!(kt.starts_with("package io.acme.demo\n"));
+        assert!(kt.contains("import uniffi.demo.getGreeting"));
+    }
+
+    #[test]
     fn test_main_activity_content_hyphenated_name() {
-        let kt = main_activity_content("my-app");
+        let kt = main_activity_content("my-app", "com.example");
         assert!(kt.contains("import uniffi.my_app.getGreeting"));
+    }
+
+    #[test]
+    fn test_set_android_package() {
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("test_pkg_{unique_id}.gradle.kts"));
+        fs::write(
+            &path,
+            "android {\n    namespace = \"com.example.demo\"\n    defaultConfig {\n        applicationId = \"com.example.demo\"\n    }\n}\n",
+        )
+        .unwrap();
+
+        set_android_package(path.to_str().unwrap(), "demo", "io.acme").unwrap();
+
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content.matches("io.acme.demo").count(), 2);
+        assert!(!content.contains("com.example"));
+        fs::remove_file(&path).unwrap();
     }
 
     #[test]
@@ -795,14 +956,23 @@ dependencies {
 
         assert!(!kt_file1.exists(), "MainActivity.kt should be removed");
         assert!(!kt_file2.exists(), "Theme.kt should be removed");
-        assert!(!sub_dir.exists(), "empty theme package directory should be removed");
+        assert!(
+            !sub_dir.exists(),
+            "empty theme package directory should be removed"
+        );
         assert!(
             !temp_dir.join("app/src/main/java").exists(),
             "empty java directory tree should be removed"
         );
         assert!(kts_file.exists(), "build.gradle.kts should NOT be removed");
-        assert!(xml_file.exists(), "AndroidManifest.xml should NOT be removed");
-        assert!(res_dir.exists(), "directory with non-kt files should NOT be removed");
+        assert!(
+            xml_file.exists(),
+            "AndroidManifest.xml should NOT be removed"
+        );
+        assert!(
+            res_dir.exists(),
+            "directory with non-kt files should NOT be removed"
+        );
         assert!(jni_dir.exists(), "jniLibs directory should be preserved");
 
         let _ = fs::remove_dir_all(&temp_dir);
@@ -867,5 +1037,74 @@ dependencies {
             format_android_devices(&[], true),
             "  No Android devices found"
         );
+    }
+
+    #[test]
+    fn test_parse_device_selection() {
+        assert_eq!(parse_device_selection("1\n", 3).unwrap(), 1);
+        assert_eq!(parse_device_selection("3", 3).unwrap(), 3);
+        assert!(parse_device_selection("0", 3).is_err());
+        assert!(parse_device_selection("4", 3).is_err());
+        assert!(parse_device_selection("abc", 3).is_err());
+        assert!(parse_device_selection("", 3).is_err());
+    }
+
+    #[test]
+    fn test_select_device_index_by_name_or_serial() {
+        let devices = vec![
+            ("Pixel_7".to_string(), "SERIAL1".to_string()),
+            ("emulator".to_string(), "emulator-5554".to_string()),
+        ];
+        assert_eq!(select_device_index(&devices, Some("Pixel_7")).unwrap(), 0);
+        assert_eq!(
+            select_device_index(&devices, Some("emulator-5554")).unwrap(),
+            1
+        );
+        assert!(select_device_index(&devices, Some("Nope")).is_err());
+    }
+
+    #[test]
+    fn test_select_device_index_defaults_to_single_device() {
+        let devices = vec![("only".to_string(), "SERIAL".to_string())];
+        assert_eq!(select_device_index(&devices, None).unwrap(), 0);
+        assert!(select_device_index(&[], None).is_err());
+    }
+
+    #[test]
+    fn test_find_ndk_prebuilt_missing_ndk() {
+        let missing = std::env::temp_dir().join("ndk_prebuilt_missing_test_12345");
+        assert!(find_ndk_prebuilt(missing.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn test_find_ndk_prebuilt_prefers_host_arch() {
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("test_ndk_prebuilt_{unique_id}"));
+        let prebuilt = temp_dir.join("toolchains/llvm/prebuilt");
+
+        let host = if cfg!(target_os = "macos") {
+            "darwin"
+        } else if cfg!(target_os = "windows") {
+            "windows"
+        } else {
+            "linux"
+        };
+        let arch = if cfg!(target_arch = "aarch64") {
+            "arm64"
+        } else {
+            "x86_64"
+        };
+
+        fs::create_dir_all(prebuilt.join(format!("{host}-other-arch"))).unwrap();
+        fs::create_dir_all(prebuilt.join(format!("{host}-{arch}"))).unwrap();
+        fs::create_dir_all(prebuilt.join("foreign-host")).unwrap();
+
+        let found = find_ndk_prebuilt(temp_dir.to_str().unwrap()).unwrap();
+        assert_eq!(found, format!("{host}-{arch}"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }
