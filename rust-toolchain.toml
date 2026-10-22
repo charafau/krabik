@@ -1,0 +1,8 @@
+# The toolchain this project is built with.
+#
+# Conventions beat configuration: everyone who checks out the repository gets
+# the same toolchain and the same components, without having to set anything
+# up. The minimum supported version is pinned in Cargo.toml as `rust-version`.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

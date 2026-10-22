@@ -1,3 +1,5 @@
+//! Tests for the command line interface of `mobile_cli`.
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;

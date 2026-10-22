@@ -1,3 +1,9 @@
+//! Scaffold and build cross-platform Rust mobile apps with UniFFI.
+//!
+//! The CLI lives in [`run`], which dispatches the parsed [`Args`] to the
+//! platform modules. The logic is in the library so that it can be tested
+//! without spawning a process.
+
 pub mod android;
 pub mod ios;
 pub mod naming;
@@ -102,19 +108,25 @@ pub(crate) fn run_command(cmd: &mut Command, what: &str) -> Result<()> {
     Ok(())
 }
 
+/// The command line arguments of the CLI.
 #[derive(Parser)]
 #[command(version, about, long_about=None)]
 pub struct Args {
+    /// The command to run.
     #[command(subcommand)]
     pub command: Commands,
 }
 
+/// The mobile platform a command applies to.
 #[derive(Clone, Copy, ValueEnum)]
 pub enum Platform {
+    /// Android, using Gradle and the Android NDK.
     Android,
+    /// iOS, using Xcode and XcodeGen.
     Ios,
 }
 
+/// The commands of the CLI.
 #[derive(Subcommand)]
 pub enum Commands {
     /// Check the development environment
@@ -135,21 +147,26 @@ pub enum Commands {
 
     /// List available devices (use -a / --all to include offline devices too)
     Devices {
+        /// Include devices that are not online.
         #[arg(short, long, visible_alias = "offline")]
         all: bool,
     },
 
     /// Launch given emulator
     Launch {
+        /// The name of the emulator or simulator to boot.
         emulator: String,
+        /// The platform the emulator belongs to.
         #[arg(long, value_enum, default_value_t = Platform::Android)]
         platform: Platform,
     },
 
     /// Run on given device (build and launch)
     Run {
+        /// The device to run on. The only online device is used when omitted.
         #[arg(default_value = "")]
         device: String,
+        /// The platform of the device.
         #[arg(long, value_enum, default_value_t = Platform::Android)]
         platform: Platform,
         /// Build for this ABI instead of the one of the device (Android only)
@@ -159,12 +176,14 @@ pub enum Commands {
 
     /// Build release build
     Release {
+        /// The platform to build for.
         #[arg(long, value_enum, default_value_t = Platform::Android)]
         platform: Platform,
     },
 
     /// Generate UniFFI bindings
     Bindings {
+        /// The platform to generate the bindings for.
         #[arg(long, value_enum, default_value_t = Platform::Android)]
         platform: Platform,
     },
@@ -175,6 +194,13 @@ fn create_project(project: &ProjectName, package_prefix: &str, root: &Path) -> R
     rust::create_rust(project, root)?;
     android::create_android(project, package_prefix, root)?;
     ios::create_ios(project, package_prefix, root)?;
+
+    // The project declares the targets it needs, so it does not depend on the
+    // machine being set up beforehand.
+    let mut targets: Vec<&str> = android::ANDROID_TARGETS.iter().map(|t| t.arch).collect();
+    targets.extend(ios::IOS_TARGETS.iter().copied());
+    rust::write_toolchain_file(root, &targets)?;
+
     Ok(())
 }
 
@@ -236,7 +262,7 @@ pub fn run(args: Args) -> Result<()> {
             }
         }
         Commands::Create { name, package } => {
-            println!("create: {}", name);
+            println!("create: {name}");
 
             naming::validate_package_prefix(&package)?;
 

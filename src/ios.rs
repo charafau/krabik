@@ -1,3 +1,5 @@
+//! iOS support: the project template, the toolchain and the build.
+
 use anyhow::{Context, Result, anyhow};
 
 use std::fs;
@@ -8,7 +10,8 @@ use crate::naming::ProjectName;
 use crate::rust::InstalledTargets;
 use crate::{check_mark, command_exists, report_check, run_command, rust};
 
-const IOS_TARGETS: [&str; 2] = ["aarch64-apple-ios", "aarch64-apple-ios-sim"];
+/// The Rust targets a project can be built for on iOS.
+pub const IOS_TARGETS: [&str; 2] = ["aarch64-apple-ios", "aarch64-apple-ios-sim"];
 
 const IOS_SIM_TARGET: &str = "aarch64-apple-ios-sim";
 const IOS_DEVICE_TARGET: &str = "aarch64-apple-ios";
@@ -171,11 +174,16 @@ struct ContentView: View {
     .to_string()
 }
 
+/// iOS simulator information.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct IosDevice {
+    /// The name of the simulator, e.g. `iPhone 16 Pro`.
     pub name: String,
+    /// The unique identifier of the simulator.
     pub udid: String,
+    /// The runtime of the simulator, e.g. `iOS 18.3`.
     pub runtime: Option<String>,
+    /// The state of the simulator, e.g. `Booted` or `Shutdown`.
     pub state: String,
 }
 

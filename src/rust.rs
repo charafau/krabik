@@ -1,3 +1,5 @@
+//! Rust support: the library crate of a project and the Rust toolchain.
+
 use anyhow::{Context, Result, anyhow};
 
 use std::fs;
@@ -70,6 +72,35 @@ pub fn check_rust() -> bool {
 const UNIFFI_GIT: &str = "https://github.com/mozilla/uniffi-rs";
 // uniffi-bindgen-kotlin-jni is not published on crates.io, so pin all uniffi crates to the same commit
 const UNIFFI_REV: &str = "c31f4bc025c7a31eae56b49107f50e6d38e76bc7";
+
+/// Writes the `rust-toolchain.toml` of a project.
+///
+/// The file declares the compilation targets the project needs, so rustup
+/// installs them on the first build. The project therefore does not depend
+/// on the machine it is built on being set up beforehand.
+pub fn write_toolchain_file(root: &Path, targets: &[&str]) -> Result<()> {
+    let mut targets = targets.to_vec();
+    targets.sort_unstable();
+
+    let target_list = targets
+        .iter()
+        .map(|target| format!("    \"{target}\","))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let content = format!(
+        "# The toolchain and the compilation targets this project needs.\n\
+         # Rustup installs them automatically on the first build.\n\
+         [toolchain]\n\
+         channel = \"stable\"\n\
+         targets = [\n{target_list}\n]\n"
+    );
+
+    let path = root.join("rust-toolchain.toml");
+    fs::write(&path, content).with_context(|| format!("failed to write {}", path.display()))?;
+
+    Ok(())
+}
 
 /// Creates the Rust library crate and UniFFI binding crates for the project.
 pub fn create_rust(name: &ProjectName, root: &Path) -> Result<()> {

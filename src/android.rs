@@ -1,3 +1,5 @@
+//! Android support: the project template, the toolchain and the build.
+
 use anyhow::{Context, Result, anyhow};
 use clap::ValueEnum;
 
@@ -16,11 +18,14 @@ pub struct AndroidTarget {
     pub arch: &'static str,
     /// The Android ABI, which is also the name of the jniLibs folder.
     pub jni_folder: &'static str,
+    /// The Cargo environment variable that selects the linker for the target.
     pub linker_env: &'static str,
+    /// The name of the NDK clang compiler for the target.
     pub clang: &'static str,
 }
 
-const ANDROID_TARGETS: [AndroidTarget; 4] = [
+/// The Rust targets a project can be built for on Android.
+pub const ANDROID_TARGETS: [AndroidTarget; 4] = [
     AndroidTarget {
         arch: "aarch64-linux-android",
         jni_folder: "arm64-v8a",
@@ -489,8 +494,11 @@ class MainActivity : Activity() {{
 /// Android device information.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct AndroidDevice {
+    /// The model of the device or the name of the emulator.
     pub name: String,
+    /// The serial of the device, when it differs from the name.
     pub id: Option<String>,
+    /// The state of the device, e.g. `online` or `offline`.
     pub state: String,
 }
 

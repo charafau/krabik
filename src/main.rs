@@ -1,3 +1,5 @@
+//! Command line entrypoint of `mobile_cli`.
+
 use clap::Parser;
 
 use mobile_cli::{Args, run};

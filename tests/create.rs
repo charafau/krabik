@@ -214,6 +214,27 @@ fn create_fails_when_the_android_cli_uses_another_package() {
 }
 
 #[test]
+fn create_declares_the_rust_targets_it_needs() {
+    let tools = toolchain(FAKE_ANDROID);
+    let (_work, project) = create(&tools, &["create", "my-app"]);
+
+    // the project declares the targets it needs, so it does not depend on the
+    // machine being set up beforehand
+    let toolchain = fs::read_to_string(project.join("rust-toolchain.toml")).unwrap();
+    for target in [
+        "aarch64-linux-android",
+        "armv7-linux-androideabi",
+        "x86_64-linux-android",
+        "i686-linux-android",
+        "aarch64-apple-ios",
+        "aarch64-apple-ios-sim",
+    ] {
+        assert!(toolchain.contains(target), "missing {target}: {toolchain}");
+    }
+    assert!(toolchain.contains("channel = \"stable\""), "{toolchain}");
+}
+
+#[test]
 fn a_failed_create_leaves_nothing_behind() {
     let tools = toolchain(FAKE_ANDROID_LEGACY);
     let work = TempDir::new().unwrap();
