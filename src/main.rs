@@ -1,8 +1,8 @@
-//! Command line entrypoint of `mobile_cli`.
+//! Command line entrypoint of `krabik`.
 
 use clap::Parser;
 
-use mobile_cli::{Args, run};
+use krabik::{Args, run};
 
 /// CLI entrypoint. Parses command-line arguments and dispatches to [`run`].
 fn main() -> anyhow::Result<()> {

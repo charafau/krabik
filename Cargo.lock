@@ -261,6 +261,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "krabik"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "notify",
+ "predicates",
+ "tempfile",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -294,18 +306,6 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "mobile_cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "clap",
- "notify",
- "predicates",
- "tempfile",
 ]
 
 [[package]]
