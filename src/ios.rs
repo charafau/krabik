@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use crate::naming::ProjectName;
 use crate::{check_mark, command_exists, run_command, rust};
 
 const IOS_TARGETS: [&str; 2] = ["aarch64-apple-ios", "aarch64-apple-ios-sim"];
@@ -57,20 +58,26 @@ pub fn check_ios() -> bool {
 }
 
 /// Sets up the iOS project directory, generating SwiftUI files and Xcode project configuration.
-pub fn create_ios(name: &str, package_prefix: &str) -> Result<()> {
-    let ios_dir = format!("./{name}/ios");
+pub fn create_ios(name: &ProjectName, package_prefix: &str) -> Result<()> {
+    let dir = name.dir_name();
+    let ios_dir = format!("./{dir}/ios");
     fs::create_dir_all(format!("{ios_dir}/Sources"))
         .with_context(|| format!("failed to create {ios_dir}/Sources"))?;
     fs::create_dir_all(format!("{ios_dir}/Generated"))
         .with_context(|| format!("failed to create {ios_dir}/Generated"))?;
 
-    let app = app_name(name);
-    let lib_name = lib_name(name);
+    let app = name.swift_type_name();
+    let lib_name = name.identifier();
 
     let project_yml_path = format!("{ios_dir}/project.yml");
     fs::write(
         &project_yml_path,
-        project_yml(&app, &lib_name, name, package_prefix),
+        project_yml(
+            &app,
+            lib_name,
+            package_prefix,
+            &name.bundle_id(package_prefix),
+        ),
     )
     .with_context(|| format!("failed to write {project_yml_path}"))?;
 
@@ -93,50 +100,8 @@ pub fn create_ios(name: &str, package_prefix: &str) -> Result<()> {
     Ok(())
 }
 
-/// Swift module / library name used by cargo and UniFFI.
-fn lib_name(name: &str) -> String {
-    name.replace('-', "_")
-}
-
-/// Turn an arbitrary project name into a valid Swift/Xcode identifier, e.g. `my-app` -> `MyApp`.
-fn app_name(name: &str) -> String {
-    let mut app = String::new();
-    for part in name.split(|c: char| !c.is_alphanumeric()) {
-        let mut chars = part.chars();
-        if let Some(first) = chars.next() {
-            app.extend(first.to_uppercase());
-            app.push_str(chars.as_str());
-        }
-    }
-
-    if app.is_empty() {
-        app.push_str("App");
-    } else if app.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-        app.insert_str(0, "App");
-    }
-
-    app
-}
-
-/// Bundle identifiers may contain alphanumerics, hyphens and periods, but no underscores.
-fn bundle_id(package_prefix: &str, name: &str) -> String {
-    let sanitized: String = name
-        .to_lowercase()
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-
-    format!("{package_prefix}.{sanitized}")
-}
-
 /// Generates the XcodeGen `project.yml` specification for building the iOS application.
-fn project_yml(app: &str, lib_name: &str, name: &str, package_prefix: &str) -> String {
+fn project_yml(app: &str, lib_name: &str, package_prefix: &str, bundle_id: &str) -> String {
     format!(
         r#"name: {app}
 options:
@@ -173,8 +138,7 @@ targets:
           - $(SRCROOT)/../rust/target/$(RUST_TARGET)/$(CONFIGURATION:lower)
         OTHER_LDFLAGS:
           - -l{lib_name}
-"#,
-        bundle_id = bundle_id(package_prefix, name),
+"#
     )
 }
 
@@ -614,26 +578,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_app_name() {
-        assert_eq!(app_name("demo"), "Demo");
-        assert_eq!(app_name("my-app"), "MyApp");
-        assert_eq!(app_name("my_app"), "MyApp");
-        assert_eq!(app_name("123app"), "App123app");
-        assert_eq!(app_name("---"), "App");
-    }
-
-    #[test]
-    fn test_bundle_id() {
-        assert_eq!(bundle_id("com.example", "demo"), "com.example.demo");
-        assert_eq!(bundle_id("com.example", "my-app"), "com.example.my-app");
-        assert_eq!(bundle_id("com.example", "my_app"), "com.example.my-app");
-        assert_eq!(bundle_id("com.example", "MyApp"), "com.example.myapp");
-        assert_eq!(bundle_id("io.acme", "demo"), "io.acme.demo");
-    }
-
-    #[test]
     fn test_project_yml() {
-        let yml = project_yml("Demo", "demo", "demo", "com.example");
+        let yml = project_yml("Demo", "demo", "com.example", "com.example.demo");
         assert!(yml.contains("name: Demo"));
         assert!(yml.contains("bundleIdPrefix: com.example"));
         assert!(yml.contains("PRODUCT_BUNDLE_IDENTIFIER: com.example.demo"));
@@ -646,7 +592,7 @@ mod tests {
 
     #[test]
     fn test_project_yml_custom_package() {
-        let yml = project_yml("Demo", "demo", "demo", "io.acme");
+        let yml = project_yml("Demo", "demo", "io.acme", "io.acme.demo");
         assert!(yml.contains("bundleIdPrefix: io.acme"));
         assert!(yml.contains("PRODUCT_BUNDLE_IDENTIFIER: io.acme.demo"));
     }
@@ -673,14 +619,14 @@ mod tests {
 
     #[test]
     fn test_parse_project_name() {
-        let yml = project_yml("Demo", "demo", "demo", "com.example");
+        let yml = project_yml("Demo", "demo", "com.example", "com.example.demo");
         assert_eq!(parse_project_name(&yml).unwrap(), "Demo");
         assert!(parse_project_name("options:\n  bundleIdPrefix: com.example\n").is_none());
     }
 
     #[test]
     fn test_parse_bundle_id() {
-        let yml = project_yml("Demo", "demo", "demo", "com.example");
+        let yml = project_yml("Demo", "demo", "com.example", "com.example.demo");
         assert_eq!(parse_bundle_id(&yml).unwrap(), "com.example.demo");
         assert!(parse_bundle_id("options:\n  bundleIdPrefix: com.example\n").is_none());
     }

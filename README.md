@@ -20,7 +20,8 @@ Android:
   (required by `run` and `release`)
 - `adb` on your `PATH`
 - Google's Android CLI (`android`) — used to generate the Gradle project shell
-  and to manage emulators
+  and to manage emulators. It must support the `--namespace` and
+  `--application-id` options of `android create`.
 
 iOS:
 
@@ -65,6 +66,26 @@ mobile_cli run             # build, install and launch on it
 `release` builds release Rust libraries for all Android targets (assembles no
 APK) and an unsigned iOS app for physical devices.
 
+## Project names
+
+The project name has to work as a Cargo package name, as a Rust crate
+identifier, as a Java/Kotlin package segment and as part of an iOS bundle
+identifier, so it must
+
+- start with a lowercase ASCII letter,
+- contain only lowercase ASCII letters, digits, `-` and `_`,
+- not be a Rust or Java keyword.
+
+Hyphens are allowed because Cargo package names use them (`my-app`); they are
+translated to underscores wherever an identifier requires it. The identifiers
+derived from the name are used consistently across the generated project:
+
+| Name        | Cargo package | Rust/Kotlin id | Java package          | iOS bundle id         |
+| ----------- | ------------- | -------------- | --------------------- | --------------------- |
+| `my-app`    | `my-app`      | `my_app`       | `com.example.my_app`  | `com.example.my-app`  |
+| `my_app`    | `my_app`      | `my_app`       | `com.example.my_app`  | `com.example.my-app`  |
+| `demo`      | `demo`        | `demo`         | `com.example.demo`    | `com.example.demo`    |
+
 ## Generated project layout
 
 ```
@@ -98,4 +119,10 @@ CI (`.github/workflows/ci.yml`) runs the same three checks on every push and
 pull request.
 
 The CLI logic lives in `src/lib.rs` (`mobile_cli::run`), with `src/main.rs` as
-a thin wrapper, so behavior can be tested without spawning a process.
+a thin wrapper, so behavior can be tested without spawning a process. Project
+names are validated and every identifier is derived from them in `src/naming.rs`
+(`mobile_cli::naming::ProjectName`).
+
+`tests/create.rs` runs `create` end to end with a fake `android`/`xcodegen`
+toolchain, so the generated project is verified without a full Android/Xcode
+installation.

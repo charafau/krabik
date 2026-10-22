@@ -125,6 +125,61 @@ fn create_rejects_invalid_package() {
 }
 
 #[test]
+fn create_rejects_invalid_project_name() {
+    let tmp = TempDir::new().unwrap();
+    for name in ["MyApp", "1app", "my app", "my.app", "fn", "class"] {
+        cli()
+            .current_dir(tmp.path())
+            .args(["create", name])
+            .assert()
+            .failure()
+            .code(1)
+            .stderr(predicate::str::contains("invalid project name"));
+    }
+}
+
+#[test]
+fn create_rejects_invalid_name_without_creating_a_directory() {
+    let tmp = TempDir::new().unwrap();
+    cli()
+        .current_dir(tmp.path())
+        .args(["create", "MyApp"])
+        .assert()
+        .failure()
+        .code(1);
+
+    // nothing may be written before the name has been validated
+    assert!(
+        !tmp.path().join("MyApp").exists(),
+        "no directory should be created for an invalid name"
+    );
+    assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn create_rejects_names_that_escape_the_working_directory() {
+    let tmp = TempDir::new().unwrap();
+    let working_dir = tmp.path().join("work");
+    std::fs::create_dir(&working_dir).unwrap();
+
+    for name in ["../escape", "..", "a/b"] {
+        cli()
+            .current_dir(&working_dir)
+            .args(["create", name])
+            .assert()
+            .failure()
+            .code(1)
+            .stderr(predicate::str::contains("invalid project name"));
+    }
+
+    assert!(
+        !tmp.path().join("escape").exists(),
+        "no directory may be created outside the working directory"
+    );
+    assert_eq!(std::fs::read_dir(&working_dir).unwrap().count(), 0);
+}
+
+#[test]
 fn create_help_documents_package_flag() {
     cli()
         .args(["create", "--help"])

@@ -1,9 +1,12 @@
 pub mod android;
 pub mod ios;
+pub mod naming;
 pub mod rust;
 
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand, ValueEnum};
+
+use crate::naming::ProjectName;
 
 use std::fs;
 
@@ -39,27 +42,6 @@ pub(crate) fn check_mark(ok: bool) -> String {
     paint(if ok { "32" } else { "31" }, if ok { "[✓]" } else { "[✗]" })
 }
 
-/// Validates that a package prefix consists of dot-separated valid identifiers (e.g. `com.example`).
-pub(crate) fn validate_package_prefix(prefix: &str) -> Result<()> {
-    let valid = !prefix.is_empty()
-        && prefix.split('.').all(|segment| {
-            let mut chars = segment.chars();
-            let Some(first) = chars.next() else {
-                return false;
-            };
-            (first.is_ascii_alphabetic() || first == '_')
-                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-        });
-
-    if valid {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "invalid --package value {prefix:?}: expected dot-separated identifiers like com.example"
-        ))
-    }
-}
-
 /// Executes a command synchronously, returning an error if spawning fails or the command exits with non-zero status.
 pub(crate) fn run_command(cmd: &mut Command, what: &str) -> Result<()> {
     let status = cmd
@@ -91,6 +73,7 @@ pub enum Commands {
 
     /// Create a new project
     Create {
+        /// Project name: lowercase letters, digits, '-' and '_' (e.g. `my-app`)
         name: String,
 
         /// Package prefix for the generated app id (com.example.my_app by default)
@@ -152,17 +135,21 @@ pub fn run(args: Args) -> Result<()> {
         Commands::Create { name, package } => {
             println!("create: {}", name);
 
-            validate_package_prefix(&package)?;
+            naming::validate_package_prefix(&package)?;
 
-            let dir = format!("./{name}");
+            // Validate the name before touching the filesystem so that an
+            // invalid name never leaves a half-created project behind.
+            let project = ProjectName::parse(&name)?;
+
+            let dir = format!("./{}", project.dir_name());
             if fs::metadata(&dir).is_ok() {
                 return Err(anyhow!("{dir} already exists"));
             }
             fs::create_dir(&dir).with_context(|| format!("failed to create {dir}"))?;
 
-            rust::create_rust(&name)?;
-            android::create_android(&name, &package)?;
-            ios::create_ios(&name, &package)?;
+            rust::create_rust(&project)?;
+            android::create_android(&project, &package)?;
+            ios::create_ios(&project, &package)?;
         }
         Commands::Toolchain => {
             android::install_android_toolchain()?;
@@ -206,26 +193,5 @@ mod tests {
     #[test]
     fn test_paint_without_colors() {
         assert_eq!(paint_with(false, "32", "[✓]"), "[✓]");
-    }
-
-    #[test]
-    fn test_validate_package_prefix_accepts() {
-        for prefix in ["com.example", "io.acme", "com.foo_bar", "a", "a.b.c"] {
-            assert!(validate_package_prefix(prefix).is_ok(), "{prefix}");
-        }
-    }
-
-    #[test]
-    fn test_validate_package_prefix_rejects() {
-        for prefix in [
-            "",
-            "com..example",
-            ".com",
-            "com.",
-            "1com.example",
-            "com.exa-mple",
-        ] {
-            assert!(validate_package_prefix(prefix).is_err(), "{prefix}");
-        }
     }
 }
