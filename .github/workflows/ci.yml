@@ -21,7 +21,7 @@ jobs:
         # the tool is macOS first, but it has to build everywhere
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -37,8 +37,8 @@ jobs:
       # overrides the toolchain file, which pins the stable channel
       RUSTUP_TOOLCHAIN: 1.88.0
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.120.0
       - uses: Swatinem/rust-cache@v2
       # only the tests, the lints of the older clippy differ from the current one
       - run: cargo test
