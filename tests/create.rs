@@ -6,10 +6,11 @@
 
 #![cfg(unix)]
 
-use assert_cmd::Command;
+mod common;
+
+use common::{FakeToolchain, cli};
 use predicates::prelude::*;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -105,46 +106,15 @@ EOF
 "#;
 
 /// The fake `android`/`xcodegen` executables used to run the CLI under test.
-struct FakeToolchain {
-    _dir: TempDir,
-    bin: PathBuf,
-}
-
-impl FakeToolchain {
-    /// Creates a toolchain whose `android` executable has the given script.
-    fn new(android_script: &str) -> Self {
-        let dir = TempDir::new().unwrap();
-        let bin = dir.path().join("bin");
-        fs::create_dir_all(&bin).unwrap();
-
-        write_executable(&bin.join("android"), android_script);
-        write_executable(&bin.join("xcodegen"), "#!/bin/sh\nexit 0\n");
-
-        Self { _dir: dir, bin }
-    }
-
-    /// The `PATH` to run the CLI with: the fake tools first, the real ones after.
-    fn path(&self) -> String {
-        let current = std::env::var("PATH").unwrap_or_default();
-        format!("{}:{current}", self.bin.display())
-    }
-}
-
-/// Writes a script and makes it executable.
-fn write_executable(path: &std::path::Path, script: &str) {
-    fs::write(path, script).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
-}
-
-/// The CLI under test, with the fake toolchain on the `PATH`.
-fn cli(tools: &FakeToolchain) -> Command {
-    let mut cmd = Command::cargo_bin("mobile_cli").expect("binary should build");
-    cmd.env("PATH", tools.path());
-    cmd
+fn toolchain(android_script: &str) -> FakeToolchain {
+    FakeToolchain::new(&[
+        ("android", android_script),
+        ("xcodegen", "#!/bin/sh\nexit 0\n"),
+    ])
 }
 
 /// Runs `create` in a fresh working directory and returns the project root.
-fn create(tools: &FakeToolchain, args: &[&str]) -> (TempDir, std::path::PathBuf) {
+fn create(tools: &FakeToolchain, args: &[&str]) -> (TempDir, PathBuf) {
     let work = TempDir::new().unwrap();
     cli(tools)
         .current_dir(work.path())
@@ -157,7 +127,7 @@ fn create(tools: &FakeToolchain, args: &[&str]) -> (TempDir, std::path::PathBuf)
 
 #[test]
 fn create_with_custom_package_generates_a_consistent_android_project() {
-    let tools = FakeToolchain::new(FAKE_ANDROID);
+    let tools = toolchain(FAKE_ANDROID);
     let (_work, project) = create(&tools, &["create", "my-app", "--package", "io.acme"]);
 
     // the Gradle project uses the requested package
@@ -179,7 +149,7 @@ fn create_with_custom_package_generates_a_consistent_android_project() {
 
 #[test]
 fn create_with_default_package_generates_a_consistent_android_project() {
-    let tools = FakeToolchain::new(FAKE_ANDROID);
+    let tools = toolchain(FAKE_ANDROID);
     let (_work, project) = create(&tools, &["create", "my-app"]);
 
     let gradle = fs::read_to_string(project.join("android/app/build.gradle.kts")).unwrap();
@@ -195,7 +165,7 @@ fn create_with_default_package_generates_a_consistent_android_project() {
 
 #[test]
 fn create_with_custom_package_generates_a_consistent_ios_project() {
-    let tools = FakeToolchain::new(FAKE_ANDROID);
+    let tools = toolchain(FAKE_ANDROID);
     let (_work, project) = create(&tools, &["create", "my-app", "--package", "io.acme"]);
 
     let yml = fs::read_to_string(project.join("ios/project.yml")).unwrap();
@@ -209,7 +179,7 @@ fn create_with_custom_package_generates_a_consistent_ios_project() {
 
 #[test]
 fn create_with_custom_package_keeps_the_cargo_package_name() {
-    let tools = FakeToolchain::new(FAKE_ANDROID);
+    let tools = toolchain(FAKE_ANDROID);
     let (_work, project) = create(&tools, &["create", "my-app", "--package", "io.acme"]);
 
     // the Cargo package name is the project name, the lib name is derived from it
@@ -219,7 +189,7 @@ fn create_with_custom_package_keeps_the_cargo_package_name() {
 
 #[test]
 fn create_with_custom_package_creates_the_jni_libs_directories() {
-    let tools = FakeToolchain::new(FAKE_ANDROID);
+    let tools = toolchain(FAKE_ANDROID);
     let (_work, project) = create(&tools, &["create", "my-app", "--package", "io.acme"]);
 
     for abi in ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"] {
@@ -230,7 +200,7 @@ fn create_with_custom_package_creates_the_jni_libs_directories() {
 
 #[test]
 fn create_fails_when_the_android_cli_uses_another_package() {
-    let tools = FakeToolchain::new(FAKE_ANDROID_LEGACY);
+    let tools = toolchain(FAKE_ANDROID_LEGACY);
     let work = TempDir::new().unwrap();
 
     cli(&tools)
@@ -245,7 +215,7 @@ fn create_fails_when_the_android_cli_uses_another_package() {
 
 #[test]
 fn a_failed_create_leaves_nothing_behind() {
-    let tools = FakeToolchain::new(FAKE_ANDROID_LEGACY);
+    let tools = toolchain(FAKE_ANDROID_LEGACY);
     let work = TempDir::new().unwrap();
 
     cli(&tools)
@@ -265,7 +235,7 @@ fn a_failed_create_leaves_nothing_behind() {
 
 #[test]
 fn a_failed_create_can_be_retried() {
-    let tools = FakeToolchain::new(FAKE_ANDROID_LEGACY);
+    let tools = toolchain(FAKE_ANDROID_LEGACY);
     let work = TempDir::new().unwrap();
 
     cli(&tools)

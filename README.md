@@ -45,7 +45,7 @@ cargo install --path .
 | `toolchain`                   | Install the Rust targets needed for Android and iOS          |
 | `devices [-a/--all]`          | List online devices (use `-a` to include offline ones)       |
 | `launch <emulator>`           | Boot an emulator/simulator (`--platform android\|ios`)       |
-| `run [device]`                | Build, install and launch a debug build                      |
+| `run [device]`                | Build, install and launch a debug build (`--abi` overrides the detected one) |
 | `release`                     | Build release artifacts (`--platform android\|ios`)          |
 | `bindings`                    | Generate UniFFI Kotlin/Swift bindings                        |
 
@@ -109,8 +109,9 @@ Notes:
 - Android builds link against NDK API 24, matching the generated `minSdk`.
   Linker paths are resolved from `ANDROID_NDK_HOME` at build time — nothing
   machine-specific is written into the project.
-- `run` currently builds the Android debug library for `aarch64-linux-android`
-  only (arm64 devices and emulators).
+- `run` builds the Rust library for the architecture of the device it is
+  installed on. The ABI is read from the device (`ro.product.cpu.abi`), and
+  can be overridden with `--abi arm64-v8a|armeabi-v7a|x86_64|x86`.
 
 ## Development
 

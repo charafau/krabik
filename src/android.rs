@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use clap::ValueEnum;
 
 use std::fs;
 use std::io::{self, Write};
@@ -8,8 +9,11 @@ use std::process::Command;
 use crate::naming::ProjectName;
 use crate::{check_mark, command_exists, run_command, rust};
 
+/// A Rust target that can be built for Android.
 pub struct AndroidTarget {
+    /// The Rust target triple, e.g. `aarch64-linux-android`.
     pub arch: &'static str,
+    /// The Android ABI, which is also the name of the jniLibs folder.
     pub jni_folder: &'static str,
     pub linker_env: &'static str,
     pub clang: &'static str,
@@ -41,6 +45,94 @@ const ANDROID_TARGETS: [AndroidTarget; 4] = [
         clang: "i686-linux-android",
     },
 ];
+
+/// The Android ABI a device runs on, as reported by `ro.product.cpu.abi`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum Abi {
+    /// 64 bit ARM
+    #[value(name = "arm64-v8a")]
+    Arm64V8a,
+    /// 32 bit ARM
+    #[value(name = "armeabi-v7a")]
+    ArmeabiV7a,
+    /// 64 bit x86
+    #[value(name = "x86_64")]
+    X86_64,
+    /// 32 bit x86
+    #[value(name = "x86")]
+    X86,
+}
+
+impl Abi {
+    /// The ABI as it is named by Android, e.g. `arm64-v8a`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Abi::Arm64V8a => "arm64-v8a",
+            Abi::ArmeabiV7a => "armeabi-v7a",
+            Abi::X86_64 => "x86_64",
+            Abi::X86 => "x86",
+        }
+    }
+}
+
+/// Returns the Rust target for the given Android ABI, e.g. `arm64-v8a`.
+fn target_for_abi(abi: &str) -> Result<&'static AndroidTarget> {
+    ANDROID_TARGETS
+        .iter()
+        .find(|target| target.jni_folder == abi)
+        .ok_or_else(|| anyhow!("unsupported Android ABI {abi:?}"))
+}
+
+/// Reads the primary ABI of a device via `adb shell getprop ro.product.cpu.abi`.
+fn device_abi(serial: &str) -> Result<String> {
+    let output = Command::new("adb")
+        .args(["-s", serial, "shell", "getprop", "ro.product.cpu.abi"])
+        .output()
+        .with_context(|| format!("failed to run adb shell getprop for {serial}"))?;
+
+    if !output.status.success() {
+        return Err(anyhow!("adb shell getprop failed ({})", output.status));
+    }
+
+    parse_device_abi(&String::from_utf8_lossy(&output.stdout)).ok_or_else(|| {
+        anyhow!("could not determine the ABI of {serial}; the device may not be ready yet")
+    })
+}
+
+/// Extracts the ABI from the output of `adb shell getprop ro.product.cpu.abi`.
+fn parse_device_abi(output: &str) -> Option<String> {
+    let abi = output.trim();
+    if abi.is_empty() {
+        None
+    } else {
+        Some(abi.to_string())
+    }
+}
+
+/// Removes the shared libraries of other architectures from the jniLibs
+/// directory, they may be outdated.
+fn clear_jni_libs(jni_libs: &Path) -> Result<()> {
+    if !jni_libs.is_dir() {
+        return Ok(());
+    }
+
+    for abi_dir in fs::read_dir(jni_libs)? {
+        let abi_dir = abi_dir?.path();
+        if !abi_dir.is_dir() {
+            continue;
+        }
+
+        for entry in fs::read_dir(&abi_dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("so") {
+                fs::remove_file(&path)
+                    .with_context(|| format!("failed to remove {}", path.display()))?;
+            }
+        }
+    }
+
+    Ok(())
+}
 
 /// Adds required Android Rust compilation targets via `rustup target add`.
 pub fn install_android_toolchain() -> Result<()> {
@@ -657,8 +749,9 @@ fn bindgen_args(lib_name: &str) -> Vec<String> {
     .to_vec()
 }
 
-/// Builds the Rust library for ARM64 debug, generates Kotlin bindings, installs, and launches the app.
-pub fn build_android_debug(device: &str) -> Result<()> {
+/// Builds the Rust library for the architecture of the target device, generates
+/// Kotlin bindings, installs and launches the app.
+pub fn build_android_debug(device: &str, abi: Option<Abi>) -> Result<()> {
     println!("\nBuilding android...");
 
     let wanted = if device.is_empty() {
@@ -668,16 +761,27 @@ pub fn build_android_debug(device: &str) -> Result<()> {
     };
     let serial = resolve_android_device(wanted)?;
 
+    // The library has to be built for the architecture of the device it is
+    // installed on, otherwise the app cannot load it.
+    let target = match abi {
+        Some(abi) => target_for_abi(abi.as_str())?,
+        None => target_for_abi(&device_abi(&serial)?)?,
+    };
+
+    println!(
+        "\nBuilding rust lib for {} ({})...",
+        target.arch, target.jni_folder
+    );
+
     let ndk_linkers = ndk_linker_env()?;
 
-    println!("\nBuilding rust lib...");
     let mut cmd = Command::new("cargo");
     cmd.args([
         "build",
         "--manifest-path",
         "./rust/Cargo.toml",
         "--target",
-        "aarch64-linux-android",
+        target.arch,
     ])
     .envs(&ndk_linkers);
     run_command(&mut cmd, "cargo build")?;
@@ -686,12 +790,22 @@ pub fn build_android_debug(device: &str) -> Result<()> {
     let lib_name = rust::get_lib_name()?;
 
     let so_filename = format!("lib{lib_name}.so");
-    let src_path = format!("./rust/target/aarch64-linux-android/debug/{so_filename}");
-    let dst_dir = "android/app/src/main/jniLibs/arm64-v8a";
+    let src_path = format!("./rust/target/{}/debug/{so_filename}", target.arch);
+    let jni_libs = Path::new("android/app/src/main/jniLibs");
+    let dst_dir = jni_libs.join(target.jni_folder);
 
-    fs::create_dir_all(dst_dir).with_context(|| format!("failed to create {dst_dir}"))?;
-    fs::copy(&src_path, format!("{dst_dir}/{so_filename}"))
-        .with_context(|| format!("failed to copy {src_path} to {dst_dir}"))?;
+    // The app is installed on a single device, so only its architecture is
+    // needed and the libraries of an earlier run may be outdated.
+    clear_jni_libs(jni_libs)?;
+
+    fs::create_dir_all(&dst_dir)
+        .with_context(|| format!("failed to create {}", dst_dir.display()))?;
+    fs::copy(&src_path, dst_dir.join(&so_filename)).with_context(|| {
+        format!(
+            "failed to copy {src_path} to {}",
+            dst_dir.join(&so_filename).display()
+        )
+    })?;
 
     generate_kotlin_bindings()?;
 
@@ -767,6 +881,86 @@ pub fn generate_android_bindings() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_target_for_abi() {
+        let expected = [
+            ("arm64-v8a", "aarch64-linux-android"),
+            ("armeabi-v7a", "armv7-linux-androideabi"),
+            ("x86_64", "x86_64-linux-android"),
+            ("x86", "i686-linux-android"),
+        ];
+
+        for (abi, triple) in expected {
+            let target = target_for_abi(abi).unwrap();
+            assert_eq!(target.arch, triple, "{abi}");
+            assert_eq!(target.jni_folder, abi);
+        }
+    }
+
+    #[test]
+    fn test_target_for_abi_unknown() {
+        assert!(target_for_abi("mips").is_err());
+        assert!(target_for_abi("").is_err());
+        assert!(target_for_abi("arm64").is_err());
+    }
+
+    #[test]
+    fn test_abi_as_str() {
+        assert_eq!(Abi::Arm64V8a.as_str(), "arm64-v8a");
+        assert_eq!(Abi::ArmeabiV7a.as_str(), "armeabi-v7a");
+        assert_eq!(Abi::X86_64.as_str(), "x86_64");
+        assert_eq!(Abi::X86.as_str(), "x86");
+    }
+
+    #[test]
+    fn test_parse_device_abi() {
+        assert_eq!(
+            parse_device_abi("arm64-v8a\n").as_deref(),
+            Some("arm64-v8a")
+        );
+        assert_eq!(parse_device_abi("x86_64\r\n").as_deref(), Some("x86_64"));
+        assert_eq!(
+            parse_device_abi("  armeabi-v7a  ").as_deref(),
+            Some("armeabi-v7a")
+        );
+        assert!(parse_device_abi("").is_none());
+        assert!(parse_device_abi("\n").is_none());
+        assert!(parse_device_abi("   \r\n").is_none());
+    }
+
+    #[test]
+    fn test_clear_jni_libs_removes_shared_libraries() {
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("test_jni_libs_{unique_id}"));
+
+        let arm64 = temp_dir.join("arm64-v8a");
+        let x86_64 = temp_dir.join("x86_64");
+        fs::create_dir_all(&arm64).unwrap();
+        fs::create_dir_all(&x86_64).unwrap();
+
+        fs::write(arm64.join("libdemo.so"), "arm64").unwrap();
+        fs::write(x86_64.join("libdemo.so"), "x86_64").unwrap();
+        // other files have to be kept
+        fs::write(x86_64.join("keep.txt"), "keep").unwrap();
+
+        clear_jni_libs(&temp_dir).unwrap();
+
+        assert!(!arm64.join("libdemo.so").exists());
+        assert!(!x86_64.join("libdemo.so").exists());
+        assert!(x86_64.join("keep.txt").exists());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_clear_jni_libs_missing_directory() {
+        let missing = std::env::temp_dir().join("jni_libs_missing_test_12345");
+        assert!(clear_jni_libs(&missing).is_ok());
+    }
 
     #[test]
     fn test_parse_android_packages() {

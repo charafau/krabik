@@ -104,6 +104,9 @@ pub enum Commands {
         device: String,
         #[arg(long, value_enum, default_value_t = Platform::Android)]
         platform: Platform,
+        /// Build for this ABI instead of the one of the device (Android only)
+        #[arg(long, value_enum)]
+        abi: Option<android::Abi>,
     },
 
     /// Build release build
@@ -223,9 +226,18 @@ pub fn run(args: Args) -> Result<()> {
             Platform::Android => android::launch_android_emulator(&emulator)?,
             Platform::Ios => ios::launch_ios_emulator(&emulator)?,
         },
-        Commands::Run { device, platform } => match platform {
-            Platform::Android => android::build_android_debug(&device)?,
-            Platform::Ios => ios::build_ios_debug(&device)?,
+        Commands::Run {
+            device,
+            platform,
+            abi,
+        } => match platform {
+            Platform::Android => android::build_android_debug(&device, abi)?,
+            Platform::Ios => {
+                if abi.is_some() {
+                    return Err(anyhow!("--abi is only supported for Android"));
+                }
+                ios::build_ios_debug(&device)?
+            }
         },
         Commands::Release { platform } => match platform {
             Platform::Android => android::build_android_release()?,
