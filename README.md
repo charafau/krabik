@@ -41,7 +41,7 @@ requirements.
 
 | Requirement | Needed for | Notes |
 | --- | --- | --- |
-| Rust 1.88+ with `rustup` | everything | Edition 2024. `rustup` installs the mobile targets. |
+| Rust 1.99.1+ with `rustup` | everything | Edition 2024. `rustup` installs the mobile targets. |
 | `cargo` | everything | Comes with Rust. |
 | Android CLI (`android`) | `create`, `launch`, `devices -a` | Must support `android create --namespace` and `--application-id`. |
 | Android SDK | Android builds | `ANDROID_HOME` or `ANDROID_SDK_ROOT`; also detected through `android info`. |
@@ -317,7 +317,7 @@ toolchain, so project generation can be verified without a full mobile SDK
 installation.
 
 CI (`.github/workflows/ci.yml`) runs formatting, clippy, and tests on Linux and
-macOS, plus the test suite against the minimum supported Rust version (1.88).
+macOS, plus the test suite against the minimum supported Rust version (1.99.1).
 
 The development toolchain is declared in `rust-toolchain.toml`, and the minimum
 supported version is declared in `Cargo.toml` as `rust-version`.

@@ -2,7 +2,7 @@
 name = "krabik"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.99.1"
 description = "Scaffold and build cross-platform Rust mobile apps (Android/iOS) with UniFFI"
 readme = "README.md"
 keywords = ["android", "ios", "uniffi", "scaffolding", "cli"]

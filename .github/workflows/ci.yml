@@ -31,14 +31,18 @@ jobs:
       - run: cargo test
 
   msrv:
-    name: msrv (1.88)
+    name: msrv (1.99.1)
     runs-on: ubuntu-latest
     env:
       # overrides the toolchain file, which pins the stable channel
-      RUSTUP_TOOLCHAIN: 1.88.0
+      RUSTUP_TOOLCHAIN: 1.99.1
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.88.0
+      # the ref is the action's release, not the toolchain: passing the version
+      # as a ref makes Dependabot "update" it to a Rust release that may not exist
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
       - uses: Swatinem/rust-cache@v2
       # only the tests, the lints of the older clippy differ from the current one
       - run: cargo test
