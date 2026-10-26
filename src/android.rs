@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::naming::ProjectName;
+use crate::remove::{remove_files_with_extension, remove_if_exists};
 use crate::rust::InstalledTargets;
 use crate::{check_mark, command_exists, report_check, run_command, rust};
 
@@ -305,6 +306,33 @@ fn check_ndk() -> bool {
             false
         }
     }
+}
+
+/// Paths that are only removed when `clean` is run with `--purge`.
+const ANDROID_PURGE_PATHS: &[&str] = &["android/.gradle", "android/.kotlin"];
+
+/// Removes the Android build artifacts.
+pub fn clean_android(purge: bool) -> Result<()> {
+    println!("\nAndroid:");
+
+    let mut paths = vec![
+        "android/build",
+        "android/app/build",
+        "android/app/src/main/java/uniffi",
+    ];
+
+    if purge {
+        paths.extend(ANDROID_PURGE_PATHS);
+    }
+
+    for path in paths {
+        remove_if_exists(path)?;
+    }
+
+    // The shared libraries are copied into jniLibs by `run` and `release`.
+    remove_files_with_extension(Path::new("android/app/src/main/jniLibs"), "so")?;
+
+    Ok(())
 }
 
 /// Creates the Android project template, cleans up default files, and configures jniLibs and MainActivity.

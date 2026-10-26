@@ -7,6 +7,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::naming::ProjectName;
+use crate::remove::remove_if_exists;
 use crate::rust::InstalledTargets;
 use crate::{check_mark, command_exists, report_check, run_command, rust};
 
@@ -56,6 +57,17 @@ pub fn check_ios(targets: &InstalledTargets) -> bool {
         ok &= installed;
     }
     ok
+}
+
+/// Removes the iOS build artifacts, generated bindings, and generated Xcode project.
+pub fn clean_ios(_purge: bool) -> Result<()> {
+    println!("\niOS:");
+
+    remove_if_exists("ios/build")?;
+    remove_if_exists("ios/Generated")?;
+    // remove_entries_with_extension(Path::new("ios"), "xcodeproj")?;
+
+    Ok(())
 }
 
 /// Sets up the iOS project directory, generating SwiftUI files and Xcode project configuration.

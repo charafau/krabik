@@ -31,8 +31,8 @@ krabik launch "iPhone 16" --platform ios
 krabik run --platform ios
 ```
 
-> `run`, `release`, `bindings`, and `watch` must be executed from the root of a
-> generated project.
+> `run`, `release`, `bindings`, `watch`, and `clean` must be executed from the
+> root of a generated project.
 
 ## What you need
 
@@ -95,6 +95,7 @@ krabik --version
 | `krabik release [--platform android\|ios]` | Build release artifacts. | project root |
 | `krabik bindings [--platform android\|ios]` | Generate Kotlin or Swift UniFFI bindings. | project root |
 | `krabik watch [device] [--platform android\|ios\|both]` | Rebuild and relaunch on every Rust change. | project root |
+| `krabik clean [--purge]` | Remove build artifacts; `--purge` also removes cached Android directories. | project root |
 
 ### Create a project
 
@@ -212,6 +213,21 @@ krabik watch --platform both       # Android and iOS
   model, or AVD name.
 - Native Android or iOS source changes are not watched. Rebuild those manually.
 
+### Clean the project
+
+```sh
+krabik clean
+krabik clean --purge
+```
+
+`clean` removes `rust/target`, the Android build directories
+(`android/build` and `android/app/build`), the generated Kotlin bindings, the
+copied `.so` files, `ios/build`, and `ios/Generated`. Sources, configuration,
+and the generated Xcode project are kept.
+
+`--purge` additionally removes the cached Android directories
+(`android/.gradle` and `android/.kotlin`).
+
 ## Project naming
 
 A project name has to be valid as a Cargo package name, a Rust crate identifier,
@@ -306,11 +322,12 @@ spawning a process:
 
 - `src/lib.rs` — argument parsing and command dispatch (`krabik::run`)
 - `src/main.rs` — the `krabik` binary
-- `src/android.rs` — Android project creation, devices, build, and release
-- `src/ios.rs` — iOS project creation, simulators, build, and release
-- `src/rust.rs` — Rust crate generation and toolchain checks
+- `src/android.rs` — Android project creation, devices, build, release, and cleanup
+- `src/ios.rs` — iOS project creation, simulators, build, release, and cleanup
+- `src/rust.rs` — Rust crate generation, toolchain checks, and cleanup
 - `src/naming.rs` — project name validation and identifier derivation
 - `src/watch.rs` — the file-watching rebuild loop
+- `src/remove.rs` — helpers for removing generated files and directories
 
 Tests live in `tests/`. The `create` tests use a fake `android`/`xcodegen`
 toolchain, so project generation can be verified without a full mobile SDK
