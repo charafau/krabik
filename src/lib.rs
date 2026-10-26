@@ -7,6 +7,7 @@
 pub mod android;
 pub mod ios;
 pub mod naming;
+pub mod remove;
 pub mod rust;
 pub mod watch;
 
@@ -221,6 +222,13 @@ pub enum Commands {
         #[arg(long, value_enum, default_value = "android")]
         platform: Platforms,
     },
+
+    /// Remove build artifacts (use --purge to remove cached dependencies)
+    Clean {
+        /// Also remove cached dependencies.
+        #[arg(long)]
+        purge: bool,
+    },
 }
 
 /// Creates the Rust, Android and iOS parts of the project in `root`.
@@ -360,6 +368,15 @@ pub fn run(args: Args) -> Result<()> {
             Platform::Ios => ios::generate_ios_bindings()?,
         },
         Commands::Watch { device, platform } => watch::watch(&device, platform)?,
+        Commands::Clean { purge } => {
+            println!("clean\n");
+
+            rust::clean_rust(purge)?;
+            android::clean_android(purge)?;
+            ios::clean_ios(purge)?;
+
+            println!("\nClean done.");
+        }
     }
 
     Ok(())

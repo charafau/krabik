@@ -7,6 +7,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::naming::ProjectName;
+use crate::remove::remove_if_exists;
 use crate::{command_exists, run_command};
 
 /// The Rust compilation targets that are installed.
@@ -98,6 +99,20 @@ pub fn write_toolchain_file(root: &Path, targets: &[&str]) -> Result<()> {
 
     let path = root.join("rust-toolchain.toml");
     fs::write(&path, content).with_context(|| format!("failed to write {}", path.display()))?;
+
+    Ok(())
+}
+
+/// Removes the Rust build artifacts.
+pub fn clean_rust(_purge: bool) -> Result<()> {
+    if !Path::new("rust/Cargo.toml").exists() {
+        return Err(anyhow!(
+            "no Rust sources found; run `clean` from the root of a generated project"
+        ));
+    }
+
+    println!("Cargo:");
+    remove_if_exists("rust/target")?;
 
     Ok(())
 }
