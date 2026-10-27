@@ -37,7 +37,7 @@ jobs:
       # overrides the toolchain file, which pins the stable channel
       RUSTUP_TOOLCHAIN: 1.99.1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # the ref is the action's release, not the toolchain: passing the version
       # as a ref makes Dependabot "update" it to a Rust release that may not exist
       - uses: dtolnay/rust-toolchain@master
