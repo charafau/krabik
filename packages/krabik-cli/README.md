@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/krabik.svg" alt="krabik logo" width="180">
+  <img src="https://raw.githubusercontent.com/charafau/krabik/main/assets/krabik.svg" alt="krabik logo" width="180">
 </p>
 
 <h1 align="center">krabik</h1>
@@ -67,13 +67,13 @@ Install from a local checkout:
 ```sh
 git clone https://github.com/charafau/krabik.git
 cd krabik
-cargo install --path .
+cargo install --path packages/krabik-cli
 ```
 
 Or install directly from the repository:
 
 ```sh
-cargo install --git https://github.com/charafau/krabik.git
+cargo install --git https://github.com/charafau/krabik.git --package krabik-cli
 ```
 
 This installs the `krabik` binary. Verify it with:

@@ -1,0 +1,18 @@
+[package]
+name = "krabik-ui-android"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Declarative Android view bindings for Rust, created through direct JNI"
+readme = "README.md"
+keywords = ["android", "jni", "ui", "views", "mobile"]
+categories = ["api-bindings", "gui", "mobile"]
+exclude = ["example/"]
+
+[dependencies]
+jni.workspace = true
+
+[lints]
+workspace = true

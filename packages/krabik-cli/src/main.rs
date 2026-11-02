@@ -2,7 +2,7 @@
 
 use clap::Parser;
 
-use krabik::{Args, run};
+use krabik_cli::{Args, run};
 
 /// CLI entrypoint. Parses command-line arguments and dispatches to [`run`].
 fn main() -> anyhow::Result<()> {
