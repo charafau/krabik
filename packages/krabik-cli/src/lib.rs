@@ -112,7 +112,7 @@ pub(crate) fn run_command(cmd: &mut Command, what: &str) -> Result<()> {
 
 /// The command line arguments of the CLI.
 #[derive(Parser)]
-#[command(version, about, long_about=None)]
+#[command(name = "krabik", version, about, long_about = None)]
 pub struct Args {
     /// The command to run.
     #[command(subcommand)]

@@ -1,0 +1,15 @@
+[package]
+name = "krabik-ui-example"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+krabik-ui-android = { path = "../.." }
+jni = "0.22"
+
+# This crate is a standalone project, mirroring the `rust/` directory that `krabik create`
+# generates. The empty workspace table keeps cargo from adopting a parent workspace.
+[workspace]
