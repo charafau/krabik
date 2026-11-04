@@ -1,0 +1,35 @@
+name: KrabikUiDsl
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    RUST_TARGET: aarch64-apple-ios-sim
+    GENERATE_INFOPLIST_FILE: YES
+    CODE_SIGNING_ALLOWED: NO
+    INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+
+targets:
+  KrabikUiDsl:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: Generated
+        includes:
+          - "*.swift"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.krabik-ui-dsl
+        PRODUCT_NAME: KrabikUiDsl
+        SWIFT_INCLUDE_PATHS:
+          - $(SRCROOT)/Generated
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/../rust/target/$(RUST_TARGET)/$(CONFIGURATION:lower)
+        OTHER_LDFLAGS:
+          - -lkrabik_ui_dsl
