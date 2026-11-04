@@ -1,0 +1,12 @@
+# The toolchain and the compilation targets this project needs.
+# Rustup installs them automatically on the first build.
+[toolchain]
+channel = "stable"
+targets = [
+    "aarch64-apple-ios",
+    "aarch64-apple-ios-sim",
+    "aarch64-linux-android",
+    "armv7-linux-androideabi",
+    "i686-linux-android",
+    "x86_64-linux-android",
+]

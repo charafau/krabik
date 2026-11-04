@@ -1,0 +1,23 @@
+[package]
+name = "krabik-ui-dsl"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+# macro-scaffolding is required by the standard Swift bindings generator. It is opt-in so it
+# doesn't clash with the JNI scaffolding used by Android.
+[features]
+default = []
+ios = ["uniffi/macro-scaffolding"]
+
+[dependencies]
+uniffi = { git = "https://github.com/mozilla/uniffi-rs", rev = "c31f4bc025c7a31eae56b49107f50e6d38e76bc7", default-features = false }
+uniffi-bindgen-kotlin-jni-runtime = { git = "https://github.com/mozilla/uniffi-rs", rev = "c31f4bc025c7a31eae56b49107f50e6d38e76bc7" }
+
+[build-dependencies]
+uniffi-bindgen-kotlin-jni = { git = "https://github.com/mozilla/uniffi-rs", rev = "c31f4bc025c7a31eae56b49107f50e6d38e76bc7" }
+
+[workspace]
+members = ["uniffi-bindgen", "uniffi-bindgen-swift"]
