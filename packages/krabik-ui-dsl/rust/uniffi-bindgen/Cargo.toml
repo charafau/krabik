@@ -1,0 +1,8 @@
+[package]
+name = "uniffi-bindgen"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+uniffi-bindgen-kotlin-jni = { git = "https://github.com/mozilla/uniffi-rs", rev = "c31f4bc025c7a31eae56b49107f50e6d38e76bc7" }
