@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["packages/.mobile_cli-krabik-ui-dsl-60911.tmp/rust","packages/krabik-cli", "packages/krabik-ui-android"]
+members = ["packages/krabik-cli", "packages/krabik-ui-android"]
 default-members = ["packages/krabik-cli"]
 exclude = ["packages/krabik-ui-android/example"]
 

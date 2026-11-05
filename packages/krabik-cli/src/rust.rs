@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, anyhow};
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::naming::ProjectName;
@@ -123,15 +123,21 @@ pub fn create_rust(name: &ProjectName, root: &Path) -> Result<()> {
 
     // `--vcs none` keeps the crate from becoming a repository of its own: the
     // generated project is a single repository.
-    let mut cmd = Command::new("cargo");
-    cmd.arg("new")
-        .arg(&rust_dir)
-        .arg("--lib")
-        .arg("--name")
-        .arg(name.package_name())
-        .arg("--vcs")
-        .arg("none");
-    run_command(&mut cmd, "cargo new")?;
+    //
+    // `cargo new` also registers the crate as a member of the nearest enclosing
+    // workspace. The generated project is standalone (its manifest declares its
+    // own `[workspace]`), so that registration is undone afterwards.
+    restore_enclosing_workspace(root, || {
+        let mut cmd = Command::new("cargo");
+        cmd.arg("new")
+            .arg(&rust_dir)
+            .arg("--lib")
+            .arg("--name")
+            .arg(name.package_name())
+            .arg("--vcs")
+            .arg("none");
+        run_command(&mut cmd, "cargo new")
+    })?;
 
     // cargo only writes this for VCS backed projects
     fs::write(rust_dir.join(".gitignore"), "/target\n")
@@ -182,6 +188,47 @@ pub fn create_rust(name: &ProjectName, root: &Path) -> Result<()> {
     })?;
 
     Ok(())
+}
+
+/// Runs `create` and undoes the workspace membership `cargo new` adds when the
+/// project is created inside an existing Cargo workspace.
+///
+/// The generated crate declares its own `[workspace]`, so it must not also be a
+/// member of the workspace that happens to contain the staging directory.
+fn restore_enclosing_workspace<T>(root: &Path, create: impl FnOnce() -> Result<T>) -> Result<T> {
+    let manifest = enclosing_workspace_manifest(root);
+    let original = manifest
+        .as_ref()
+        .and_then(|path| fs::read_to_string(path).ok());
+
+    let result = create();
+
+    if let (Some(path), Some(original)) = (manifest, original) {
+        let current = fs::read_to_string(&path).ok();
+        if current.as_deref() != Some(original.as_str()) {
+            fs::write(&path, original)
+                .with_context(|| format!("failed to restore {}", path.display()))?;
+        }
+    }
+
+    result
+}
+
+/// Finds the `Cargo.toml` of the closest workspace that contains `root`.
+fn enclosing_workspace_manifest(root: &Path) -> Option<PathBuf> {
+    let root = fs::canonicalize(root).ok()?;
+
+    for dir in root.ancestors().skip(1) {
+        let manifest = dir.join("Cargo.toml");
+        let Ok(contents) = fs::read_to_string(&manifest) else {
+            continue;
+        };
+        if contents.contains("[workspace]") {
+            return Some(manifest);
+        }
+    }
+
+    None
 }
 
 /// Generates the `Cargo.toml` manifest content for the core Rust shared library.
@@ -373,5 +420,60 @@ mod tests {
         assert!(toml.contains(&format!(
             "uniffi = {{ git = \"{UNIFFI_GIT}\", rev = \"{UNIFFI_REV}\", default-features = false, features = [\"cli\", \"cargo-metadata\"] }}"
         )));
+    }
+
+    #[test]
+    fn test_enclosing_workspace_manifest_finds_member_workspace() {
+        let workspace = tempfile::tempdir().unwrap();
+        let project = workspace.path().join("project");
+        let staging = project.join(".staging");
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(
+            workspace.path().join("Cargo.toml"),
+            "[workspace]\nmembers = []\n",
+        )
+        .unwrap();
+
+        let manifest = enclosing_workspace_manifest(&staging).unwrap();
+        assert_eq!(
+            manifest,
+            fs::canonicalize(workspace.path())
+                .unwrap()
+                .join("Cargo.toml")
+        );
+    }
+
+    #[test]
+    fn test_enclosing_workspace_manifest_ignores_plain_packages() {
+        let workspace = tempfile::tempdir().unwrap();
+        let staging = workspace.path().join("staging");
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(
+            workspace.path().join("Cargo.toml"),
+            "[package]\nname = \"demo\"\n",
+        )
+        .unwrap();
+
+        assert!(enclosing_workspace_manifest(&staging).is_none());
+    }
+
+    #[test]
+    fn test_restore_enclosing_workspace_undoes_the_registration() {
+        let workspace = tempfile::tempdir().unwrap();
+        let staging = workspace.path().join("staging");
+        fs::create_dir_all(&staging).unwrap();
+        let manifest = workspace.path().join("Cargo.toml");
+        let original = "[workspace]\nmembers = []\n";
+        fs::write(&manifest, original).unwrap();
+
+        // Simulate `cargo new` adding the staging crate to the workspace.
+        let result = restore_enclosing_workspace(&staging, || {
+            fs::write(&manifest, "[workspace]\nmembers = [\"staging/rust\"]\n")?;
+            Ok(42)
+        })
+        .unwrap();
+
+        assert_eq!(result, 42);
+        assert_eq!(fs::read_to_string(&manifest).unwrap(), original);
     }
 }

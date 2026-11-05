@@ -126,6 +126,25 @@ fn create(tools: &FakeToolchain, args: &[&str]) -> (TempDir, PathBuf) {
 }
 
 #[test]
+fn create_inside_a_workspace_does_not_register_the_project() {
+    let tools = toolchain(FAKE_ANDROID);
+    let work = TempDir::new().unwrap();
+    let manifest = work.path().join("Cargo.toml");
+    let original = "[workspace]\nmembers = []\nresolver = \"2\"\n";
+    fs::write(&manifest, original).unwrap();
+
+    cli(&tools)
+        .current_dir(work.path())
+        .args(["create", "my-app"])
+        .assert()
+        .success();
+
+    // the generated crate is standalone, but the enclosing workspace is untouched
+    assert!(work.path().join("my-app/rust/Cargo.toml").is_file());
+    assert_eq!(fs::read_to_string(&manifest).unwrap(), original);
+}
+
+#[test]
 fn create_with_custom_package_generates_a_consistent_android_project() {
     let tools = toolchain(FAKE_ANDROID);
     let (_work, project) = create(&tools, &["create", "my-app", "--package", "io.acme"]);
