@@ -32,6 +32,10 @@ jobs:
       # the UI example is a standalone project, outside the workspace
       - run: cargo fmt --manifest-path packages/krabik-ui-android/example/rust/Cargo.toml --check
       - run: cargo clippy --manifest-path packages/krabik-ui-android/example/rust/Cargo.toml --all-targets -- -D warnings
+      # the UI DSL is a generated project with its own workspace
+      - run: cargo fmt --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --all --check
+      - run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml
 
   msrv:
     name: msrv (1.99.1)
