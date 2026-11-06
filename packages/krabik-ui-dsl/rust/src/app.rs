@@ -9,6 +9,32 @@ use std::sync::OnceLock;
 
 use crate::ui::Element;
 
+/// A user interaction dispatched by a native widget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Event<'a> {
+    /// A button was pressed.
+    Click {
+        /// The action configured on the button.
+        action: &'static str,
+    },
+    /// The text of an input changed.
+    TextChanged {
+        /// The action configured on the input.
+        action: &'static str,
+        /// The new text of the input.
+        value: &'a str,
+    },
+}
+
+impl Event<'_> {
+    /// The action the event was dispatched for.
+    pub fn action(&self) -> &'static str {
+        match self {
+            Self::Click { action } | Self::TextChanged { action, .. } => action,
+        }
+    }
+}
+
 /// An interactive application driven by the UI runtime.
 pub trait App: Send + 'static {
     /// Returns the declarative description of the current screen.
@@ -17,7 +43,7 @@ pub trait App: Send + 'static {
     /// Handles a user interaction dispatched by a native widget.
     ///
     /// Returns `true` if the state changed and the UI should be re-rendered.
-    fn handle(&mut self, action: &str) -> bool;
+    fn handle(&mut self, event: Event<'_>) -> bool;
 }
 
 type AppFactory = Box<dyn Fn() -> Box<dyn App> + Send + Sync>;
@@ -46,4 +72,3 @@ pub fn create_app() -> Box<dyn App> {
         Box::new(crate::gallery::GalleryApp::default())
     }
 }
-

@@ -75,6 +75,13 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
         nativeOnClick(handle, nodeId)
     }
 
+    /** Forwards an edit of a native input back to Rust. */
+    fun onTextChanged(nodeId: Long, text: String) {
+        if (handle != 0L) {
+            nativeOnTextChanged(handle, nodeId, text)
+        }
+    }
+
     /** Releases the Rust state when the activity goes away. */
     fun destroy() {
         if (handle != 0L) {
@@ -91,6 +98,8 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     private external fun nativeRender(handle: Long, widthPx: Int, heightPx: Int)
 
     private external fun nativeOnClick(handle: Long, nodeId: Long)
+
+    private external fun nativeOnTextChanged(handle: Long, nodeId: Long, text: String)
 
     private external fun nativeDestroy(handle: Long)
 
