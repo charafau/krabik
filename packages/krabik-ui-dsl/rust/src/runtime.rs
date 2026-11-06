@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use crate::geometry::{Rect, Size};
-use crate::layout;
+use crate::layout::{self, LayoutResult};
 use crate::measure::Measure;
 use crate::render::{self, Op, Renderer};
 use crate::tree::{self, NodeId, NodeKind, ROOT_ID, UiNode};
@@ -32,7 +32,7 @@ impl Update {
 /// Owns the UI tree and coordinates layout and reconciliation.
 pub struct Runtime {
     tree: UiNode,
-    frames: HashMap<NodeId, Rect>,
+    layout: LayoutResult,
     measurer: Box<dyn Measure>,
 }
 
@@ -41,7 +41,7 @@ impl Runtime {
     pub fn new(measurer: Box<dyn Measure>) -> Self {
         Self {
             tree: UiNode::empty(),
-            frames: HashMap::new(),
+            layout: LayoutResult::default(),
             measurer,
         }
     }
@@ -51,15 +51,21 @@ impl Runtime {
         let next = tree::build(element);
 
         let mut ops = render::diff(&self.tree, &next);
-        let frames = layout::compute(&next, viewport, self.measurer.as_ref());
-        ops.extend(render::diff_layout(&next, &self.frames, &frames));
+        let layout = layout::compute(&next, viewport, self.measurer.as_ref());
+        ops.extend(render::diff_layout(
+            &self.tree,
+            &next,
+            &self.layout,
+            &layout,
+        ));
 
-        let size = frames
+        let size = layout
+            .frames
             .get(&ROOT_ID)
             .map_or(viewport, |root| Size::new(root.width, root.height));
 
         self.tree = next;
-        self.frames = frames;
+        self.layout = layout;
 
         Update { size, ops }
     }
@@ -85,6 +91,15 @@ impl Runtime {
         }
     }
 
+    /// Returns the action of the text input with the given identifier, if any.
+    pub fn text_field_action(&self, id: NodeId) -> Option<&'static str> {
+        let node = tree::find(&self.tree, id)?;
+        match &node.kind {
+            NodeKind::TextField(props) if !props.action.is_empty() => Some(props.action),
+            _ => None,
+        }
+    }
+
     /// The current tree.
     pub fn tree(&self) -> &UiNode {
         &self.tree
@@ -92,7 +107,12 @@ impl Runtime {
 
     /// The frames of the last layout pass.
     pub fn frames(&self) -> &HashMap<NodeId, Rect> {
-        &self.frames
+        &self.layout.frames
+    }
+
+    /// The scrollable content sizes of the last layout pass.
+    pub fn content_sizes(&self) -> &HashMap<NodeId, Size> {
+        &self.layout.content_sizes
     }
 }
 
@@ -102,7 +122,7 @@ mod tests {
     use crate::geometry::Constraints;
     use crate::measure::ApproximateMeasure;
     use crate::render::RecordingRenderer;
-    use crate::ui::{Button, Column, Text, TextProps};
+    use crate::ui::{Button, Column, Text, TextField, TextProps};
 
     fn viewport() -> Size {
         Size::new(300.0, 600.0)
@@ -168,6 +188,19 @@ mod tests {
 
         assert_eq!(runtime.click(button.id), Some("click"));
         assert_eq!(runtime.click(ROOT_ID), None);
+    }
+
+    #[test]
+    fn text_fields_resolve_to_their_action() {
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        let element: Element = Column::new()
+            .child(TextField::new("").placeholder("Name").action("name"))
+            .into();
+        runtime.update(&element, viewport());
+
+        let field = runtime.tree().children[0].children[0].id;
+        assert_eq!(runtime.text_field_action(field), Some("name"));
+        assert_eq!(runtime.click(field), None);
     }
 
     #[test]

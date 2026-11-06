@@ -7,7 +7,10 @@
 
 use std::collections::HashMap;
 
-use crate::ui::{ButtonProps, Element, ElementKind, Length, Style, TextProps};
+use crate::ui::{
+    ButtonProps, Element, ElementKind, ImageProps, Length, ScrollProps, Style, TextFieldProps,
+    TextProps,
+};
 
 /// The identifier of the synthetic root node.
 pub const ROOT_ID: NodeId = NodeId(0);
@@ -31,17 +34,29 @@ pub enum NodeKind {
     Text(TextProps),
     /// A native button.
     Button(ButtonProps),
+    /// A native single-line text input.
+    TextField(TextFieldProps),
+    /// A native image.
+    Image(ImageProps),
+    /// A native scroll container.
+    Scroll(ScrollProps),
 }
 
 impl NodeKind {
     /// Whether the node corresponds to an actual native widget.
     pub fn is_native(&self) -> bool {
-        matches!(self, Self::Text(_) | Self::Button(_))
+        matches!(
+            self,
+            Self::Text(_) | Self::Button(_) | Self::TextField(_) | Self::Image(_) | Self::Scroll(_)
+        )
     }
 
     /// Whether the node lays out children in a flex container.
     pub fn is_container(&self) -> bool {
-        matches!(self, Self::Root | Self::Column | Self::Row)
+        matches!(
+            self,
+            Self::Root | Self::Column | Self::Row | Self::Scroll(_)
+        )
     }
 }
 
@@ -67,6 +82,14 @@ impl UiNode {
             style: root_style(),
             children: Vec::new(),
         }
+    }
+
+    /// Whether the node owns a native view.
+    ///
+    /// Native widgets always do. Layout nodes stay virtual unless they paint
+    /// something, in which case they need a decoration view of their own.
+    pub fn is_renderable(&self) -> bool {
+        self.kind.is_native() || self.style.needs_view()
     }
 }
 
@@ -94,6 +117,9 @@ fn build_node(element: &Element, parent: NodeId, index: usize) -> UiNode {
         ElementKind::Spacer => NodeKind::Spacer,
         ElementKind::Text(props) => NodeKind::Text(props.clone()),
         ElementKind::Button(props) => NodeKind::Button(props.clone()),
+        ElementKind::TextField(props) => NodeKind::TextField(props.clone()),
+        ElementKind::Image(props) => NodeKind::Image(props.clone()),
+        ElementKind::Scroll(props) => NodeKind::Scroll(*props),
     };
 
     let children = element
@@ -168,6 +194,34 @@ pub fn index(root: &UiNode) -> HashMap<NodeId, &UiNode> {
 /// Finds a node by its identifier.
 pub fn find(root: &UiNode, id: NodeId) -> Option<&UiNode> {
     preorder(root).into_iter().find(|node| node.id == id)
+}
+
+/// Maps every node to the nearest renderable ancestor that hosts its native view.
+///
+/// Layout-only nodes stay virtual, so their descendants are parented to the
+/// closest node that actually owns a view. The synthetic root is not returned
+/// as a parent: `None` means "a direct child of the platform root view".
+pub fn renderable_parents(root: &UiNode) -> HashMap<NodeId, Option<NodeId>> {
+    let mut parents = HashMap::new();
+    collect_renderable_parents(root, None, &mut parents);
+    parents
+}
+
+fn collect_renderable_parents(
+    node: &UiNode,
+    nearest: Option<NodeId>,
+    parents: &mut HashMap<NodeId, Option<NodeId>>,
+) {
+    for child in &node.children {
+        parents.insert(child.id, nearest);
+
+        let next = if child.is_renderable() {
+            Some(child.id)
+        } else {
+            nearest
+        };
+        collect_renderable_parents(child, next, parents);
+    }
 }
 
 #[cfg(test)]

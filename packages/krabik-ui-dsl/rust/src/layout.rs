@@ -6,17 +6,27 @@
 
 use std::collections::HashMap;
 
-use taffy::geometry::{Rect as TaffyRect, Size as TaffySize};
+use taffy::Overflow;
+use taffy::geometry::{Point as TaffyPoint, Rect as TaffyRect, Size as TaffySize};
 use taffy::prelude::{
     AlignItems, AvailableSpace, Dimension, Display, FlexDirection, JustifyContent,
     LengthPercentage, LengthPercentageAuto, NodeId as TaffyId, Style as TaffyStyle, TaffyTree,
 };
-use taffy::tree::{LayoutInput, LayoutOutput};
+use taffy::tree::{Layout, LayoutInput, LayoutOutput};
 
 use crate::geometry::{Constraints, Rect, Size};
 use crate::measure::Measure;
 use crate::tree::{self, NodeId, NodeKind, UiNode};
-use crate::ui::{Align, Justify, Length, TextProps};
+use crate::ui::{Align, Axis, Justify, Length, TextProps};
+
+/// The result of one layout pass.
+#[derive(Clone, Debug, Default)]
+pub struct LayoutResult {
+    /// The absolute frame of every node in the tree.
+    pub frames: HashMap<NodeId, Rect>,
+    /// The scrollable content size of scroll containers, keyed by node.
+    pub content_sizes: HashMap<NodeId, Size>,
+}
 
 /// The horizontal padding a button adds around its label.
 const BUTTON_PADDING_X: f32 = 16.0;
@@ -26,14 +36,14 @@ const BUTTON_PADDING_Y: f32 = 12.0;
 const BUTTON_MIN_HEIGHT: f32 = 20.0;
 
 /// Calculates the absolute frame of every node in the tree.
-pub fn compute(root: &UiNode, viewport: Size, measurer: &dyn Measure) -> HashMap<NodeId, Rect> {
+pub fn compute(root: &UiNode, viewport: Size, measurer: &dyn Measure) -> LayoutResult {
     let mut taffy = TaffyTree::new();
     // Layout stays fractional in logical points; the platform renderer rounds
     // when it converts to pixels.
     taffy.disable_rounding();
 
     let mut taffy_ids = HashMap::new();
-    let taffy_root = build_taffy(&mut taffy, root, &mut taffy_ids);
+    let taffy_root = build_taffy(&mut taffy, root, &mut taffy_ids, false);
 
     let nodes = tree::index(root);
     let by_taffy: HashMap<TaffyId, NodeId> = taffy_ids
@@ -75,33 +85,65 @@ pub fn compute(root: &UiNode, viewport: Size, measurer: &dyn Measure) -> HashMap
         .expect("taffy layout");
 
     let mut frames = HashMap::with_capacity(taffy_ids.len());
-    collect_frames(&taffy, root, &taffy_ids, 0.0, 0.0, &mut frames);
-    frames
+    let mut content_sizes = HashMap::new();
+    collect_frames(
+        &taffy,
+        root,
+        &taffy_ids,
+        0.0,
+        0.0,
+        &mut frames,
+        &mut content_sizes,
+    );
+
+    LayoutResult {
+        frames,
+        content_sizes,
+    }
 }
 
 fn build_taffy(
     taffy: &mut TaffyTree,
     node: &UiNode,
     ids: &mut HashMap<NodeId, TaffyId>,
+    scroll_child: bool,
 ) -> TaffyId {
+    let is_scroll = matches!(node.kind, NodeKind::Scroll(_));
     let children: Vec<TaffyId> = node
         .children
         .iter()
-        .map(|child| build_taffy(taffy, child, ids))
+        .map(|child| build_taffy(taffy, child, ids, is_scroll))
         .collect();
 
     let taffy_id = taffy
-        .new_with_children(taffy_style(node), &children)
+        .new_with_children(taffy_style(node, scroll_child), &children)
         .expect("taffy node");
 
     ids.insert(node.id, taffy_id);
     taffy_id
 }
 
-fn taffy_style(node: &UiNode) -> TaffyStyle {
+fn taffy_style(node: &UiNode, scroll_child: bool) -> TaffyStyle {
     let direction = match node.kind {
         NodeKind::Row => FlexDirection::Row,
+        NodeKind::Scroll(props) if props.axis == Axis::Horizontal => FlexDirection::Row,
         _ => FlexDirection::Column,
+    };
+
+    let overflow = match node.kind {
+        NodeKind::Scroll(props) => TaffyPoint {
+            x: if props.axis == Axis::Horizontal {
+                Overflow::Scroll
+            } else {
+                Overflow::Hidden
+            },
+            y: if props.axis == Axis::Vertical {
+                Overflow::Scroll
+            } else {
+                Overflow::Hidden
+            },
+        },
+        _ => TaffyPoint::default(),
     };
 
     TaffyStyle {
@@ -128,8 +170,12 @@ fn taffy_style(node: &UiNode) -> TaffyStyle {
             height: length_percentage(node.style.gap),
         },
         flex_grow: node.style.grow,
+        // Scroll containers must let their content keep its natural size in
+        // the scroll axis instead of shrinking it into the viewport.
+        flex_shrink: if scroll_child { 0.0 } else { 1.0 },
         align_items: align_items(node.style.align_items),
         justify_content: justify_content(node.style.justify_content),
+        overflow,
         ..TaffyStyle::default()
     }
 }
@@ -215,6 +261,30 @@ fn content_size(
                 text.height.max(BUTTON_MIN_HEIGHT) + BUTTON_PADDING_Y * 2.0,
             )
         }
+        NodeKind::TextField(props) => {
+            // An empty input is measured from its hint, so the field keeps a
+            // stable height and width before the user types.
+            let content = if props.value.is_empty() {
+                &props.placeholder
+            } else {
+                &props.value
+            };
+            let text = TextProps {
+                content: content.clone(),
+                size: props.size,
+                color: props.color,
+                weight: props.weight,
+            };
+            measurer.measure(
+                &text,
+                Constraints {
+                    max_width,
+                    max_height: None,
+                },
+            )
+        }
+        // Images are sized explicitly by the application in this milestone.
+        NodeKind::Image(_) => Size::ZERO,
         _ => Size::ZERO,
     }
 }
@@ -226,6 +296,7 @@ fn collect_frames(
     parent_x: f32,
     parent_y: f32,
     frames: &mut HashMap<NodeId, Rect>,
+    content_sizes: &mut HashMap<NodeId, Size>,
 ) {
     let layout = taffy.layout(ids[&node.id]).expect("taffy layout");
 
@@ -236,16 +307,47 @@ fn collect_frames(
         Rect::new(x, y, layout.size.width, layout.size.height),
     );
 
-    for child in &node.children {
-        collect_frames(taffy, child, ids, x, y, frames);
+    if let Some(content_size) = scroll_content_size(node, layout) {
+        content_sizes.insert(node.id, content_size);
     }
+
+    for child in &node.children {
+        collect_frames(taffy, child, ids, x, y, frames, content_sizes);
+    }
+}
+
+/// Returns the size of the scrollable content of a scroll container.
+///
+/// Taffy measures the overflow from the node's scroll origin, which is the
+/// padding-box corner. The native content host lives at the content-box corner,
+/// so the padding is subtracted before the two sizes are compared.
+fn scroll_content_size(node: &UiNode, layout: &Layout) -> Option<Size> {
+    let NodeKind::Scroll(props) = node.kind else {
+        return None;
+    };
+
+    let content = layout.content_box_size();
+    let overflow = layout.scrollable_overflow_rect;
+    // Taffy adds the scroll container's end padding to the overflow rect, but
+    // the host sits inside that padding and the native scroll view already
+    // applies it, so only the inner content extent is kept.
+    let content_width = (overflow.right - layout.padding.left - layout.padding.right).max(0.0);
+    let content_height = (overflow.bottom - layout.padding.top - layout.padding.bottom).max(0.0);
+
+    Some(match props.axis {
+        Axis::Vertical => Size::new(content.width, content.height.max(content_height)),
+        Axis::Horizontal => Size::new(content.width.max(content_width), content.height),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tree::ROOT_ID;
-    use crate::ui::{Button, Column, EdgeInsets, Element, Row, Spacer, Text};
+    use crate::ui::{
+        Button, Column, EdgeInsets, Element, Image, ImageSource, Row, ScrollView, Spacer, Text,
+        TextField,
+    };
 
     /// Measures every text as the same fixed box.
     struct FixedMeasure;
@@ -258,7 +360,7 @@ mod tests {
 
     fn layout(element: Element, viewport: Size) -> HashMap<NodeId, Rect> {
         let tree = tree::build(&element);
-        let frames = compute(&tree, viewport, &FixedMeasure);
+        let frames = compute(&tree, viewport, &FixedMeasure).frames;
 
         // sanity check: the collection is what the tests assert on
         assert_eq!(frames.len(), tree::preorder(&tree).len());
@@ -277,7 +379,7 @@ mod tests {
             .into();
 
         let tree = tree::build(&element);
-        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure).frames;
         let column = &frames[&tree.children[0].id];
 
         // the column is 200 wide and as tall as its content
@@ -296,7 +398,7 @@ mod tests {
             .into();
 
         let tree = tree::build(&element);
-        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure).frames;
 
         let first = &frames[&tree.children[0].children[0].id];
         let second = &frames[&tree.children[0].children[1].id];
@@ -315,7 +417,7 @@ mod tests {
             .into();
 
         let tree = tree::build(&element);
-        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure).frames;
 
         let row = &tree.children[0];
         assert_eq!(frames[&row.id].width, 300.0);
@@ -333,7 +435,7 @@ mod tests {
             .into();
 
         let tree = tree::build(&element);
-        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure).frames;
 
         assert_eq!(frames[&tree.children[0].children[0].id].width, 100.0);
     }
@@ -345,7 +447,7 @@ mod tests {
             .child(Button::new("Ok"))
             .into();
         let tree = tree::build(&element);
-        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure).frames;
 
         let button = &tree.children[0].children[0];
         // label 100x20 plus 16 horizontal and 12 vertical padding
@@ -361,7 +463,7 @@ mod tests {
             .into();
 
         let tree = tree::build(&element);
-        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure).frames;
         let chip = &frames[&tree.children[0].children[0].id];
 
         // label 100x20 plus 10dp on the horizontal and 4dp on the vertical axis
@@ -388,7 +490,7 @@ mod tests {
 
         let tree = tree::build(&element);
         let measurer = WidthMeasure(std::sync::Mutex::new(None));
-        let frames = compute(&tree, Size::new(300.0, 600.0), &measurer);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &measurer).frames;
         let text = &frames[&tree.children[0].children[0].id];
 
         // 200dp column minus 10dp padding on each side, then the text's own 10dp
@@ -423,7 +525,7 @@ mod tests {
             .into();
 
         let tree = tree::build(&element);
-        let frames = compute(&tree, Size::new(300.0, 600.0), &WrappingMeasure);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &WrappingMeasure).frames;
         let text = &frames[&tree.children[0].children[0].id];
 
         // the column's 200dp minus its 10dp padding on each side
@@ -440,8 +542,118 @@ mod tests {
             .into();
 
         let tree = tree::build(&element);
-        let frames = compute(&tree, Size::new(100.0, 10.0), &FixedMeasure);
+        let frames = compute(&tree, Size::new(100.0, 10.0), &FixedMeasure).frames;
 
         assert_eq!(frames[&tree.children[0].id].height, 40.0);
+    }
+
+    #[test]
+    fn vertical_scroll_reports_its_content_height() {
+        let mut scroll = ScrollView::new().width(200).height(100);
+        for label in ["1", "2", "3", "4", "5", "6"] {
+            scroll = scroll.child(Text::new(label));
+        }
+        let element: Element = scroll.into();
+
+        let tree = tree::build(&element);
+        let result = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure);
+        let scroll = &tree.children[0];
+
+        assert_eq!(result.frames[&scroll.id], Rect::new(0.0, 0.0, 200.0, 100.0));
+        // six 20pt rows overflow the 100pt viewport
+        assert_eq!(result.content_sizes[&scroll.id], Size::new(200.0, 120.0));
+        assert_eq!(result.frames[&scroll.children[5].id].y, 100.0);
+    }
+
+    #[test]
+    fn horizontal_scroll_reports_its_content_width() {
+        let mut scroll = ScrollView::horizontal().width(100).height(50);
+        for label in ["1", "2", "3", "4", "5"] {
+            scroll = scroll.child(Text::new(label));
+        }
+        let element: Element = scroll.into();
+
+        let tree = tree::build(&element);
+        let result = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure);
+        let scroll = &tree.children[0];
+
+        assert_eq!(result.frames[&scroll.id], Rect::new(0.0, 0.0, 100.0, 50.0));
+        // five 100pt columns overflow the 100pt viewport
+        assert_eq!(result.content_sizes[&scroll.id], Size::new(500.0, 50.0));
+        assert_eq!(result.frames[&scroll.children[4].id].x, 400.0);
+    }
+
+    #[test]
+    fn scroll_content_accounts_for_padding() {
+        let mut scroll = ScrollView::new()
+            .width(200)
+            .height(100)
+            .padding_each(EdgeInsets::all(10));
+        for label in ["1", "2", "3", "4", "5", "6"] {
+            scroll = scroll.child(Text::new(label));
+        }
+        let element: Element = scroll.into();
+
+        let tree = tree::build(&element);
+        let result = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure);
+        let scroll = &tree.children[0];
+
+        // content starts at the padding origin, so six rows need 120pt
+        assert_eq!(result.content_sizes[&scroll.id], Size::new(180.0, 120.0));
+    }
+
+    /// Measures text as ten points per character.
+    struct LengthMeasure;
+
+    impl Measure for LengthMeasure {
+        fn measure(&self, text: &TextProps, _constraints: Constraints) -> Size {
+            Size::new(text.content.chars().count() as f32 * 10.0, 20.0)
+        }
+    }
+
+    #[test]
+    fn an_empty_text_field_is_measured_from_its_hint() {
+        let element: Element = Column::new()
+            .align_items(Align::Start)
+            .child(TextField::new("").placeholder("hint"))
+            .into();
+
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &LengthMeasure).frames;
+
+        assert_eq!(frames[&tree.children[0].children[0].id].width, 40.0);
+    }
+
+    #[test]
+    fn a_filled_text_field_is_measured_from_its_value() {
+        let element: Element = Column::new()
+            .align_items(Align::Start)
+            .child(TextField::new("abc").placeholder("hint"))
+            .into();
+
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &LengthMeasure).frames;
+
+        assert_eq!(frames[&tree.children[0].children[0].id].width, 30.0);
+    }
+
+    #[test]
+    fn images_use_their_explicit_size() {
+        let element: Element = Column::new()
+            .align_items(Align::Start)
+            .child(
+                Image::new(ImageSource::asset("krabik.webp"))
+                    .width(64)
+                    .height(48),
+            )
+            .into();
+
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure).frames;
+
+        assert_eq!(
+            frames[&tree.children[0].children[0].id],
+            Rect::new(0.0, 0.0, 64.0, 48.0)
+        );
     }
 }
