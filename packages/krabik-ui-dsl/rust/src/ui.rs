@@ -188,6 +188,120 @@ impl ButtonProps {
     }
 }
 
+/// A border drawn around a node.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Border {
+    /// The stroke width in logical points.
+    pub width: f32,
+    /// The ARGB stroke color.
+    pub color: u32,
+}
+
+impl Border {
+    /// Creates a border with the given width and color.
+    pub const fn new(width: f32, color: u32) -> Self {
+        Self { width, color }
+    }
+}
+
+/// Platform-independent properties of a text input node.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextFieldProps {
+    /// The current text of the input.
+    pub value: String,
+    /// Hint shown while the input is empty.
+    pub placeholder: String,
+    /// The action dispatched whenever the text changes.
+    pub action: &'static str,
+    /// Font size in logical points.
+    pub size: f32,
+    /// ARGB text color.
+    pub color: u32,
+    /// Font weight.
+    pub weight: FontWeight,
+}
+
+impl TextFieldProps {
+    /// Creates an empty input with the default size and color.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            placeholder: String::new(),
+            action: "",
+            size: 16.0,
+            color: 0xFF00_0000,
+            weight: FontWeight::Normal,
+        }
+    }
+}
+
+/// The axis a scroll container scrolls along.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Axis {
+    /// Scroll vertically.
+    #[default]
+    Vertical,
+    /// Scroll horizontally.
+    Horizontal,
+}
+
+/// Platform-independent properties of a scroll container.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ScrollProps {
+    /// The axis the container scrolls along.
+    pub axis: Axis,
+}
+
+/// Where an image is loaded from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImageSource {
+    /// A file bundled in the platform application's assets.
+    Asset(String),
+    /// A remote image URL.
+    Url(String),
+}
+
+impl ImageSource {
+    /// An image bundled with the application.
+    pub fn asset(path: impl Into<String>) -> Self {
+        Self::Asset(path.into())
+    }
+
+    /// An image loaded from a URL.
+    pub fn url(url: impl Into<String>) -> Self {
+        Self::Url(url.into())
+    }
+}
+
+/// How an image fills its frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ImageScale {
+    /// Scale the image to fit inside the frame, preserving its aspect ratio.
+    #[default]
+    Fit,
+    /// Scale the image to fill the frame, cropping the excess.
+    Fill,
+}
+
+/// Platform-independent properties of an image node.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImageProps {
+    /// The source of the image.
+    pub source: ImageSource,
+    /// How the image fills its frame.
+    pub scale: ImageScale,
+}
+
+impl ImageProps {
+    /// Creates an image with the given source.
+    pub fn new(source: ImageSource) -> Self {
+        Self {
+            source,
+            scale: ImageScale::Fit,
+        }
+    }
+}
+
 /// The layout and decoration properties shared by every component.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Style {
@@ -209,12 +323,29 @@ pub struct Style {
     pub justify_content: Justify,
     /// ARGB background color, if any.
     pub background: Option<u32>,
+    /// Radius of the node's rounded corners in logical points.
+    pub corner_radius: f32,
+    /// Border drawn around the node, if any.
+    pub border: Option<Border>,
+    /// Opacity of the node and its children, in the range `0.0..=1.0`.
+    pub opacity: Option<f32>,
 }
 
 impl Style {
     /// Creates the default style.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether the node needs a native view to draw its decoration.
+    ///
+    /// Native widgets always have a view of their own; this only matters for
+    /// layout nodes, which stay virtual unless they actually paint something.
+    pub fn needs_view(&self) -> bool {
+        self.background.is_some()
+            || self.corner_radius > 0.0
+            || self.border.is_some()
+            || self.opacity.is_some_and(|opacity| opacity < 1.0)
     }
 }
 
@@ -226,10 +357,16 @@ pub(crate) enum ElementKind {
     Spacer,
     Text(TextProps),
     Button(ButtonProps),
+    TextField(TextFieldProps),
+    Image(ImageProps),
+    Scroll(ScrollProps),
 }
 
 impl ElementKind {
     /// A stable tag used when hashing node identifiers.
+    ///
+    /// The scroll axis is part of the tag: switching it rebuilds the subtree,
+    /// because the native scroll container changes class.
     pub(crate) fn tag(&self) -> u64 {
         match self {
             Self::Column => 1,
@@ -237,6 +374,12 @@ impl ElementKind {
             Self::Spacer => 3,
             Self::Text(_) => 4,
             Self::Button(_) => 5,
+            Self::TextField(_) => 6,
+            Self::Image(_) => 7,
+            Self::Scroll(props) => match props.axis {
+                Axis::Vertical => 8,
+                Axis::Horizontal => 9,
+            },
         }
     }
 }
@@ -358,6 +501,24 @@ macro_rules! style_builder {
             /// Sets the background color as ARGB.
             pub fn background(mut self, color: u32) -> Self {
                 self.0.style.background = Some(color);
+                self
+            }
+
+            /// Rounds the corners of the node's background and border.
+            pub fn corner_radius(mut self, radius: impl IntoPoints) -> Self {
+                self.0.style.corner_radius = radius.into_points();
+                self
+            }
+
+            /// Draws a border around the node.
+            pub fn border(mut self, width: impl IntoPoints, color: u32) -> Self {
+                self.0.style.border = Some(Border::new(width.into_points(), color));
+                self
+            }
+
+            /// Sets the opacity of the node and its children.
+            pub fn opacity(mut self, opacity: f32) -> Self {
+                self.0.style.opacity = Some(opacity.clamp(0.0, 1.0));
                 self
             }
 
@@ -532,11 +693,132 @@ impl From<Button> for Element {
     }
 }
 
+/// A native single-line text input.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextField(pub(crate) Element);
+
+impl TextField {
+    /// Creates an input with the given initial value.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(Element::leaf(ElementKind::TextField(TextFieldProps::new(
+            value,
+        ))))
+    }
+
+    /// Sets the hint shown while the input is empty.
+    pub fn placeholder(mut self, text: impl Into<String>) -> Self {
+        if let ElementKind::TextField(props) = &mut self.0.kind {
+            props.placeholder = text.into();
+        }
+        self
+    }
+
+    /// Sets the action dispatched whenever the text changes.
+    pub fn action(mut self, action: &'static str) -> Self {
+        if let ElementKind::TextField(props) = &mut self.0.kind {
+            props.action = action;
+        }
+        self
+    }
+
+    /// The current text of the input.
+    pub fn value(&self) -> Option<&str> {
+        match &self.0.kind {
+            ElementKind::TextField(props) => Some(&props.value),
+            _ => None,
+        }
+    }
+}
+
+impl From<TextField> for Element {
+    fn from(component: TextField) -> Self {
+        component.0
+    }
+}
+
+/// A native image.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Image(pub(crate) Element);
+
+impl Image {
+    /// Creates an image with the given source.
+    ///
+    /// Give the image an explicit width and height, or let a parent stretch it;
+    /// intrinsic sizing is not available for remote images yet.
+    pub fn new(source: ImageSource) -> Self {
+        Self(Element::leaf(ElementKind::Image(ImageProps::new(source))))
+    }
+
+    /// Sets how the image fills its frame.
+    pub fn scale(mut self, scale: ImageScale) -> Self {
+        if let ElementKind::Image(props) = &mut self.0.kind {
+            props.scale = scale;
+        }
+        self
+    }
+}
+
+impl From<Image> for Element {
+    fn from(component: Image) -> Self {
+        component.0
+    }
+}
+
+/// A native scroll container.
+///
+/// Give it a bounded size (`.grow(1)`, a fixed height, or a parent-provided
+/// constraint) so its content can actually overflow.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScrollView(pub(crate) Element);
+
+impl ScrollView {
+    /// Creates a vertical scroll container.
+    pub fn new() -> Self {
+        Self(Element::container(ElementKind::Scroll(ScrollProps {
+            axis: Axis::Vertical,
+        })))
+    }
+
+    /// Creates a horizontal scroll container.
+    pub fn horizontal() -> Self {
+        Self(Element::container(ElementKind::Scroll(ScrollProps {
+            axis: Axis::Horizontal,
+        })))
+    }
+
+    /// The axis the container scrolls along.
+    pub fn axis(&self) -> Axis {
+        match &self.0.kind {
+            ElementKind::Scroll(props) => props.axis,
+            _ => Axis::Vertical,
+        }
+    }
+
+    /// Appends a child.
+    pub fn child(mut self, child: impl Into<Element>) -> Self {
+        self.0.children.push(child.into());
+        self
+    }
+}
+
+impl Default for ScrollView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<ScrollView> for Element {
+    fn from(component: ScrollView) -> Self {
+        component.0
+    }
+}
+
 impl Element {
     fn set_text_size(&mut self, size: f32) {
         match &mut self.kind {
             ElementKind::Text(props) => props.size = size,
             ElementKind::Button(props) => props.size = size,
+            ElementKind::TextField(props) => props.size = size,
             _ => {}
         }
     }
@@ -545,6 +827,7 @@ impl Element {
         match &mut self.kind {
             ElementKind::Text(props) => props.color = color,
             ElementKind::Button(props) => props.color = color,
+            ElementKind::TextField(props) => props.color = color,
             _ => {}
         }
     }
@@ -553,6 +836,7 @@ impl Element {
         match &mut self.kind {
             ElementKind::Text(props) => props.weight = weight,
             ElementKind::Button(props) => props.weight = weight,
+            ElementKind::TextField(props) => props.weight = weight,
             _ => {}
         }
     }
@@ -563,8 +847,12 @@ style_builder!(Row);
 style_builder!(Spacer);
 style_builder!(Text);
 style_builder!(Button);
+style_builder!(TextField);
+style_builder!(Image);
+style_builder!(ScrollView);
 text_builder!(Text);
 text_builder!(Button);
+text_builder!(TextField);
 
 #[cfg(test)]
 mod tests {

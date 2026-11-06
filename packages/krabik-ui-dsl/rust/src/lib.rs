@@ -22,7 +22,7 @@ pub mod runtime;
 pub mod tree;
 pub mod ui;
 
-pub use app::{create_app, set_app_factory, App};
+pub use app::{App, create_app, set_app_factory};
 pub use gallery::GalleryApp;
 
 #[cfg(target_os = "android")]
