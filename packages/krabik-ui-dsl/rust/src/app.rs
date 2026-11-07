@@ -24,13 +24,28 @@ pub enum Event<'a> {
         /// The new text of the input.
         value: &'a str,
     },
+    /// The user submitted an input from the keyboard.
+    Submitted {
+        /// The action configured on the input.
+        action: &'static str,
+    },
+    /// An input gained or lost focus.
+    FocusChanged {
+        /// The action configured on the input.
+        action: &'static str,
+        /// Whether the input is now focused.
+        focused: bool,
+    },
 }
 
 impl Event<'_> {
     /// The action the event was dispatched for.
     pub fn action(&self) -> &'static str {
         match self {
-            Self::Click { action } | Self::TextChanged { action, .. } => action,
+            Self::Click { action }
+            | Self::TextChanged { action, .. }
+            | Self::Submitted { action }
+            | Self::FocusChanged { action, .. } => action,
         }
     }
 }

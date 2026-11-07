@@ -35,10 +35,12 @@ class MainActivity : Activity() {
                     val bars = insets.getInsets(
                         WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
                     )
+                    val ime = insets.getInsets(WindowInsets.Type.ime())
                     left = bars.left
                     top = bars.top
                     right = bars.right
-                    bottom = bars.bottom
+                    // Keep the focused field above the keyboard when it opens.
+                    bottom = maxOf(bars.bottom, ime.bottom)
                 } else {
                     @Suppress("DEPRECATION")
                     left = insets.systemWindowInsetLeft

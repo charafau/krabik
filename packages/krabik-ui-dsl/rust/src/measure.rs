@@ -40,6 +40,9 @@ impl Measure for ApproximateMeasure {
         } else {
             1.0
         };
+        let lines = text
+            .max_lines
+            .map_or(lines, |max| lines.min(max.max(1) as f32));
 
         Size::new(width, lines * line_height)
     }
@@ -83,5 +86,26 @@ mod tests {
     fn constraints_do_not_stretch_short_text() {
         let measured = ApproximateMeasure.measure(&text("Hi"), Constraints::width(500.0));
         assert_eq!(measured.width, 17.6);
+    }
+
+    #[test]
+    fn max_lines_clamps_the_measured_height() {
+        let constraints = Constraints::width(22.0);
+
+        // "Hello" wraps onto two lines at 22dp, but the limit is one.
+        let mut limited = text("Hello");
+        limited.max_lines = Some(1);
+        assert_eq!(
+            ApproximateMeasure.measure(&limited, constraints),
+            Size::new(22.0, 20.0)
+        );
+
+        // A limit above the required line count changes nothing.
+        let mut generous = text("Hello");
+        generous.max_lines = Some(5);
+        assert_eq!(
+            ApproximateMeasure.measure(&generous, constraints),
+            Size::new(22.0, 40.0)
+        );
     }
 }

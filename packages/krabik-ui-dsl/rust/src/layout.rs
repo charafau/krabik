@@ -153,6 +153,7 @@ fn taffy_style(node: &UiNode, scroll_child: bool) -> TaffyStyle {
             width: dimension(node.style.width),
             height: dimension(node.style.height),
         },
+        aspect_ratio: node.style.aspect_ratio,
         padding: TaffyRect {
             left: length_percentage(node.style.padding.left),
             right: length_percentage(node.style.padding.right),
@@ -247,6 +248,7 @@ fn content_size(
                 size: props.size,
                 color: props.color,
                 weight: props.weight,
+                ..TextProps::new("")
             };
             let text = measurer.measure(
                 &label,
@@ -269,12 +271,19 @@ fn content_size(
             } else {
                 &props.value
             };
-            let text = TextProps {
+            let mut text = TextProps {
                 content: content.clone(),
                 size: props.size,
                 color: props.color,
                 weight: props.weight,
+                ..TextProps::new("")
             };
+            if !props.multiline {
+                // A single-line input never grows taller when the text is
+                // longer than the available width.
+                text.max_lines = Some(1);
+                text.ellipsis = true;
+            }
             measurer.measure(
                 &text,
                 Constraints {
@@ -343,6 +352,7 @@ fn scroll_content_size(node: &UiNode, layout: &Layout) -> Option<Size> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::measure::ApproximateMeasure;
     use crate::tree::ROOT_ID;
     use crate::ui::{
         Button, Column, EdgeInsets, Element, Image, ImageSource, Row, ScrollView, Spacer, Text,
@@ -655,5 +665,53 @@ mod tests {
             frames[&tree.children[0].children[0].id],
             Rect::new(0.0, 0.0, 64.0, 48.0)
         );
+    }
+
+    #[test]
+    fn aspect_ratio_derives_the_missing_dimension() {
+        let element: Element = Column::new()
+            .align_items(Align::Start)
+            .child(
+                Image::new(ImageSource::asset("krabik.webp"))
+                    .width(200)
+                    .aspect_ratio(2.0),
+            )
+            .into();
+
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure).frames;
+
+        assert_eq!(
+            frames[&tree.children[0].children[0].id],
+            Rect::new(0.0, 0.0, 200.0, 100.0)
+        );
+    }
+
+    #[test]
+    fn a_single_line_text_field_never_wraps() {
+        let element: Element = Column::new()
+            .align_items(Align::Start)
+            .child(TextField::new("aaaaaaaaaa").width(44))
+            .into();
+
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &ApproximateMeasure).frames;
+
+        // Ten 8.8pt glyphs need two lines at 44pt, but a single-line field
+        // stays one line high.
+        assert_eq!(frames[&tree.children[0].children[0].id].height, 20.0);
+    }
+
+    #[test]
+    fn a_multiline_text_field_wraps() {
+        let element: Element = Column::new()
+            .align_items(Align::Start)
+            .child(TextField::new("aaaaaaaaaa").multiline(true).width(44))
+            .into();
+
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &ApproximateMeasure).frames;
+
+        assert_eq!(frames[&tree.children[0].children[0].id].height, 40.0);
     }
 }

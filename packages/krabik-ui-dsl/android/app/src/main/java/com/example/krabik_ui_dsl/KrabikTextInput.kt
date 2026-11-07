@@ -1,22 +1,32 @@
 package com.example.krabik_ui_dsl
 
 import android.content.Context
+import android.graphics.Rect
 import android.text.Editable
+import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 
 /**
  * The native input used for `TextField` nodes.
  *
  * It owns the text watcher so it can forward user edits to Rust and update the
- * text programmatically without echoing the change back.
+ * text programmatically without echoing the change back. It also owns the
+ * focus and submit listeners, because both are native input concerns.
  */
 class KrabikTextInput(
     context: Context,
     private val root: RustRootView,
     private val nodeId: Long,
 ) : EditText(context) {
+
+    private var secure = false
+    private var multiline = false
+    private var keyboard = 0
+    private var imeAction = 0
+    private var configured = false
 
     private val watcher = object : TextWatcher {
         override fun beforeTextChanged(
@@ -39,12 +49,77 @@ class KrabikTextInput(
     }
 
     init {
-        setSingleLine(true)
         setBackground(null)
         setIncludeFontPadding(false)
         setPadding(0, 0, 0, 0)
-        setGravity(Gravity.START or Gravity.CENTER_VERTICAL)
         addTextChangedListener(watcher)
+
+        setOnEditorActionListener { _, actionId, event ->
+            if (event == null || actionId != EditorInfo.IME_ACTION_UNSPECIFIED) {
+                root.onSubmitted(nodeId)
+            }
+            // Let the platform handle the default action, such as hiding the
+            // keyboard after "done".
+            false
+        }
+
+        setOnFocusChangeListener { _, hasFocus ->
+            root.onFocusChanged(nodeId, hasFocus)
+            if (hasFocus) {
+                // Ask the surrounding scroll view to reveal the field once the
+                // keyboard has changed the viewport.
+                post {
+                    requestRectangleOnScreen(Rect(0, 0, width, height), true)
+                }
+            }
+        }
+    }
+
+    /** Applies the keyboard, line, and obscuring configuration of the field. */
+    fun configure(
+        secure: Boolean,
+        multiline: Boolean,
+        keyboard: Int,
+        imeAction: Int,
+    ) {
+        if (configured &&
+            this.secure == secure &&
+            this.multiline == multiline &&
+            this.keyboard == keyboard &&
+            this.imeAction == imeAction
+        ) {
+            return
+        }
+        configured = true
+        this.secure = secure
+        this.multiline = multiline
+        this.keyboard = keyboard
+        this.imeAction = imeAction
+
+        setSingleLine(!multiline)
+        setGravity(if (multiline) Gravity.START or Gravity.TOP else Gravity.START or Gravity.CENTER_VERTICAL)
+
+        var inputType = when (keyboard) {
+            1 -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            2 -> InputType.TYPE_CLASS_NUMBER
+            3 -> InputType.TYPE_CLASS_PHONE
+            else -> InputType.TYPE_CLASS_TEXT
+        }
+        if (secure) {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        } else if (multiline) {
+            inputType = inputType or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+        this.inputType = inputType
+        setMaxLines(if (multiline) Int.MAX_VALUE else 1)
+
+        imeOptions = when (imeAction) {
+            1 -> EditorInfo.IME_ACTION_DONE
+            2 -> EditorInfo.IME_ACTION_NEXT
+            3 -> EditorInfo.IME_ACTION_SEARCH
+            4 -> EditorInfo.IME_ACTION_SEND
+            else -> EditorInfo.IME_ACTION_UNSPECIFIED
+        }
     }
 
     /**
