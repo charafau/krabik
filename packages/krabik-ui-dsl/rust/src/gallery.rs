@@ -5,8 +5,9 @@
 
 use crate::app::{App, Event};
 use crate::ui::{
-    Align, Button, Column, EdgeInsets, Element, Image, ImageScale, ImageSource, Justify, Row,
-    ScrollView, Spacer, Text, TextField,
+    Align, Button, Column, CornerRadii, EdgeInsets, Element, Gradient, Image, ImageScale,
+    ImageSource, ImeAction, Justify, KeyboardType, Row, ScrollView, Spacer, Text, TextAlign,
+    TextField,
 };
 
 pub const COLOR_MUTED: u32 = 0xFF66_6666;
@@ -17,7 +18,8 @@ pub const COLOR_AMBER: u32 = 0xFFF9_A825;
 pub const COLOR_PURPLE: u32 = 0xFF6A_1B9A;
 pub const COLOR_BORDER: u32 = 0xFFDD_DDDD;
 pub const COLOR_SURFACE: u32 = 0xFFF4_F4F4;
-
+pub const COLOR_LIGHT_BLUE: u32 = 0xFFE3_F2FD;
+pub const COLOR_LIGHT_TEAL: u32 = 0xFFE0_F2F1;
 /// The example screens reachable from the gallery.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Demo {
@@ -39,6 +41,10 @@ pub struct GalleryApp {
     pub demo: Demo,
     pub count: i64,
     pub name: String,
+    pub bio: String,
+    pub email: String,
+    pub bio_focused: bool,
+    pub submitted: bool,
 }
 
 impl GalleryApp {
@@ -172,6 +178,29 @@ impl GalleryApp {
             .child(Text::new("Body 16 - The quick brown fox jumps over the lazy dog.").size(16))
             .child(Text::new("Caption 12 / muted").size(12).color(COLOR_MUTED))
             .child(Text::new("Accent 16 / teal").size(16).color(COLOR_TEAL))
+            .child(
+                Text::new("Centered body text")
+                    .size(16)
+                    .text_align(TextAlign::Center)
+                    .width_percent(1.0),
+            )
+            .child(
+                Text::new("Trailing body text")
+                    .size(16)
+                    .text_align(TextAlign::End)
+                    .width_percent(1.0),
+            )
+            .child(caption("Two lines maximum, truncated with an ellipsis:"))
+            .child(
+                Text::new(
+                    "This paragraph is long enough to need more lines than the limit, \
+                     so it is clipped and the last visible line ends with an ellipsis.",
+                )
+                .size(14)
+                .max_lines(2)
+                .ellipsis()
+                .width_percent(1.0),
+            )
             .into()
     }
 
@@ -236,31 +265,77 @@ impl GalleryApp {
         } else {
             format!("Hello, {}!", self.name)
         };
+        let focus = if self.bio_focused {
+            "The bio field is focused."
+        } else {
+            "The bio field is not focused."
+        };
+        let submitted = if self.submitted {
+            "Submitted from the keyboard."
+        } else {
+            "Press the keyboard action key on the name field to submit."
+        };
 
-        Column::new()
-            .padding(24)
-            .spacing(14)
+        ScrollView::new()
             .width_percent(1.0)
             .height_percent(1.0)
-            .align_items(Align::Start)
-            .child(back_button())
-            .child(Text::new("Form").size(26).bold())
-            .child(caption(
-                "Each edit reaches Rust as a typed TextChanged event.",
-            ))
             .child(
-                TextField::new(self.name.clone())
-                    .placeholder("Your name")
-                    .action("form:name")
-                    .size(18)
-                    .padding_each(EdgeInsets::symmetric(12, 10))
-                    .background(COLOR_SURFACE)
-                    .corner_radius(10)
-                    .border(1, COLOR_BORDER)
-                    .width_percent(1.0),
+                Column::new()
+                    .padding(24)
+                    .spacing(14)
+                    .width_percent(1.0)
+                    .align_items(Align::Start)
+                    .child(back_button())
+                    .child(Text::new("Form").size(26).bold())
+                    .child(caption(
+                        "Edits, submits and focus changes all reach Rust as typed events.",
+                    ))
+                    .child(
+                        TextField::new(self.name.clone())
+                            .placeholder("Your name")
+                            .action("form:name")
+                            .submit_action("form:submit")
+                            .ime_action(ImeAction::Next)
+                            .size(18)
+                            .padding_each(EdgeInsets::symmetric(12, 10))
+                            .background(COLOR_SURFACE)
+                            .corner_radius(10)
+                            .border(1, COLOR_BORDER)
+                            .width_percent(1.0),
+                    )
+                    .child(Text::new(greeting).size(20).color(COLOR_BLUE))
+                    .child(
+                        TextField::new(self.bio.clone())
+                            .placeholder("Tell us about yourself")
+                            .action("form:bio")
+                            .focus_action("form:bio-focus")
+                            .multiline(true)
+                            .size(16)
+                            .padding_each(EdgeInsets::symmetric(12, 10))
+                            .background(COLOR_SURFACE)
+                            .corner_radius(10)
+                            .border(1, COLOR_BORDER)
+                            .height(96)
+                            .width_percent(1.0),
+                    )
+                    .child(caption(focus))
+                    .child(
+                        TextField::new(self.email.clone())
+                            .placeholder("you@example.com")
+                            .action("form:email")
+                            .keyboard(KeyboardType::Email)
+                            .ime_action(ImeAction::Send)
+                            .submit_action("form:submit")
+                            .size(16)
+                            .padding_each(EdgeInsets::symmetric(12, 10))
+                            .background(COLOR_SURFACE)
+                            .corner_radius(10)
+                            .border(1, COLOR_BORDER)
+                            .width_percent(1.0),
+                    )
+                    .child(caption(submitted))
+                    .child(Button::new("Clear").action("form:clear")),
             )
-            .child(Text::new(greeting).size(20).color(COLOR_BLUE))
-            .child(Button::new("Clear").action("form:clear"))
             .into()
     }
 
@@ -283,17 +358,19 @@ impl GalleryApp {
                         Image::new(ImageSource::asset("krabik.webp"))
                             .width(96)
                             .height(96)
-                            .corner_radius(18),
+                            .corner_radius(18)
+                            .accessibility_label("Krabik app icon"),
                     )
                     .child(caption("Asset image, 96x96 with rounded corners"))
                     .child(
                         Image::new(ImageSource::url("https://picsum.photos/600/300"))
                             .width_percent(1.0)
-                            .height(180)
+                            .aspect_ratio(2.0)
                             .corner_radius(16)
-                            .scale(ImageScale::Fill),
+                            .scale(ImageScale::Fill)
+                            .accessibility_label("Remote landscape photo"),
                     )
-                    .child(caption("Remote image, cropped to fill its frame")),
+                    .child(caption("Remote image, 2:1 aspect ratio cropped to fill")),
             )
             .into()
     }
@@ -327,6 +404,19 @@ impl GalleryApp {
                             )),
                     )
                     .child(
+                        Column::new()
+                            .width_percent(1.0)
+                            .padding(16)
+                            .spacing(8)
+                            .gradient(Gradient::horizontal(COLOR_LIGHT_BLUE, COLOR_LIGHT_TEAL))
+                            .corner_radii(CornerRadii::new(24.0, 6.0, 24.0, 6.0))
+                            .elevation(6)
+                            .child(Text::new("Gradient card").size(18).bold())
+                            .child(caption(
+                                "Two-color gradient, per-corner radii and native elevation.",
+                            )),
+                    )
+                    .child(
                         Row::new()
                             .width_percent(1.0)
                             .spacing(10)
@@ -352,10 +442,17 @@ impl GalleryApp {
                                     .background(COLOR_SURFACE)
                                     .corner_radius(22),
                             )
-                            .child(Button::new("Faded").action("styling:noop").opacity(0.45)),
+                            .child(Button::new("Faded").action("styling:noop").opacity(0.45))
+                            .child(
+                                Button::new("Disabled")
+                                    .action("styling:noop")
+                                    .enabled(false)
+                                    .background(COLOR_SURFACE)
+                                    .corner_radius(22),
+                            ),
                     )
                     .child(caption(
-                        "Buttons keep their native ripple under the custom shape.",
+                        "Buttons keep their native ripple and honour enabled state.",
                     )),
             )
             .into()
@@ -424,7 +521,28 @@ impl App for GalleryApp {
             Event::TextChanged {
                 action: "form:name",
                 value,
-            } => self.name = value.to_string(),
+            } => {
+                self.name = value.to_string();
+                self.submitted = false;
+            }
+            Event::TextChanged {
+                action: "form:bio",
+                value,
+            } => self.bio = value.to_string(),
+            Event::TextChanged {
+                action: "form:email",
+                value,
+            } => {
+                self.email = value.to_string();
+                self.submitted = false;
+            }
+            Event::Submitted {
+                action: "form:submit",
+            } => self.submitted = true,
+            Event::FocusChanged {
+                action: "form:bio-focus",
+                focused,
+            } => self.bio_focused = focused,
             Event::Click { action } => match action {
                 "back" => self.demo = Demo::Gallery,
                 "open:counter" => {
@@ -440,7 +558,12 @@ impl App for GalleryApp {
                 "open:styling" => self.demo = Demo::Styling,
                 "counter:add" => self.count += 1,
                 "counter:reset" => self.count = 0,
-                "form:clear" => self.name.clear(),
+                "form:clear" => {
+                    self.name.clear();
+                    self.bio.clear();
+                    self.email.clear();
+                    self.submitted = false;
+                }
                 _ => return false,
             },
             _ => return false,
@@ -544,12 +667,64 @@ mod tests {
         }));
         assert_eq!(app.name, "Ada");
 
+        assert!(app.handle(Event::TextChanged {
+            action: "form:bio",
+            value: "Loves layout engines.",
+        }));
+        assert_eq!(app.bio, "Loves layout engines.");
+
+        assert!(app.handle(Event::TextChanged {
+            action: "form:email",
+            value: "ada@example.com",
+        }));
+        assert_eq!(app.email, "ada@example.com");
+
         assert!(app.handle(click("form:clear")));
         assert!(app.name.is_empty());
+        assert!(app.bio.is_empty());
+        assert!(app.email.is_empty());
+        assert!(!app.submitted);
 
         assert!(!app.handle(Event::TextChanged {
             action: "unknown",
             value: "ignored",
+        }));
+    }
+
+    #[test]
+    fn submitting_and_focusing_update_the_form_state() {
+        let mut app = GalleryApp::new();
+        assert!(!app.submitted);
+        assert!(!app.bio_focused);
+
+        assert!(app.handle(Event::FocusChanged {
+            action: "form:bio-focus",
+            focused: true,
+        }));
+        assert!(app.bio_focused);
+
+        assert!(app.handle(Event::FocusChanged {
+            action: "form:bio-focus",
+            focused: false,
+        }));
+        assert!(!app.bio_focused);
+
+        assert!(app.handle(Event::Submitted {
+            action: "form:submit",
+        }));
+        assert!(app.submitted);
+
+        // Editing a submitted field clears the confirmation.
+        assert!(app.handle(Event::TextChanged {
+            action: "form:name",
+            value: "Grace",
+        }));
+        assert!(!app.submitted);
+
+        assert!(!app.handle(Event::Submitted { action: "unknown" }));
+        assert!(!app.handle(Event::FocusChanged {
+            action: "unknown",
+            focused: true,
         }));
     }
 

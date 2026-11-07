@@ -135,6 +135,18 @@ pub enum FontWeight {
     Bold,
 }
 
+/// Horizontal alignment of a text node inside its frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextAlign {
+    /// Align the text to the leading edge.
+    #[default]
+    Start,
+    /// Center the text horizontally.
+    Center,
+    /// Align the text to the trailing edge.
+    End,
+}
+
 /// Platform-independent properties of a text node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextProps {
@@ -146,6 +158,12 @@ pub struct TextProps {
     pub color: u32,
     /// Font weight.
     pub weight: FontWeight,
+    /// Horizontal alignment inside the node's frame.
+    pub align: TextAlign,
+    /// Maximum number of lines to draw, or unlimited when `None`.
+    pub max_lines: Option<u32>,
+    /// Whether the last visible line is truncated with an ellipsis.
+    pub ellipsis: bool,
 }
 
 impl TextProps {
@@ -156,6 +174,9 @@ impl TextProps {
             size: 16.0,
             color: 0xFF00_0000,
             weight: FontWeight::Normal,
+            align: TextAlign::Start,
+            max_lines: None,
+            ellipsis: false,
         }
     }
 }
@@ -204,6 +225,36 @@ impl Border {
     }
 }
 
+/// Which on-screen keyboard an input requests.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum KeyboardType {
+    /// Free-form text.
+    #[default]
+    Text,
+    /// An email address.
+    Email,
+    /// A number.
+    Number,
+    /// A phone number.
+    Phone,
+}
+
+/// The action key shown on the keyboard of an input.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ImeAction {
+    /// Let the platform choose the action.
+    #[default]
+    Default,
+    /// Show a done key.
+    Done,
+    /// Show a next key.
+    Next,
+    /// Show a search key.
+    Search,
+    /// Show a send key.
+    Send,
+}
+
 /// Platform-independent properties of a text input node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextFieldProps {
@@ -213,6 +264,18 @@ pub struct TextFieldProps {
     pub placeholder: String,
     /// The action dispatched whenever the text changes.
     pub action: &'static str,
+    /// The action dispatched when the user submits the input.
+    pub submit_action: &'static str,
+    /// The action dispatched when the input gains or loses focus.
+    pub focus_action: &'static str,
+    /// Whether the input accepts multiple lines of text.
+    pub multiline: bool,
+    /// Whether the text is obscured while typing.
+    pub secure: bool,
+    /// The keyboard the input requests.
+    pub keyboard: KeyboardType,
+    /// The action key shown on the keyboard.
+    pub ime_action: ImeAction,
     /// Font size in logical points.
     pub size: f32,
     /// ARGB text color.
@@ -228,6 +291,12 @@ impl TextFieldProps {
             value: value.into(),
             placeholder: String::new(),
             action: "",
+            submit_action: "",
+            focus_action: "",
+            multiline: false,
+            secure: false,
+            keyboard: KeyboardType::Text,
+            ime_action: ImeAction::Default,
             size: 16.0,
             color: 0xFF00_0000,
             weight: FontWeight::Normal,
@@ -302,6 +371,77 @@ impl ImageProps {
     }
 }
 
+/// Per-corner radii of a node's rounded corners.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CornerRadii {
+    /// Radius of the top-left corner.
+    pub top_left: f32,
+    /// Radius of the top-right corner.
+    pub top_right: f32,
+    /// Radius of the bottom-right corner.
+    pub bottom_right: f32,
+    /// Radius of the bottom-left corner.
+    pub bottom_left: f32,
+}
+
+impl CornerRadii {
+    /// Creates radii for each corner, clockwise from the top left.
+    pub const fn new(top_left: f32, top_right: f32, bottom_right: f32, bottom_left: f32) -> Self {
+        Self {
+            top_left,
+            top_right,
+            bottom_right,
+            bottom_left,
+        }
+    }
+
+    /// The same radius on every corner.
+    pub const fn all(radius: f32) -> Self {
+        Self::new(radius, radius, radius, radius)
+    }
+}
+
+/// The direction a background gradient runs in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GradientDirection {
+    /// From the top edge to the bottom edge.
+    #[default]
+    Vertical,
+    /// From the left edge to the right edge.
+    Horizontal,
+}
+
+/// A two-color linear background gradient.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Gradient {
+    /// ARGB color at the start edge.
+    pub start: u32,
+    /// ARGB color at the end edge.
+    pub end: u32,
+    /// The axis the gradient runs along.
+    pub direction: GradientDirection,
+}
+
+impl Gradient {
+    /// Creates a vertical gradient between two colors.
+    pub const fn vertical(start: u32, end: u32) -> Self {
+        Self {
+            start,
+            end,
+            direction: GradientDirection::Vertical,
+        }
+    }
+
+    /// Creates a horizontal gradient between two colors.
+    pub const fn horizontal(start: u32, end: u32) -> Self {
+        Self {
+            start,
+            end,
+            direction: GradientDirection::Horizontal,
+        }
+    }
+}
+
 /// The layout and decoration properties shared by every component.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Style {
@@ -313,6 +453,8 @@ pub struct Style {
     pub width: Length,
     /// Height of the node.
     pub height: Length,
+    /// Width-to-height ratio, when the node derives one dimension from the other.
+    pub aspect_ratio: Option<f32>,
     /// Space between children.
     pub gap: f32,
     /// Share of the remaining main-axis space the node claims.
@@ -323,12 +465,22 @@ pub struct Style {
     pub justify_content: Justify,
     /// ARGB background color, if any.
     pub background: Option<u32>,
+    /// Background gradient, if any. Takes precedence over `background`.
+    pub gradient: Option<Gradient>,
     /// Radius of the node's rounded corners in logical points.
     pub corner_radius: f32,
+    /// Per-corner radii, overriding `corner_radius` when set.
+    pub corner_radii: Option<CornerRadii>,
     /// Border drawn around the node, if any.
     pub border: Option<Border>,
     /// Opacity of the node and its children, in the range `0.0..=1.0`.
     pub opacity: Option<f32>,
+    /// Shadow depth in logical points, or zero for no elevation.
+    pub elevation: f32,
+    /// Whether the node accepts input. `None` leaves the platform default.
+    pub enabled: Option<bool>,
+    /// Accessibility label announced by screen readers, if any.
+    pub accessibility_label: Option<String>,
 }
 
 impl Style {
@@ -343,9 +495,18 @@ impl Style {
     /// layout nodes, which stay virtual unless they actually paint something.
     pub fn needs_view(&self) -> bool {
         self.background.is_some()
+            || self.gradient.is_some()
             || self.corner_radius > 0.0
+            || self.corner_radii.is_some()
             || self.border.is_some()
             || self.opacity.is_some_and(|opacity| opacity < 1.0)
+            || self.elevation > 0.0
+    }
+
+    /// The corner radii the node draws with.
+    pub fn corner_radii(&self) -> CornerRadii {
+        self.corner_radii
+            .unwrap_or_else(|| CornerRadii::all(self.corner_radius))
     }
 }
 
@@ -480,6 +641,12 @@ macro_rules! style_builder {
                 self
             }
 
+            /// Sets the width-to-height ratio.
+            pub fn aspect_ratio(mut self, ratio: f32) -> Self {
+                self.0.style.aspect_ratio = Some(ratio);
+                self
+            }
+
             /// Lets the node grow into the remaining main-axis space.
             pub fn grow(mut self, value: impl IntoPoints) -> Self {
                 self.0.style.grow = value.into_points();
@@ -504,9 +671,21 @@ macro_rules! style_builder {
                 self
             }
 
+            /// Sets a two-color background gradient.
+            pub fn gradient(mut self, gradient: Gradient) -> Self {
+                self.0.style.gradient = Some(gradient);
+                self
+            }
+
             /// Rounds the corners of the node's background and border.
             pub fn corner_radius(mut self, radius: impl IntoPoints) -> Self {
                 self.0.style.corner_radius = radius.into_points();
+                self
+            }
+
+            /// Rounds each corner of the node independently.
+            pub fn corner_radii(mut self, radii: CornerRadii) -> Self {
+                self.0.style.corner_radii = Some(radii);
                 self
             }
 
@@ -519,6 +698,24 @@ macro_rules! style_builder {
             /// Sets the opacity of the node and its children.
             pub fn opacity(mut self, opacity: f32) -> Self {
                 self.0.style.opacity = Some(opacity.clamp(0.0, 1.0));
+                self
+            }
+
+            /// Raises the node above its siblings with a native shadow.
+            pub fn elevation(mut self, elevation: impl IntoPoints) -> Self {
+                self.0.style.elevation = elevation.into_points().max(0.0);
+                self
+            }
+
+            /// Enables or disables interaction with the node.
+            pub fn enabled(mut self, enabled: bool) -> Self {
+                self.0.style.enabled = Some(enabled);
+                self
+            }
+
+            /// Sets the label announced by accessibility services.
+            pub fn accessibility_label(mut self, label: impl Into<String>) -> Self {
+                self.0.style.accessibility_label = Some(label.into());
                 self
             }
 
@@ -660,6 +857,30 @@ impl Text {
     pub fn new(content: impl Into<String>) -> Self {
         Self(Element::leaf(ElementKind::Text(TextProps::new(content))))
     }
+
+    /// Aligns the text horizontally inside its frame.
+    pub fn text_align(mut self, align: TextAlign) -> Self {
+        if let ElementKind::Text(props) = &mut self.0.kind {
+            props.align = align;
+        }
+        self
+    }
+
+    /// Limits the number of lines the text may occupy.
+    pub fn max_lines(mut self, lines: u32) -> Self {
+        if let ElementKind::Text(props) = &mut self.0.kind {
+            props.max_lines = Some(lines.max(1));
+        }
+        self
+    }
+
+    /// Truncates the text with an ellipsis when it does not fit.
+    pub fn ellipsis(mut self) -> Self {
+        if let ElementKind::Text(props) = &mut self.0.kind {
+            props.ellipsis = true;
+        }
+        self
+    }
 }
 
 impl From<Text> for Element {
@@ -717,6 +938,54 @@ impl TextField {
     pub fn action(mut self, action: &'static str) -> Self {
         if let ElementKind::TextField(props) = &mut self.0.kind {
             props.action = action;
+        }
+        self
+    }
+
+    /// Sets the action dispatched when the user submits the input.
+    pub fn submit_action(mut self, action: &'static str) -> Self {
+        if let ElementKind::TextField(props) = &mut self.0.kind {
+            props.submit_action = action;
+        }
+        self
+    }
+
+    /// Sets the action dispatched when the input gains or loses focus.
+    pub fn focus_action(mut self, action: &'static str) -> Self {
+        if let ElementKind::TextField(props) = &mut self.0.kind {
+            props.focus_action = action;
+        }
+        self
+    }
+
+    /// Lets the input accept multiple lines of text.
+    pub fn multiline(mut self, multiline: bool) -> Self {
+        if let ElementKind::TextField(props) = &mut self.0.kind {
+            props.multiline = multiline;
+        }
+        self
+    }
+
+    /// Obscures the text while typing.
+    pub fn secure(mut self, secure: bool) -> Self {
+        if let ElementKind::TextField(props) = &mut self.0.kind {
+            props.secure = secure;
+        }
+        self
+    }
+
+    /// Requests a specific keyboard layout.
+    pub fn keyboard(mut self, keyboard: KeyboardType) -> Self {
+        if let ElementKind::TextField(props) = &mut self.0.kind {
+            props.keyboard = keyboard;
+        }
+        self
+    }
+
+    /// Sets the action key shown on the keyboard.
+    pub fn ime_action(mut self, action: ImeAction) -> Self {
+        if let ElementKind::TextField(props) = &mut self.0.kind {
+            props.ime_action = action;
         }
         self
     }

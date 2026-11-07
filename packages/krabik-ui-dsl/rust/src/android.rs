@@ -13,7 +13,7 @@ use jni::errors::{Result as JniResult, ThrowRuntimeExAndDefault};
 use jni::objects::{JObject, JString};
 use jni::refs::Global;
 use jni::strings::JNIStr;
-use jni::sys::{jfloat, jint, jlong};
+use jni::sys::{jboolean, jfloat, jint, jlong};
 use jni::{Env, EnvUnowned, JValue, JavaVM, jni_sig, jni_str};
 
 use crate::app::{App, Event};
@@ -23,7 +23,8 @@ use crate::render::{Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{NodeId, NodeKind};
 use crate::ui::{
-    Axis, EdgeInsets, FontWeight, ImageProps, ImageScale, ImageSource, TextFieldProps, TextProps,
+    Axis, EdgeInsets, FontWeight, GradientDirection, ImageProps, ImageScale, ImageSource,
+    ImeAction, KeyboardType, TextAlign, TextFieldProps, TextProps,
 };
 
 const TEXT_VIEW_CLASS: &JNIStr = jni_str!("android/widget/TextView");
@@ -32,6 +33,7 @@ const FRAME_LAYOUT_CLASS: &JNIStr = jni_str!("android/widget/FrameLayout");
 const IMAGE_VIEW_CLASS: &JNIStr = jni_str!("android/widget/ImageView");
 const VIEW_CLASS: &JNIStr = jni_str!("android/view/View");
 const TYPEFACE_CLASS: &JNIStr = jni_str!("android/graphics/Typeface");
+const TEXT_UTILS_CLASS: &JNIStr = jni_str!("android/text/TextUtils$TruncateAt");
 const LONG_CLASS: &JNIStr = jni_str!("java/lang/Long");
 const MEASURE_SPEC_CLASS: &JNIStr = jni_str!("android/view/View$MeasureSpec");
 const LAYOUT_PARAMS_CLASS: &JNIStr = jni_str!("android/view/ViewGroup$LayoutParams");
@@ -51,6 +53,12 @@ const WRAP_CONTENT: jint = -2;
 const COMPLEX_UNIT_SP: jint = 2;
 /// `android.view.Gravity.CENTER`.
 const GRAVITY_CENTER: jint = 17;
+/// `android.view.Gravity.CENTER_HORIZONTAL`.
+const GRAVITY_CENTER_HORIZONTAL: jint = 1;
+/// `android.view.Gravity.START`.
+const GRAVITY_START: jint = 0x0080_0003;
+/// `android.view.Gravity.END`.
+const GRAVITY_END: jint = 0x0080_0005;
 
 /// Calls a JNI method and turns a pending Java exception into a Rust error.
 macro_rules! jcall {
@@ -106,6 +114,8 @@ struct MeasureKey {
     size: u32,
     bold: bool,
     max_width: Option<u32>,
+    max_lines: Option<u32>,
+    ellipsis: bool,
 }
 
 impl AndroidMeasure {
@@ -202,6 +212,7 @@ impl AndroidMeasure {
         )?;
         let bold = matches!(text.weight, FontWeight::Bold);
         apply_typeface(env, view, bold)?;
+        apply_text_limits(env, view, (text.max_lines, text.ellipsis))?;
 
         let width = match constraints.max_width {
             Some(max_width) => {
@@ -247,6 +258,8 @@ impl Measure for AndroidMeasure {
             size: text.size.to_bits(),
             bold: matches!(text.weight, FontWeight::Bold),
             max_width: constraints.max_width.map(f32::to_bits),
+            max_lines: text.max_lines,
+            ellipsis: text.ellipsis,
         };
 
         if let Some(cached) = self
@@ -544,6 +557,7 @@ impl AndroidState {
         }
         apply_padding(env, &view, node.style.padding, self.density)?;
         apply_style(env, &view, node)?;
+        apply_accessibility(env, &view, node)?;
         set_tag(env, &view, node.id.0 as jlong)?;
 
         Ok(view)
@@ -582,7 +596,8 @@ fn update_view(
         update_text(env, view, &node.kind)?;
     }
     apply_padding(env, view, node.style.padding, density)?;
-    apply_style(env, view, node)
+    apply_style(env, view, node)?;
+    apply_accessibility(env, view, node)
 }
 
 fn update_image(env: &mut Env<'_>, view: &JObject<'_>, props: &ImageProps) -> JniResult<()> {
@@ -656,6 +671,34 @@ fn update_text_field(
         )
     )?;
     apply_typeface(env, view, matches!(props.weight, FontWeight::Bold))?;
+
+    let keyboard = match props.keyboard {
+        KeyboardType::Text => 0,
+        KeyboardType::Email => 1,
+        KeyboardType::Number => 2,
+        KeyboardType::Phone => 3,
+    };
+    let ime_action = match props.ime_action {
+        ImeAction::Default => 0,
+        ImeAction::Done => 1,
+        ImeAction::Next => 2,
+        ImeAction::Search => 3,
+        ImeAction::Send => 4,
+    };
+    let _ = jcall!(
+        env,
+        env.call_method(
+            view,
+            jni_str!("configure"),
+            jni_sig!("(ZZII)V"),
+            &[
+                JValue::Bool(props.secure),
+                JValue::Bool(props.multiline),
+                JValue::Int(keyboard),
+                JValue::Int(ime_action),
+            ],
+        )
+    )?;
     Ok(())
 }
 
@@ -716,7 +759,79 @@ fn update_text(env: &mut Env<'_>, view: &JObject<'_>, kind: &NodeKind) -> JniRes
     )?;
 
     apply_typeface(env, view, matches!(weight, FontWeight::Bold))?;
+    apply_text_limits(env, view, text_limits(kind))?;
 
+    if let NodeKind::Text(props) = kind {
+        let gravity = match props.align {
+            TextAlign::Start => GRAVITY_START,
+            TextAlign::Center => GRAVITY_CENTER_HORIZONTAL,
+            TextAlign::End => GRAVITY_END,
+        };
+        let _ = jcall!(
+            env,
+            env.call_method(
+                view,
+                jni_str!("setGravity"),
+                jni_sig!("(I)V"),
+                &[JValue::Int(gravity)],
+            )
+        )?;
+    }
+
+    Ok(())
+}
+
+/// The line limit and truncation of a text-bearing node.
+fn text_limits(kind: &NodeKind) -> (Option<u32>, bool) {
+    match kind {
+        NodeKind::Text(props) => (props.max_lines, props.ellipsis),
+        _ => (None, false),
+    }
+}
+
+fn apply_text_limits(
+    env: &mut Env<'_>,
+    view: &JObject<'_>,
+    limits: (Option<u32>, bool),
+) -> JniResult<()> {
+    let (max_lines, ellipsis) = limits;
+    let max_lines = max_lines.map_or(jint::MAX, |lines| {
+        lines.max(1).min(jint::MAX as u32) as jint
+    });
+    let _ = jcall!(
+        env,
+        env.call_method(
+            view,
+            jni_str!("setMaxLines"),
+            jni_sig!("(I)V"),
+            &[JValue::Int(max_lines)],
+        )
+    )?;
+
+    let truncate_at = if ellipsis {
+        let class = jcall!(env, env.find_class(TEXT_UTILS_CLASS))?;
+        jcall!(
+            env,
+            env.get_static_field(
+                &class,
+                jni_str!("END"),
+                jni_sig!("Landroid/text/TextUtils$TruncateAt;"),
+            )
+        )?
+        .l()?
+    } else {
+        JObject::null()
+    };
+
+    let _ = jcall!(
+        env,
+        env.call_method(
+            view,
+            jni_str!("setEllipsize"),
+            jni_sig!("(Landroid/text/TextUtils$TruncateAt;)V"),
+            &[JValue::Object(&truncate_at)],
+        )
+    )?;
     Ok(())
 }
 
@@ -835,6 +950,8 @@ fn apply_padding(
 fn apply_style(env: &mut Env<'_>, view: &JObject<'_>, node: &RenderNode) -> JniResult<()> {
     let class = jcall!(env, env.find_class(KRABIK_STYLE_CLASS))?;
     let background = node.style.background;
+    let gradient = node.style.gradient;
+    let radii = node.style.corner_radii();
     let border = node.style.border;
     let ripple = matches!(node.kind, NodeKind::Button(_));
 
@@ -843,20 +960,74 @@ fn apply_style(env: &mut Env<'_>, view: &JObject<'_>, node: &RenderNode) -> JniR
         env.call_static_method(
             &class,
             jni_str!("apply"),
-            jni_sig!("(Landroid/view/View;IZFFIZFZ)V"),
+            jni_sig!("(Landroid/view/View;IZIIZZFFFFFZFIZFZF)V"),
             &[
                 JValue::Object(view),
                 JValue::Int(background.unwrap_or(0) as jint),
                 JValue::Bool(background.is_some()),
+                JValue::Int(gradient.map_or(0, |gradient| gradient.start) as jint),
+                JValue::Int(gradient.map_or(0, |gradient| gradient.end) as jint),
+                JValue::Bool(gradient.is_some()),
+                JValue::Bool(gradient.is_some_and(|gradient| {
+                    gradient.direction == GradientDirection::Horizontal
+                })),
                 JValue::Float(node.style.corner_radius),
+                JValue::Float(radii.top_left),
+                JValue::Float(radii.top_right),
+                JValue::Float(radii.bottom_right),
+                JValue::Float(radii.bottom_left),
+                JValue::Bool(node.style.corner_radii.is_some()),
                 JValue::Float(border.map_or(0.0, |border| border.width)),
                 JValue::Int(border.map_or(0, |border| border.color) as jint),
                 JValue::Bool(border.is_some()),
                 JValue::Float(node.style.opacity.unwrap_or(1.0)),
                 JValue::Bool(ripple),
+                JValue::Float(node.style.elevation),
             ],
         )
     )?;
+    Ok(())
+}
+
+/// Applies interaction state and accessibility metadata to a native view.
+fn apply_accessibility(env: &mut Env<'_>, view: &JObject<'_>, node: &RenderNode) -> JniResult<()> {
+    if let Some(enabled) = node.style.enabled {
+        let _ = jcall!(
+            env,
+            env.call_method(
+                view,
+                jni_str!("setEnabled"),
+                jni_sig!("(Z)V"),
+                &[JValue::Bool(enabled)],
+            )
+        )?;
+    }
+
+    match &node.style.accessibility_label {
+        Some(label) => {
+            let label = jcall!(env, env.new_string(label))?;
+            let _ = jcall!(
+                env,
+                env.call_method(
+                    view,
+                    jni_str!("setContentDescription"),
+                    jni_sig!("(Ljava/lang/CharSequence;)V"),
+                    &[JValue::Object(label.as_ref())],
+                )
+            )?;
+        }
+        None => {
+            let _ = jcall!(
+                env,
+                env.call_method(
+                    view,
+                    jni_str!("setContentDescription"),
+                    jni_sig!("(Ljava/lang/CharSequence;)V"),
+                    &[JValue::Object(&JObject::null())],
+                )
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -1065,6 +1236,59 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnTex
                 action,
                 value: &value,
             })
+        {
+            state.render(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Dispatches a submit on a native input back into the Rust tree.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSubmitted<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    node_id: jlong,
+) {
+    run(&mut unenv, "nativeOnSubmitted", |env| {
+        let mut states = states().lock().expect("android states");
+        let Some(state) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+
+        if let Some(action) = state
+            .runtime
+            .text_field_submit_action(NodeId(node_id as u64))
+            && state.app.handle(Event::Submitted { action })
+        {
+            state.render(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Dispatches a focus change on a native input back into the Rust tree.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFocusChanged<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    node_id: jlong,
+    focused: jboolean,
+) {
+    run(&mut unenv, "nativeOnFocusChanged", |env| {
+        let mut states = states().lock().expect("android states");
+        let Some(state) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+
+        if let Some(action) = state
+            .runtime
+            .text_field_focus_action(NodeId(node_id as u64))
+            && state.app.handle(Event::FocusChanged { action, focused })
         {
             state.render(env)?;
         }

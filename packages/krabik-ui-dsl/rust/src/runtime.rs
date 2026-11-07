@@ -100,6 +100,28 @@ impl Runtime {
         }
     }
 
+    /// Returns the submit action of the text input with the given identifier.
+    pub fn text_field_submit_action(&self, id: NodeId) -> Option<&'static str> {
+        let node = tree::find(&self.tree, id)?;
+        match &node.kind {
+            NodeKind::TextField(props) if !props.submit_action.is_empty() => {
+                Some(props.submit_action)
+            }
+            _ => None,
+        }
+    }
+
+    /// Returns the focus action of the text input with the given identifier.
+    pub fn text_field_focus_action(&self, id: NodeId) -> Option<&'static str> {
+        let node = tree::find(&self.tree, id)?;
+        match &node.kind {
+            NodeKind::TextField(props) if !props.focus_action.is_empty() => {
+                Some(props.focus_action)
+            }
+            _ => None,
+        }
+    }
+
     /// The current tree.
     pub fn tree(&self) -> &UiNode {
         &self.tree

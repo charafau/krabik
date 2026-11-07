@@ -33,6 +33,12 @@ object KrabikViews {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ),
         )
+
+        // Fade the edge where content continues, so overflow is discoverable.
+        val fadingEdge = (24 * context.resources.displayMetrics.density).toInt()
+        scroll.setFadingEdgeLength(fadingEdge)
+        scroll.isVerticalFadingEdgeEnabled = !horizontal
+        scroll.isHorizontalFadingEdgeEnabled = horizontal
         return scroll
     }
 }

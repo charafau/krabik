@@ -82,6 +82,20 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
         }
     }
 
+    /** Forwards a keyboard submit of a native input back to Rust. */
+    fun onSubmitted(nodeId: Long) {
+        if (handle != 0L) {
+            nativeOnSubmitted(handle, nodeId)
+        }
+    }
+
+    /** Forwards a focus change of a native input back to Rust. */
+    fun onFocusChanged(nodeId: Long, focused: Boolean) {
+        if (handle != 0L) {
+            nativeOnFocusChanged(handle, nodeId, focused)
+        }
+    }
+
     /** Releases the Rust state when the activity goes away. */
     fun destroy() {
         if (handle != 0L) {
@@ -100,6 +114,10 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     private external fun nativeOnClick(handle: Long, nodeId: Long)
 
     private external fun nativeOnTextChanged(handle: Long, nodeId: Long, text: String)
+
+    private external fun nativeOnSubmitted(handle: Long, nodeId: Long)
+
+    private external fun nativeOnFocusChanged(handle: Long, nodeId: Long, focused: Boolean)
 
     private external fun nativeDestroy(handle: Long)
 
