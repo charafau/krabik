@@ -6,8 +6,8 @@
 use crate::app::{App, Event};
 use crate::ui::{
     Align, Button, Column, CornerRadii, EdgeInsets, Element, Gradient, Image, ImageScale,
-    ImageSource, ImeAction, Justify, KeyboardType, Row, ScrollView, Spacer, Text, TextAlign,
-    TextField,
+    ImageSource, ImeAction, Justify, KeyboardType, Row, ScrollView, Spacer, Switch, Text,
+    TextAlign, TextField,
 };
 
 pub const COLOR_MUTED: u32 = 0xFF66_6666;
@@ -33,6 +33,7 @@ pub enum Demo {
     Form,
     Media,
     Styling,
+    Controls,
 }
 
 /// The state of the gallery demo application.
@@ -45,6 +46,7 @@ pub struct GalleryApp {
     pub email: String,
     pub bio_focused: bool,
     pub submitted: bool,
+    pub notifications: bool,
 }
 
 impl GalleryApp {
@@ -76,6 +78,7 @@ impl GalleryApp {
                     .child(Button::new("Form").action("open:form"))
                     .child(Button::new("Media").action("open:media"))
                     .child(Button::new("Styling").action("open:styling"))
+                    .child(Button::new("Controls").action("open:controls"))
                     .child(caption(
                         "This list scrolls, so every demo stays reachable on small screens.",
                     )),
@@ -457,6 +460,41 @@ impl GalleryApp {
             )
             .into()
     }
+
+    fn controls(&self) -> Element {
+        let state = if self.notifications {
+            "Notifications are on."
+        } else {
+            "Notifications are off."
+        };
+
+        Column::new()
+            .padding(24)
+            .spacing(14)
+            .width_percent(1.0)
+            .height_percent(1.0)
+            .align_items(Align::Start)
+            .child(back_button())
+            .child(Text::new("Controls").size(26).bold())
+            .child(caption(
+                "Switches report their checked state to Rust as typed events.",
+            ))
+            .child(
+                Row::new()
+                    .width_percent(1.0)
+                    .spacing(12)
+                    .align_items(Align::Center)
+                    .child(Text::new("Notifications").size(18))
+                    .child(Spacer::new())
+                    .child(
+                        Switch::new(self.notifications)
+                            .action("controls:notifications")
+                            .accessibility_label("Notifications"),
+                    ),
+            )
+            .child(caption(state))
+            .into()
+    }
 }
 
 /// Twenty rows that overflow the vertical scroll viewport.
@@ -513,6 +551,7 @@ impl App for GalleryApp {
             Demo::Form => self.form(),
             Demo::Media => self.media(),
             Demo::Styling => self.styling(),
+            Demo::Controls => self.controls(),
         }
     }
 
@@ -543,6 +582,10 @@ impl App for GalleryApp {
                 action: "form:bio-focus",
                 focused,
             } => self.bio_focused = focused,
+            Event::Toggled {
+                action: "controls:notifications",
+                checked,
+            } => self.notifications = checked,
             Event::Click { action } => match action {
                 "back" => self.demo = Demo::Gallery,
                 "open:counter" => {
@@ -556,6 +599,7 @@ impl App for GalleryApp {
                 "open:form" => self.demo = Demo::Form,
                 "open:media" => self.demo = Demo::Media,
                 "open:styling" => self.demo = Demo::Styling,
+                "open:controls" => self.demo = Demo::Controls,
                 "counter:add" => self.count += 1,
                 "counter:reset" => self.count = 0,
                 "form:clear" => {
@@ -654,6 +698,9 @@ mod tests {
         assert!(app.handle(click("open:styling")));
         assert_eq!(app.demo, Demo::Styling);
 
+        assert!(app.handle(click("open:controls")));
+        assert_eq!(app.demo, Demo::Controls);
+
         assert!(!app.handle(click("unknown_action")));
     }
 
@@ -729,6 +776,29 @@ mod tests {
     }
 
     #[test]
+    fn toggling_a_switch_updates_the_controls_state() {
+        let mut app = GalleryApp::new();
+        assert!(!app.notifications);
+
+        assert!(app.handle(Event::Toggled {
+            action: "controls:notifications",
+            checked: true,
+        }));
+        assert!(app.notifications);
+
+        assert!(app.handle(Event::Toggled {
+            action: "controls:notifications",
+            checked: false,
+        }));
+        assert!(!app.notifications);
+
+        assert!(!app.handle(Event::Toggled {
+            action: "unknown",
+            checked: true,
+        }));
+    }
+
+    #[test]
     fn view_produces_elements_for_all_screens() {
         let mut app = GalleryApp::new();
         for demo in [
@@ -741,6 +811,7 @@ mod tests {
             Demo::Form,
             Demo::Media,
             Demo::Styling,
+            Demo::Controls,
         ] {
             app.demo = demo;
             let element = app.view();

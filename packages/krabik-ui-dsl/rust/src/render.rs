@@ -233,7 +233,7 @@ fn collect_relative_frames(
 mod tests {
     use super::*;
     use crate::layout::LayoutResult;
-    use crate::ui::{Button, Column, Element, Row, ScrollView, Text};
+    use crate::ui::{Button, Column, Element, Row, ScrollView, Switch, Text};
 
     fn tree(element: Element) -> UiNode {
         crate::tree::build(&element)
@@ -312,6 +312,30 @@ mod tests {
         let ops = diff(&old, &new);
         assert_eq!(ops.len(), 1);
         assert!(matches!(&ops[0], Op::Remove { id } if *id == old.children[0].children[1].id));
+    }
+
+    #[test]
+    fn toggling_a_switch_updates_the_same_widget() {
+        let old = tree(
+            Column::new()
+                .child(Switch::new(false).action("toggle"))
+                .into(),
+        );
+        let new = tree(
+            Column::new()
+                .child(Switch::new(true).action("toggle"))
+                .into(),
+        );
+
+        let ops = diff(&old, &new);
+        assert_eq!(ops.len(), 1);
+        match &ops[0] {
+            Op::Update(node) => {
+                assert_eq!(node.id, old.children[0].children[0].id);
+                assert!(matches!(&node.kind, NodeKind::Switch(props) if props.checked));
+            }
+            other => panic!("expected update, got {other:?}"),
+        }
     }
 
     #[test]

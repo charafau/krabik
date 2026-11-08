@@ -34,6 +34,10 @@ const BUTTON_PADDING_X: f32 = 16.0;
 const BUTTON_PADDING_Y: f32 = 12.0;
 /// The smallest height a button is allowed to have.
 const BUTTON_MIN_HEIGHT: f32 = 20.0;
+/// The default intrinsic width of a switch in logical points.
+const SWITCH_WIDTH: f32 = 52.0;
+/// The default intrinsic height of a switch in logical points.
+const SWITCH_HEIGHT: f32 = 32.0;
 
 /// Calculates the absolute frame of every node in the tree.
 pub fn compute(root: &UiNode, viewport: Size, measurer: &dyn Measure) -> LayoutResult {
@@ -292,6 +296,12 @@ fn content_size(
                 },
             )
         }
+        // Switches have a platform-defined intrinsic size. The default matches
+        // the Material track and is overridable with an explicit dimension.
+        NodeKind::Switch(_) => Size::new(
+            max_width.map_or(SWITCH_WIDTH, |width| width.min(SWITCH_WIDTH)),
+            SWITCH_HEIGHT,
+        ),
         // Images are sized explicitly by the application in this milestone.
         NodeKind::Image(_) => Size::ZERO,
         _ => Size::ZERO,
@@ -355,8 +365,8 @@ mod tests {
     use crate::measure::ApproximateMeasure;
     use crate::tree::ROOT_ID;
     use crate::ui::{
-        Button, Column, EdgeInsets, Element, Image, ImageSource, Row, ScrollView, Spacer, Text,
-        TextField,
+        Button, Column, EdgeInsets, Element, Image, ImageSource, Row, ScrollView, Spacer, Switch,
+        Text, TextField,
     };
 
     /// Measures every text as the same fixed box.
@@ -713,5 +723,37 @@ mod tests {
         let frames = compute(&tree, Size::new(300.0, 600.0), &ApproximateMeasure).frames;
 
         assert_eq!(frames[&tree.children[0].children[0].id].height, 40.0);
+    }
+
+    #[test]
+    fn a_switch_has_an_intrinsic_size() {
+        let element: Element = Column::new()
+            .align_items(Align::Start)
+            .child(Switch::new(false))
+            .into();
+
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure).frames;
+
+        assert_eq!(
+            frames[&tree.children[0].children[0].id],
+            Rect::new(0.0, 0.0, 52.0, 32.0)
+        );
+    }
+
+    #[test]
+    fn an_explicit_size_overrides_the_switch_intrinsic_size() {
+        let element: Element = Column::new()
+            .align_items(Align::Start)
+            .child(Switch::new(false).width(80).height(40))
+            .into();
+
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &FixedMeasure).frames;
+
+        assert_eq!(
+            frames[&tree.children[0].children[0].id],
+            Rect::new(0.0, 0.0, 80.0, 40.0)
+        );
     }
 }
