@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 
 use crate::ui::{
-    ButtonProps, Element, ElementKind, ImageProps, Length, ScrollProps, Style, TextFieldProps,
-    TextProps,
+    ButtonProps, Element, ElementKind, ImageProps, Length, ScrollProps, Style, SwitchProps,
+    TextFieldProps, TextProps,
 };
 
 /// The identifier of the synthetic root node.
@@ -34,8 +34,10 @@ pub enum NodeKind {
     Text(TextProps),
     /// A native button.
     Button(ButtonProps),
-    /// A native single-line text input.
+    /// A native text input.
     TextField(TextFieldProps),
+    /// A native on/off switch.
+    Switch(SwitchProps),
     /// A native image.
     Image(ImageProps),
     /// A native scroll container.
@@ -47,7 +49,12 @@ impl NodeKind {
     pub fn is_native(&self) -> bool {
         matches!(
             self,
-            Self::Text(_) | Self::Button(_) | Self::TextField(_) | Self::Image(_) | Self::Scroll(_)
+            Self::Text(_)
+                | Self::Button(_)
+                | Self::TextField(_)
+                | Self::Switch(_)
+                | Self::Image(_)
+                | Self::Scroll(_)
         )
     }
 
@@ -118,6 +125,7 @@ fn build_node(element: &Element, parent: NodeId, index: usize) -> UiNode {
         ElementKind::Text(props) => NodeKind::Text(props.clone()),
         ElementKind::Button(props) => NodeKind::Button(props.clone()),
         ElementKind::TextField(props) => NodeKind::TextField(props.clone()),
+        ElementKind::Switch(props) => NodeKind::Switch(*props),
         ElementKind::Image(props) => NodeKind::Image(props.clone()),
         ElementKind::Scroll(props) => NodeKind::Scroll(*props),
     };
@@ -227,7 +235,7 @@ fn collect_renderable_parents(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::{Button, Column, Text};
+    use crate::ui::{Button, Column, Switch, Text};
 
     fn sample() -> Element {
         Column::new()
@@ -293,11 +301,27 @@ mod tests {
     fn different_kinds_get_different_identifiers() {
         let text = build(&Column::new().child(Text::new("x")).into());
         let button = build(&Column::new().child(Button::new("x")).into());
+        let switch = build(&Column::new().child(Switch::new(false)).into());
 
         assert_ne!(
             text.children[0].children[0].id,
             button.children[0].children[0].id
         );
+        assert_ne!(
+            text.children[0].children[0].id,
+            switch.children[0].children[0].id
+        );
+    }
+
+    #[test]
+    fn a_switch_is_native() {
+        let tree = build(&Column::new().child(Switch::new(true)).into());
+
+        assert!(matches!(
+            tree.children[0].children[0].kind,
+            NodeKind::Switch(_)
+        ));
+        assert!(tree.children[0].children[0].kind.is_native());
     }
 
     #[test]

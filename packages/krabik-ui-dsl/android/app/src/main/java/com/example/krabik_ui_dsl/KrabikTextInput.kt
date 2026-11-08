@@ -96,6 +96,11 @@ class KrabikTextInput(
         this.keyboard = keyboard
         this.imeAction = imeAction
 
+        // Changing the input type or line mode can move the cursor, so the
+        // current selection is restored afterwards.
+        val start = selectionStart.coerceAtLeast(0)
+        val end = selectionEnd.coerceAtLeast(0)
+
         setSingleLine(!multiline)
         setGravity(if (multiline) Gravity.START or Gravity.TOP else Gravity.START or Gravity.CENTER_VERTICAL)
 
@@ -120,6 +125,9 @@ class KrabikTextInput(
             4 -> EditorInfo.IME_ACTION_SEND
             else -> EditorInfo.IME_ACTION_UNSPECIFIED
         }
+
+        val length = text?.length ?: 0
+        setSelection(start.coerceAtMost(length), end.coerceAtMost(length))
     }
 
     /**

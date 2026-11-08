@@ -54,7 +54,8 @@ object KrabikStyle {
                 floatArrayOf(cornerRadius, cornerRadius, cornerRadius, cornerRadius)
             },
         )
-        val hasShape = hasBackground || hasGradient || hasBorder || radii.any { it > 0f }
+        val hasShape = hasBackground || hasGradient || hasBorder ||
+            radii.any { it > 0f } || elevation > 0f
 
         if (!hasShape) {
             // Restore what the platform gave the view, if we ever replaced it.
