@@ -91,6 +91,15 @@ impl Runtime {
         }
     }
 
+    /// Returns the action of the switch with the given identifier, if any.
+    pub fn switch_action(&self, id: NodeId) -> Option<&'static str> {
+        let node = tree::find(&self.tree, id)?;
+        match &node.kind {
+            NodeKind::Switch(props) if !props.action.is_empty() => Some(props.action),
+            _ => None,
+        }
+    }
+
     /// Returns the action of the text input with the given identifier, if any.
     pub fn text_field_action(&self, id: NodeId) -> Option<&'static str> {
         let node = tree::find(&self.tree, id)?;
@@ -144,7 +153,7 @@ mod tests {
     use crate::geometry::Constraints;
     use crate::measure::ApproximateMeasure;
     use crate::render::RecordingRenderer;
-    use crate::ui::{Button, Column, Text, TextField, TextProps};
+    use crate::ui::{Button, Column, Switch, Text, TextField, TextProps};
 
     fn viewport() -> Size {
         Size::new(300.0, 600.0)
@@ -223,6 +232,19 @@ mod tests {
         let field = runtime.tree().children[0].children[0].id;
         assert_eq!(runtime.text_field_action(field), Some("name"));
         assert_eq!(runtime.click(field), None);
+    }
+
+    #[test]
+    fn switches_resolve_to_their_action() {
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        let element: Element = Column::new()
+            .child(Switch::new(false).action("notifications"))
+            .into();
+        runtime.update(&element, viewport());
+
+        let switch = runtime.tree().children[0].children[0].id;
+        assert_eq!(runtime.switch_action(switch), Some("notifications"));
+        assert_eq!(runtime.switch_action(ROOT_ID), None);
     }
 
     #[test]

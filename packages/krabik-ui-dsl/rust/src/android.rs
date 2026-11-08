@@ -24,7 +24,7 @@ use crate::runtime::Runtime;
 use crate::tree::{NodeId, NodeKind};
 use crate::ui::{
     Axis, EdgeInsets, FontWeight, GradientDirection, ImageProps, ImageScale, ImageSource,
-    ImeAction, KeyboardType, TextAlign, TextFieldProps, TextProps,
+    ImeAction, KeyboardType, SwitchProps, TextAlign, TextFieldProps, TextProps,
 };
 
 const TEXT_VIEW_CLASS: &JNIStr = jni_str!("android/widget/TextView");
@@ -42,6 +42,7 @@ const LAYOUT_PARAMS_CLASS: &JNIStr = jni_str!("android/view/ViewGroup$LayoutPara
 const FRAME_PARAMS_CLASS: &JNIStr = jni_str!("android/widget/FrameLayout$LayoutParams");
 const KRABIK_STYLE_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikStyle");
 const TEXT_INPUT_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikTextInput");
+const SWITCH_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSwitch");
 const KRABIK_IMAGES_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikImages");
 const KRABIK_VIEWS_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikViews");
 
@@ -500,6 +501,7 @@ impl AndroidState {
                 NodeKind::Text(_) => TEXT_VIEW_CLASS,
                 NodeKind::Button(_) => BUTTON_CLASS,
                 NodeKind::TextField(_) => TEXT_INPUT_CLASS,
+                NodeKind::Switch(_) => SWITCH_CLASS,
                 NodeKind::Image(_) => IMAGE_VIEW_CLASS,
                 // Decorated layout containers become real containers so they can
                 // draw behind their children and clip them to rounded corners.
@@ -509,7 +511,7 @@ impl AndroidState {
             };
 
             let class = jcall!(env, env.find_class(class_name))?;
-            if matches!(node.kind, NodeKind::TextField(_)) {
+            if matches!(node.kind, NodeKind::TextField(_) | NodeKind::Switch(_)) {
                 jcall!(
                     env,
                     env.new_object(
@@ -538,6 +540,8 @@ impl AndroidState {
 
         if let NodeKind::TextField(props) = &node.kind {
             update_text_field(env, &view, props)?;
+        } else if let NodeKind::Switch(props) = &node.kind {
+            update_switch(env, &view, props)?;
         } else if let NodeKind::Image(props) = &node.kind {
             update_image(env, &view, props)?;
         } else {
@@ -590,6 +594,8 @@ fn update_view(
 ) -> JniResult<()> {
     if let NodeKind::TextField(props) = &node.kind {
         update_text_field(env, view, props)?;
+    } else if let NodeKind::Switch(props) = &node.kind {
+        update_switch(env, view, props)?;
     } else if let NodeKind::Image(props) = &node.kind {
         update_image(env, view, props)?;
     } else {
@@ -670,7 +676,6 @@ fn update_text_field(
             &[JValue::Int(props.color as jint)],
         )
     )?;
-    apply_typeface(env, view, matches!(props.weight, FontWeight::Bold))?;
 
     let keyboard = match props.keyboard {
         KeyboardType::Text => 0,
@@ -697,6 +702,22 @@ fn update_text_field(
                 JValue::Int(keyboard),
                 JValue::Int(ime_action),
             ],
+        )
+    )?;
+    // `configure` changes the input type and line mode, which can reset the
+    // typeface, so the font is applied after the platform configuration.
+    apply_typeface(env, view, matches!(props.weight, FontWeight::Bold))?;
+    Ok(())
+}
+
+fn update_switch(env: &mut Env<'_>, view: &JObject<'_>, props: &SwitchProps) -> JniResult<()> {
+    let _ = jcall!(
+        env,
+        env.call_method(
+            view,
+            jni_str!("setCheckedSilently"),
+            jni_sig!("(Z)V"),
+            &[JValue::Bool(props.checked)],
         )
     )?;
     Ok(())
@@ -991,17 +1012,16 @@ fn apply_style(env: &mut Env<'_>, view: &JObject<'_>, node: &RenderNode) -> JniR
 
 /// Applies interaction state and accessibility metadata to a native view.
 fn apply_accessibility(env: &mut Env<'_>, view: &JObject<'_>, node: &RenderNode) -> JniResult<()> {
-    if let Some(enabled) = node.style.enabled {
-        let _ = jcall!(
-            env,
-            env.call_method(
-                view,
-                jni_str!("setEnabled"),
-                jni_sig!("(Z)V"),
-                &[JValue::Bool(enabled)],
-            )
-        )?;
-    }
+    // Always set the flag so removing `.enabled(false)` restores the view.
+    let _ = jcall!(
+        env,
+        env.call_method(
+            view,
+            jni_str!("setEnabled"),
+            jni_sig!("(Z)V"),
+            &[JValue::Bool(node.style.enabled.unwrap_or(true))],
+        )
+    )?;
 
     match &node.style.accessibility_label {
         Some(label) => {
@@ -1289,6 +1309,32 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFoc
             .runtime
             .text_field_focus_action(NodeId(node_id as u64))
             && state.app.handle(Event::FocusChanged { action, focused })
+        {
+            state.render(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Dispatches a switch toggle back into the Rust tree.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnCheckedChanged<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    node_id: jlong,
+    checked: jboolean,
+) {
+    run(&mut unenv, "nativeOnCheckedChanged", |env| {
+        let mut states = states().lock().expect("android states");
+        let Some(state) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+
+        if let Some(action) = state.runtime.switch_action(NodeId(node_id as u64))
+            && state.app.handle(Event::Toggled { action, checked })
         {
             state.render(env)?;
         }

@@ -36,6 +36,13 @@ pub enum Event<'a> {
         /// Whether the input is now focused.
         focused: bool,
     },
+    /// A switch was toggled.
+    Toggled {
+        /// The action configured on the switch.
+        action: &'static str,
+        /// Whether the switch is now on.
+        checked: bool,
+    },
 }
 
 impl Event<'_> {
@@ -45,7 +52,8 @@ impl Event<'_> {
             Self::Click { action }
             | Self::TextChanged { action, .. }
             | Self::Submitted { action }
-            | Self::FocusChanged { action, .. } => action,
+            | Self::FocusChanged { action, .. }
+            | Self::Toggled { action, .. } => action,
         }
     }
 }

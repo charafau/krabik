@@ -304,6 +304,25 @@ impl TextFieldProps {
     }
 }
 
+/// Platform-independent properties of a switch node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SwitchProps {
+    /// Whether the switch is on.
+    pub checked: bool,
+    /// The action dispatched whenever the switch is toggled.
+    pub action: &'static str,
+}
+
+impl SwitchProps {
+    /// Creates a switch in the given state with no action.
+    pub const fn new(checked: bool) -> Self {
+        Self {
+            checked,
+            action: "",
+        }
+    }
+}
+
 /// The axis a scroll container scrolls along.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Axis {
@@ -519,6 +538,7 @@ pub(crate) enum ElementKind {
     Text(TextProps),
     Button(ButtonProps),
     TextField(TextFieldProps),
+    Switch(SwitchProps),
     Image(ImageProps),
     Scroll(ScrollProps),
 }
@@ -536,6 +556,7 @@ impl ElementKind {
             Self::Text(_) => 4,
             Self::Button(_) => 5,
             Self::TextField(_) => 6,
+            Self::Switch(_) => 10,
             Self::Image(_) => 7,
             Self::Scroll(props) => match props.axis {
                 Axis::Vertical => 8,
@@ -914,7 +935,7 @@ impl From<Button> for Element {
     }
 }
 
-/// A native single-line text input.
+/// A native text input.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextField(pub(crate) Element);
 
@@ -1001,6 +1022,41 @@ impl TextField {
 
 impl From<TextField> for Element {
     fn from(component: TextField) -> Self {
+        component.0
+    }
+}
+
+/// A native on/off switch.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Switch(pub(crate) Element);
+
+impl Switch {
+    /// Creates a switch in the given state.
+    pub fn new(checked: bool) -> Self {
+        Self(Element::leaf(ElementKind::Switch(SwitchProps::new(
+            checked,
+        ))))
+    }
+
+    /// Sets whether the switch is on.
+    pub fn checked(mut self, checked: bool) -> Self {
+        if let ElementKind::Switch(props) = &mut self.0.kind {
+            props.checked = checked;
+        }
+        self
+    }
+
+    /// Sets the action dispatched whenever the switch is toggled.
+    pub fn action(mut self, action: &'static str) -> Self {
+        if let ElementKind::Switch(props) = &mut self.0.kind {
+            props.action = action;
+        }
+        self
+    }
+}
+
+impl From<Switch> for Element {
+    fn from(component: Switch) -> Self {
         component.0
     }
 }
@@ -1117,6 +1173,7 @@ style_builder!(Spacer);
 style_builder!(Text);
 style_builder!(Button);
 style_builder!(TextField);
+style_builder!(Switch);
 style_builder!(Image);
 style_builder!(ScrollView);
 text_builder!(Text);
@@ -1164,5 +1221,16 @@ mod tests {
     fn keys_are_kept_on_the_element() {
         let element: Element = Text::new("a").key("first").into();
         assert_eq!(element.key(), Some("first"));
+    }
+
+    #[test]
+    fn switch_keeps_its_state_and_action() {
+        let element: Element = Switch::new(true).action("toggle").into();
+
+        let ElementKind::Switch(props) = element.kind else {
+            panic!("expected switch");
+        };
+        assert!(props.checked);
+        assert_eq!(props.action, "toggle");
     }
 }

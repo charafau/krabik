@@ -96,6 +96,13 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
         }
     }
 
+    /** Forwards a toggle of a native switch back to Rust. */
+    fun onCheckedChanged(nodeId: Long, checked: Boolean) {
+        if (handle != 0L) {
+            nativeOnCheckedChanged(handle, nodeId, checked)
+        }
+    }
+
     /** Releases the Rust state when the activity goes away. */
     fun destroy() {
         if (handle != 0L) {
@@ -118,6 +125,8 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     private external fun nativeOnSubmitted(handle: Long, nodeId: Long)
 
     private external fun nativeOnFocusChanged(handle: Long, nodeId: Long, focused: Boolean)
+
+    private external fun nativeOnCheckedChanged(handle: Long, nodeId: Long, checked: Boolean)
 
     private external fun nativeDestroy(handle: Long)
 

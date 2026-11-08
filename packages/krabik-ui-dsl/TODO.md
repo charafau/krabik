@@ -30,6 +30,7 @@ All core widgets from SPEC.md §7.1 are implemented on Android.
 | `Text` | [`update_text()`](rust/src/android.rs) | `TextView` |
 | `Button` | [`configure_button()`](rust/src/android.rs) | `Button` |
 | `TextField` | [`update_text_field()`](rust/src/android.rs) | Custom `KrabikTextInput` (EditText) |
+| `Switch` | [`update_switch()`](rust/src/android.rs) | Custom `KrabikSwitch` (`android.widget.Switch`) |
 | `Image` | [`update_image()`](rust/src/android.rs) | `ImageView` (assets + URLs) |
 | `ScrollView` | [`create_scroll()`](rust/src/android.rs) | Custom scroll container (vertical + horizontal) |
 
@@ -42,6 +43,13 @@ Full `Style` system (applied via [`apply_style()`](rust/src/android.rs)):
 - Enabled / disabled
 - Accessibility label
 
+Additional capabilities:
+- Text alignment, max lines and ellipsis
+- Multiline, secure and keyboard-configured inputs
+- Submit and focus events for inputs
+- Aspect-ratio sizing
+- Controls demo with native switches
+
 ### 5. Type-Safe State Management & Event Dispatch ✅
 
 Events are typed in `rust/src/app.rs`:
@@ -52,6 +60,7 @@ pub enum Event<'a> {
     TextChanged { action: &'static str, value: &'a str },
     Submitted { action: &'static str },
     FocusChanged { action: &'static str, focused: bool },
+    Toggled { action: &'static str, checked: bool },
 }
 ```
 
@@ -86,5 +95,7 @@ In `AndroidState::render`, every node property update issues separate JNI calls 
 
 - Virtualized lists (RecyclerView / UICollectionView-based)
 - Animations via native platform APIs
+- Native intrinsic measurement for switches and images
+- Disabled-state styling for custom backgrounds (native text already dims)
 - More widgets: Checkbox, RadioButton, Slider, ProgressIndicator, DatePicker, Dialog, BottomSheet, Navigation
 - Platform-specific extensions
