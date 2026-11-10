@@ -122,6 +122,25 @@ final class GalleryUITests: XCTestCase {
         capture("11-list")
         back()
 
+        // Variable-height rows are measured on first sight, then reused.
+        if !app.buttons["List (variable)"].isHittable {
+            app.swipeUp()
+        }
+        open("List (variable)")
+        let variableRow = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Row 1 -"),
+        ).firstMatch
+        XCTAssertTrue(variableRow.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(rowNumbers().count, 40)
+        for _ in 0..<6 {
+            app.swipeUp()
+        }
+        let variableNumbers = rowNumbers()
+        XCTAssertLessThanOrEqual(variableNumbers.count, 40)
+        XCTAssertGreaterThan(variableNumbers.max() ?? 0, 5)
+        capture("12-list-variable")
+        back()
+
         XCTAssertTrue(app.staticTexts["Native UI DSL"].waitForExistence(timeout: 5))
     }
 
@@ -141,7 +160,10 @@ final class GalleryUITests: XCTestCase {
         app.staticTexts
             .matching(NSPredicate(format: "label BEGINSWITH %@", "Row "))
             .allElementsBoundByIndex
-            .compactMap { Int($0.label.dropFirst("Row ".count)) }
+            .compactMap { element -> Int? in
+                let digits = element.label.dropFirst("Row ".count).prefix { $0.isNumber }
+                return Int(digits)
+            }
     }
 
     private func waitForAbsence(_ element: XCUIElement) {
