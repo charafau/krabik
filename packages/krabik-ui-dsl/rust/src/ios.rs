@@ -563,26 +563,58 @@ fn update_field(field: &UITextField, props: &TextFieldProps) {
     if current != props.value {
         field.setText(Some(&NSString::from_str(&props.value)));
     }
-    field.setPlaceholder(Some(&NSString::from_str(&props.placeholder)));
+    // The remaining setters reconfigure the text input system, which can
+    // disturb active typing; skip them when the values already match so a
+    // re-render between keystrokes stays a no-op.
+    let placeholder = field.placeholder().map(|text| text.to_string());
+    if placeholder.as_deref() != Some(props.placeholder.as_str()) {
+        field.setPlaceholder(Some(&NSString::from_str(&props.placeholder)));
+    }
     field.setFont(Some(&system_font(props.size, props.weight)));
     field.setTextColor(Some(&color(props.color)));
-    set_text_input_traits(
-        field,
-        match props.keyboard {
-            KeyboardType::Text => UIKeyboardType::Default,
-            KeyboardType::Email => UIKeyboardType::EmailAddress,
-            KeyboardType::Number => UIKeyboardType::NumberPad,
-            KeyboardType::Phone => UIKeyboardType::PhonePad,
-        },
-        match props.ime_action {
-            ImeAction::Default => UIReturnKeyType::Default,
-            ImeAction::Done => UIReturnKeyType::Done,
-            ImeAction::Next => UIReturnKeyType::Next,
-            ImeAction::Search => UIReturnKeyType::Search,
-            ImeAction::Send => UIReturnKeyType::Send,
-        },
-    );
-    field.setSecureTextEntry(props.secure);
+    let keyboard_type = match props.keyboard {
+        KeyboardType::Text => UIKeyboardType::Default,
+        KeyboardType::Email => UIKeyboardType::EmailAddress,
+        KeyboardType::Number => UIKeyboardType::NumberPad,
+        KeyboardType::Phone => UIKeyboardType::PhonePad,
+    };
+    let return_key_type = match props.ime_action {
+        ImeAction::Default => UIReturnKeyType::Default,
+        ImeAction::Done => UIReturnKeyType::Done,
+        ImeAction::Next => UIReturnKeyType::Next,
+        ImeAction::Search => UIReturnKeyType::Search,
+        ImeAction::Send => UIReturnKeyType::Send,
+    };
+    let (current_keyboard, current_return_key, current_secure) = text_input_traits(field);
+    if current_keyboard != keyboard_type.0 || current_return_key != return_key_type.0 {
+        set_text_input_traits(field, keyboard_type, return_key_type);
+    }
+    if current_secure != props.secure {
+        field.setSecureTextEntry(props.secure);
+    }
+}
+
+/// Reads the keyboard, return-key, and secure-entry traits through the raw
+/// runtime.
+///
+/// Mirrors [`set_text_input_traits`]: `UITextField` does not declare these
+/// `UITextInputTraits` accessors itself, so objc2's debug-time method
+/// verification rejects the generated getters even though messaging works.
+fn text_input_traits(field: &UITextField) -> (isize, isize, bool) {
+    let receiver = field as *const UITextField as *mut AnyObject;
+    // SAFETY: all three getters take no arguments and return an integer
+    // (`NSInteger` / `BOOL`), which arrives in `x0` on arm64.
+    unsafe {
+        let send_integer: unsafe extern "C-unwind" fn(*mut AnyObject, Sel) -> isize =
+            std::mem::transmute(objc2::ffi::objc_msgSend as *const ());
+        let send_bool: unsafe extern "C-unwind" fn(*mut AnyObject, Sel) -> i8 =
+            std::mem::transmute(objc2::ffi::objc_msgSend as *const ());
+        (
+            send_integer(receiver, objc2::sel!(keyboardType)),
+            send_integer(receiver, objc2::sel!(returnKeyType)),
+            send_bool(receiver, objc2::sel!(isSecureTextEntry)) != 0,
+        )
+    }
 }
 
 /// Sets the keyboard and return-key traits through the raw runtime.
@@ -860,7 +892,7 @@ fn dispatch_click(handle: u64, id: NodeId) {
     guard("click", || {
         with_state(handle, |state| {
             if let Some(action) = state.runtime.click(id)
-                && state.app.handle(Event::Click { action })
+                && state.app.handle(Event::Click { action: &action })
             {
                 state.render();
             }
@@ -872,7 +904,10 @@ fn dispatch_text(handle: u64, id: NodeId, value: &str) {
     guard("text", || {
         with_state(handle, |state| {
             if let Some(action) = state.runtime.text_field_action(id)
-                && state.app.handle(Event::TextChanged { action, value })
+                && state.app.handle(Event::TextChanged {
+                    action: &action,
+                    value,
+                })
             {
                 state.render();
             }
@@ -884,7 +919,7 @@ fn dispatch_submitted(handle: u64, id: NodeId) {
     guard("submitted", || {
         with_state(handle, |state| {
             if let Some(action) = state.runtime.text_field_submit_action(id)
-                && state.app.handle(Event::Submitted { action })
+                && state.app.handle(Event::Submitted { action: &action })
             {
                 state.render();
             }
@@ -896,7 +931,10 @@ fn dispatch_focus(handle: u64, id: NodeId, focused: bool) {
     guard("focus", || {
         with_state(handle, |state| {
             if let Some(action) = state.runtime.text_field_focus_action(id)
-                && state.app.handle(Event::FocusChanged { action, focused })
+                && state.app.handle(Event::FocusChanged {
+                    action: &action,
+                    focused,
+                })
             {
                 state.render();
             }
@@ -908,7 +946,10 @@ fn dispatch_checked(handle: u64, id: NodeId, checked: bool) {
     guard("checked", || {
         with_state(handle, |state| {
             if let Some(action) = state.runtime.switch_action(id)
-                && state.app.handle(Event::Toggled { action, checked })
+                && state.app.handle(Event::Toggled {
+                    action: &action,
+                    checked,
+                })
             {
                 state.render();
             }

@@ -125,7 +125,7 @@ fn build_node(element: &Element, parent: NodeId, index: usize) -> UiNode {
         ElementKind::Text(props) => NodeKind::Text(props.clone()),
         ElementKind::Button(props) => NodeKind::Button(props.clone()),
         ElementKind::TextField(props) => NodeKind::TextField(props.clone()),
-        ElementKind::Switch(props) => NodeKind::Switch(*props),
+        ElementKind::Switch(props) => NodeKind::Switch(props.clone()),
         ElementKind::Image(props) => NodeKind::Image(props.clone()),
         ElementKind::Scroll(props) => NodeKind::Scroll(*props),
     };

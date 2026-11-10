@@ -1225,7 +1225,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnCli
         };
 
         if let Some(action) = state.runtime.click(NodeId(node_id as u64))
-            && state.app.handle(Event::Click { action })
+            && state.app.handle(Event::Click { action: &action })
         {
             state.render(env)?;
         }
@@ -1253,7 +1253,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnTex
 
         if let Some(action) = state.runtime.text_field_action(NodeId(node_id as u64))
             && state.app.handle(Event::TextChanged {
-                action,
+                action: &action,
                 value: &value,
             })
         {
@@ -1280,7 +1280,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSub
         if let Some(action) = state
             .runtime
             .text_field_submit_action(NodeId(node_id as u64))
-            && state.app.handle(Event::Submitted { action })
+            && state.app.handle(Event::Submitted { action: &action })
         {
             state.render(env)?;
         }
@@ -1308,7 +1308,10 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFoc
         if let Some(action) = state
             .runtime
             .text_field_focus_action(NodeId(node_id as u64))
-            && state.app.handle(Event::FocusChanged { action, focused })
+            && state.app.handle(Event::FocusChanged {
+                action: &action,
+                focused,
+            })
         {
             state.render(env)?;
         }
@@ -1334,7 +1337,10 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnChe
         };
 
         if let Some(action) = state.runtime.switch_action(NodeId(node_id as u64))
-            && state.app.handle(Event::Toggled { action, checked })
+            && state.app.handle(Event::Toggled {
+                action: &action,
+                checked,
+            })
         {
             state.render(env)?;
         }
