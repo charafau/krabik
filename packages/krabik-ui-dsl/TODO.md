@@ -83,6 +83,30 @@ render holds it. All event dispatch and `nativeRender` run on the main thread,
 so contention can only mean a widget listener fired synchronously during a
 render and re-entered the entry point; blocking there would deadlock the UI.
 
+### 3b. Virtualized lists ✅
+
+[`List`](rust/src/ui.rs) (`List::new(items).item_height(..).buffer(..).key(..).row(..)`)
+expands during tree build into a native scroll container whose content is
+`[top spacer, visible rows, bottom spacer]`. Only the rows around the viewport
+become elements and native views; the spacers give the scroll extent the full
+list height, so rows keep their absolute content position and native scrolling
+needs no repositioning when the window slides.
+
+- Rows are keyed, so their node identifiers stay stable across window changes.
+- The runtime owns the scroll offset per list and rebuilds only when the
+  visible index range moves; sub-row scrolls just update the stored offset.
+- Android reports offsets from `KrabikScrollView` (coalesced to once per frame,
+  pixels converted to points in `nativeOnScroll`).
+- Gallery demo: 1000 rows with a 44-point row height and a four-row buffer.
+
+Covered by Rust tests (window maths, spacer geometry, row-id stability,
+rebuild throttling) and an Espresso test that scrolls the demo and asserts the
+materialized row count stays bounded.
+
+**Remaining on this track:** iOS renders lists but does not report scroll
+offsets yet, so it shows the first window (`UIScrollViewDelegate` wiring), and
+rows are fixed-height until the measurement/prefix-sum phase.
+
 ### 3. Expand Native Widget Set ✅
 
 All core widgets from SPEC.md §7.1 are implemented on Android.
@@ -215,7 +239,9 @@ matters for large lists.
 
 ## Future (not yet started)
 
-- Virtualized lists (RecyclerView / UICollectionView-based)
+- Variable-height list rows (the runtime measures rows and keeps a prefix-sum
+  offset table; the platform view recycling of RecyclerView/UICollectionView is
+  only worth it if a profile asks for it)
 - Animations via native platform APIs
 - Native intrinsic measurement for switches and images
 - Disabled-state styling for custom backgrounds (native text already dims)
