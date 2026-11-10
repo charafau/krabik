@@ -95,6 +95,14 @@ needs no repositioning when the window slides.
 - Rows are keyed, so their node identifiers stay stable across window changes.
 - The runtime owns the scroll offset per list and rebuilds only when the
   visible index range moves; sub-row scrolls just update the stored offset.
+- Rows may have different heights. A list without `.item_height()` materializes
+  the window from an estimated height, measures the rows it built after layout,
+  caches the heights by item key, and rebuilds (at most three passes) until the
+  prefix sums and the window agree. The estimate is configuration, not derived
+  state, so a scroll clamp cannot feed back into another rebuild.
+- A list whose item keys change while keeping its node id (for example after a
+  screen swap at the same tree position) discards its cached heights and scroll
+  offset instead of applying them to the new items.
 - Android reports offsets from `KrabikScrollView` (coalesced to once per frame,
   pixels converted to points in `nativeOnScroll`).
 - iOS reports offsets from a `UIScrollViewDelegate` implemented in Rust; the
@@ -106,9 +114,11 @@ Covered by Rust tests (window maths, spacer geometry, row-id stability,
 rebuild throttling) and an Espresso test that scrolls the demo and asserts the
 materialized row count stays bounded.
 
-**Remaining on this track:** rows are fixed-height until the measurement and
-prefix-sum phase; scrolling a focused field out of the window also loses its
-native state.
+**Remaining on this track:** scrolling a focused field out of the window loses
+its native state (pinning the focused row is the next polish), the prefix sums
+are recomputed per build (fine for hundreds of rows, not for tens of thousands),
+and native view recycling (RecyclerView/UICollectionView) is only worth adding
+if a profile asks for it.
 
 ### 3. Expand Native Widget Set ✅
 
