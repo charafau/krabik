@@ -5,11 +5,13 @@
 //! position (or its key) so that rebuilding the same description yields the
 //! same identifiers, which lets the renderer update native widgets in place.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
+use crate::geometry::Size;
 use crate::ui::{
-    ButtonProps, Element, ElementKind, ImageProps, Length, ScrollProps, Style, SwitchProps,
-    TextFieldProps, TextProps,
+    Axis, ButtonProps, Element, ElementKind, ImageProps, Length, ListProps, ScrollProps, Style,
+    SwitchProps, TextFieldProps, TextProps,
 };
 
 /// The identifier of the synthetic root node.
@@ -100,11 +102,81 @@ impl UiNode {
     }
 }
 
+/// The extent of one virtualized list, recorded while building it.
+///
+/// Scroll updates use it to decide whether the visible window changed without
+/// rebuilding the tree.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ListExtent {
+    /// The number of items in the list.
+    pub count: usize,
+    /// The fixed height of one row, in logical points.
+    pub item_height: f32,
+    /// Extra rows materialized above and below the viewport.
+    pub buffer: usize,
+}
+
+/// What a build learned about the tree, besides the tree itself.
+#[derive(Debug, Default)]
+pub struct BuildInfo {
+    /// The extent of every list, keyed by its scroll node id.
+    pub lists: HashMap<NodeId, ListExtent>,
+}
+
 /// Converts a declarative element into the internal tree.
+///
+/// Lists are materialized at offset zero; use [`build_with`] to account for
+/// scroll positions.
 pub fn build(element: &Element) -> UiNode {
+    let offsets = HashMap::new();
+    build_with(element, &offsets, Size::ZERO).0
+}
+
+/// Converts a declarative element into the internal tree with scroll state.
+pub fn build_with(
+    element: &Element,
+    offsets: &HashMap<NodeId, f32>,
+    viewport: Size,
+) -> (UiNode, BuildInfo) {
+    let mut info = BuildInfo::default();
     let mut root = UiNode::empty();
-    root.children.push(build_node(element, ROOT_ID, 0));
-    root
+    let mut context = BuildContext {
+        offsets,
+        viewport,
+        info: &mut info,
+    };
+    root.children
+        .push(build_node(element, ROOT_ID, 0, &mut context));
+    (root, info)
+}
+
+/// State [`build_node`] needs beyond the element itself.
+struct BuildContext<'a> {
+    offsets: &'a HashMap<NodeId, f32>,
+    viewport: Size,
+    info: &'a mut BuildInfo,
+}
+
+/// The half-open range of items a list materializes for a viewport and offset.
+///
+/// The range includes `buffer` rows on each side so small scrolls do not
+/// immediately cross a boundary.
+pub fn list_window(extent: ListExtent, viewport: f32, offset: f32) -> (usize, usize) {
+    if extent.count == 0 || extent.item_height <= 0.0 {
+        return (0, 0);
+    }
+
+    let offset = offset.clamp(0.0, max_scroll_offset(extent, viewport));
+    let first = (offset / extent.item_height).floor() as usize;
+    let visible = ((viewport / extent.item_height).ceil() as usize).max(1);
+    let start = first.saturating_sub(extent.buffer).min(extent.count);
+    let end = (first + visible + extent.buffer).min(extent.count);
+    (start, end)
+}
+
+/// The largest meaningful scroll offset of a list.
+pub fn max_scroll_offset(extent: ListExtent, viewport: f32) -> f32 {
+    (extent.count as f32 * extent.item_height - viewport).max(0.0)
 }
 
 fn root_style() -> Style {
@@ -115,8 +187,12 @@ fn root_style() -> Style {
     }
 }
 
-fn build_node(element: &Element, parent: NodeId, index: usize) -> UiNode {
+fn build_node(element: &Element, parent: NodeId, index: usize, cx: &mut BuildContext) -> UiNode {
     let id = node_id(parent, index, element.key(), element.kind.tag());
+
+    if let ElementKind::List(props) = &element.kind {
+        return build_list(element, id, props, cx);
+    }
 
     let kind = match &element.kind {
         ElementKind::Column => NodeKind::Column,
@@ -128,9 +204,10 @@ fn build_node(element: &Element, parent: NodeId, index: usize) -> UiNode {
         ElementKind::Switch(props) => NodeKind::Switch(props.clone()),
         ElementKind::Image(props) => NodeKind::Image(props.clone()),
         ElementKind::Scroll(props) => NodeKind::Scroll(*props),
+        ElementKind::List(_) => unreachable!("lists are expanded before the node kind match"),
     };
 
-    let children = build_children(element, id);
+    let children = build_children(element, id, cx);
 
     UiNode {
         id,
@@ -140,7 +217,7 @@ fn build_node(element: &Element, parent: NodeId, index: usize) -> UiNode {
     }
 }
 
-fn build_children(element: &Element, parent: NodeId) -> Vec<UiNode> {
+fn build_children(element: &Element, parent: NodeId, cx: &mut BuildContext) -> Vec<UiNode> {
     // Duplicate keys would hash two siblings to the same identifier, which
     // silently aliases their native views. Fail loudly in debug builds.
     #[cfg(debug_assertions)]
@@ -160,8 +237,83 @@ fn build_children(element: &Element, parent: NodeId) -> Vec<UiNode> {
         .children
         .iter()
         .enumerate()
-        .map(|(index, child)| build_node(child, parent, index))
+        .map(|(index, child)| build_node(child, parent, index, cx))
         .collect()
+}
+
+/// Expands a list into a scroll container holding only the visible rows.
+///
+/// The content is a column of `[top spacer, rows, bottom spacer]`, so the
+/// platform scroll extent is the full list height while only the window exists
+/// as native views. Rows sit at their absolute content position, which means a
+/// native scroll needs no repositioning when the window changes.
+fn build_list(element: &Element, id: NodeId, props: &ListProps, cx: &mut BuildContext) -> UiNode {
+    let extent = ListExtent {
+        count: props.item_count,
+        item_height: props.item_height,
+        buffer: props.buffer,
+    };
+    cx.info.lists.insert(id, extent);
+
+    let offset = cx.offsets.get(&id).copied().unwrap_or(0.0);
+    let (start, end) = list_window(extent, cx.viewport.height, offset);
+
+    let column_id = node_id(id, 0, None, ElementKind::Column.tag());
+    let mut children = Vec::with_capacity(end - start + 2);
+
+    if start > 0 {
+        children.push(build_spacer(
+            column_id,
+            children.len(),
+            start as f32 * props.item_height,
+            cx,
+        ));
+    }
+
+    for index in start..end {
+        let mut row = Element::container(ElementKind::Column);
+        row.style.width = Length::Percent(1.0);
+        row.style.height = Length::Points(props.item_height);
+        row.key = Some(Cow::Owned((props.keys)(index)));
+        row.children.push((props.rows)(index));
+
+        let position = children.len();
+        children.push(build_node(&row, column_id, position, cx));
+    }
+
+    if end < props.item_count {
+        children.push(build_spacer(
+            column_id,
+            children.len(),
+            (props.item_count - end) as f32 * props.item_height,
+            cx,
+        ));
+    }
+
+    let column = UiNode {
+        id: column_id,
+        kind: NodeKind::Column,
+        style: Style {
+            width: Length::Percent(1.0),
+            ..Style::default()
+        },
+        children,
+    };
+
+    UiNode {
+        id,
+        kind: NodeKind::Scroll(ScrollProps {
+            axis: Axis::Vertical,
+        }),
+        style: element.style.clone(),
+        children: vec![column],
+    }
+}
+
+fn build_spacer(parent: NodeId, index: usize, height: f32, cx: &mut BuildContext) -> UiNode {
+    let mut spacer = Element::leaf(ElementKind::Spacer);
+    spacer.style.height = Length::Points(height.max(0.0));
+    build_node(&spacer, parent, index, cx)
 }
 
 /// Derives a node identifier from its parent, position or key, and kind.
@@ -254,6 +406,8 @@ fn collect_renderable_parents(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::ui::{Button, Column, Switch, Text};
 
@@ -277,6 +431,98 @@ mod tests {
         assert_eq!(column.children.len(), 2);
         assert!(column.children[0].kind.is_native());
         assert!(column.children[1].kind.is_native());
+    }
+
+    fn list_of(count: usize) -> Element {
+        crate::ui::List::new(Arc::new(
+            (0..count)
+                .map(|index| format!("Row {index}"))
+                .collect::<Vec<_>>(),
+        ))
+        .item_height(50.0)
+        .buffer(2)
+        .key(|item| item.clone())
+        .row(|item| crate::ui::Text::new(item.clone()).into())
+        .into()
+    }
+
+    #[test]
+    fn a_list_only_materializes_the_window_around_the_viewport() {
+        let offsets = HashMap::new();
+        let (tree, info) = build_with(&list_of(100), &offsets, Size::new(300.0, 200.0));
+
+        let scroll = &tree.children[0];
+        let column = &scroll.children[0];
+        // Four visible rows plus two buffered ones, plus the trailing spacer.
+        assert_eq!(column.children.len(), 7);
+        assert_eq!(info.lists[&scroll.id].count, 100);
+        assert_eq!(info.lists[&scroll.id].item_height, 50.0);
+        // The spacer represents the 94 rows that are not materialized.
+        assert_eq!(column.children[6].style.height, Length::Points(94.0 * 50.0));
+    }
+
+    #[test]
+    fn a_scrolled_list_moves_its_window_but_keeps_row_identifiers() {
+        let element = list_of(100);
+        let base = build_with(&element, &HashMap::new(), Size::new(300.0, 200.0)).0;
+        let scroll_id = base.children[0].id;
+
+        let mut offsets = HashMap::new();
+        offsets.insert(scroll_id, 300.0);
+        let (scrolled, _) = build_with(&element, &offsets, Size::new(300.0, 200.0));
+
+        let base_rows = &base.children[0].children[0].children;
+        let scrolled_rows = &scrolled.children[0].children[0].children;
+        // Offset 300 starts at row 6; with a buffer of 2 the first row is 4.
+        // Rows 4 and 5 overlap the unscrolled window at positions 4 and 5.
+        // The scrolled column starts with a spacer for rows 0..4.
+        assert_eq!(base_rows[4].id, scrolled_rows[1].id);
+        assert_eq!(base_rows[5].id, scrolled_rows[2].id);
+        assert_eq!(scrolled_rows[0].style.height, Length::Points(4.0 * 50.0));
+        assert_eq!(
+            scrolled_rows.last().unwrap().style.height,
+            Length::Points((100.0 - 12.0) * 50.0)
+        );
+    }
+
+    #[test]
+    fn a_list_builds_rows_only_for_the_visible_window() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let built = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&built);
+        let element: Element = crate::ui::List::new(Arc::new(
+            (0..500)
+                .map(|index| format!("Row {index}"))
+                .collect::<Vec<_>>(),
+        ))
+        .item_height(50.0)
+        .buffer(2)
+        .key(|item| item.clone())
+        .row(move |item| {
+            counter.fetch_add(1, Ordering::Relaxed);
+            crate::ui::Text::new(item.clone()).into()
+        })
+        .into();
+
+        let _ = build_with(&element, &HashMap::new(), Size::new(300.0, 200.0));
+
+        assert_eq!(built.load(Ordering::Relaxed), 6);
+    }
+
+    #[test]
+    fn an_empty_list_has_no_rows() {
+        let element: Element = crate::ui::List::new(Arc::new(Vec::<String>::new()))
+            .item_height(50.0)
+            .key(|item| item.clone())
+            .row(|item| crate::ui::Text::new(item.clone()).into())
+            .into();
+
+        let (tree, info) = build_with(&element, &HashMap::new(), Size::new(300.0, 200.0));
+        let column = &tree.children[0].children[0];
+
+        assert!(column.children.is_empty());
+        assert_eq!(info.lists[&tree.children[0].id].count, 0);
     }
 
     #[test]
