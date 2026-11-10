@@ -1,0 +1,988 @@
+//! iOS renderer driven directly through UIKit.
+//!
+//! The Swift side is a thin `UIView`: it forwards its bounds to Rust and hosts
+//! the native widgets. Every widget, every property update, every frame change,
+//! and every event is handled here on native `UILabel`/`UIButton`/… instances.
+
+use std::collections::HashMap;
+use std::ffi::{CStr, c_char, c_void};
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
+
+use block2::RcBlock;
+use dispatch2::DispatchQueue;
+use objc2::rc::{Retained, Weak};
+use objc2::runtime::{AnyObject, Sel};
+use objc2::{MainThreadMarker, Message};
+use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+use objc2_core_graphics::CGColor;
+use objc2_foundation::{NSArray, NSBundle, NSString};
+use objc2_quartz_core::{CACornerMask, CAGradientLayer};
+use objc2_ui_kit::{
+    NSLineBreakMode, NSObjectUIAccessibility, NSTextAlignment, UIAction, UIButton, UIButtonType,
+    UIColor, UIControl, UIControlEvents, UIControlState, UIFont, UIImage, UIImageView,
+    UIKeyboardType, UILabel, UIReturnKeyType, UIScrollView, UISwitch, UITextBorderStyle,
+    UITextField, UITextInputTraits, UIView, UIViewContentMode,
+};
+
+use crate::app::{App, Event};
+use crate::geometry::{Constraints, Rect, Size};
+use crate::measure::Measure;
+use crate::render::{Op, RenderNode};
+use crate::runtime::Runtime;
+use crate::tree::{NodeId, NodeKind};
+use crate::ui::{
+    Axis, ButtonProps, EdgeInsets, FontWeight, GradientDirection, ImageProps, ImageScale,
+    ImageSource, ImeAction, KeyboardType, TextAlign, TextFieldProps, TextProps,
+};
+
+/// Measures text with an off-screen `UILabel`.
+///
+/// Results are cached because Taffy asks for the same intrinsic sizes several
+/// times per layout pass. UIKit objects are only touched from the main thread,
+/// which is also where the runtime renders.
+struct IosMeasure {
+    label: Retained<UILabel>,
+    cache: Mutex<HashMap<MeasureKey, Size>>,
+}
+
+// SAFETY: every method is called from the main thread by `IosState::render`.
+unsafe impl Send for IosMeasure {}
+unsafe impl Sync for IosMeasure {}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct MeasureKey {
+    content: String,
+    size: u32,
+    bold: bool,
+    max_width: Option<u32>,
+    max_lines: Option<u32>,
+    ellipsis: bool,
+}
+
+impl IosMeasure {
+    fn new(mtm: MainThreadMarker) -> Self {
+        let label = UILabel::new(mtm);
+        label.setAdjustsFontSizeToFitWidth(false);
+        Self {
+            label,
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn measure_with(&self, text: &TextProps, constraints: Constraints) -> Size {
+        if text.content.is_empty() {
+            return Size::ZERO;
+        }
+
+        let key = MeasureKey {
+            content: text.content.clone(),
+            size: text.size.to_bits(),
+            bold: matches!(text.weight, FontWeight::Bold),
+            max_width: constraints.max_width.map(f32::to_bits),
+            max_lines: text.max_lines,
+            ellipsis: text.ellipsis,
+        };
+
+        if let Some(cached) = self
+            .cache
+            .lock()
+            .expect("measurement cache")
+            .get(&key)
+            .copied()
+        {
+            return cached;
+        }
+
+        let label = &self.label;
+        label.setText(Some(&NSString::from_str(&text.content)));
+        let font = system_font(text.size, text.weight);
+        // SAFETY: the font is retained by the label for as long as it is set.
+        unsafe { label.setFont(Some(&font)) };
+        label.setNumberOfLines(text.max_lines.map_or(0, |lines| lines.max(1) as isize));
+        label.setLineBreakMode(if text.ellipsis {
+            NSLineBreakMode::ByTruncatingTail
+        } else {
+            NSLineBreakMode::ByWordWrapping
+        });
+
+        let max_width = constraints.max_width.map_or(f64::MAX, f64::from);
+        let measured = label.sizeThatFits(CGSize::new(max_width, f64::MAX));
+        let size = Size::new(measured.width.ceil() as f32, measured.height.ceil() as f32);
+
+        self.cache
+            .lock()
+            .expect("measurement cache")
+            .insert(key, size);
+        size
+    }
+}
+
+impl Measure for IosMeasure {
+    fn measure(&self, text: &TextProps, constraints: Constraints) -> Size {
+        self.measure_with(text, constraints)
+    }
+}
+
+fn system_font(size: f32, weight: FontWeight) -> Retained<UIFont> {
+    match weight {
+        FontWeight::Bold => UIFont::boldSystemFontOfSize(f64::from(size)),
+        FontWeight::Normal => UIFont::systemFontOfSize(f64::from(size)),
+    }
+}
+
+fn color(argb: u32) -> Retained<UIColor> {
+    let alpha = f64::from((argb >> 24) & 0xFF) / 255.0;
+    let red = f64::from((argb >> 16) & 0xFF) / 255.0;
+    let green = f64::from((argb >> 8) & 0xFF) / 255.0;
+    let blue = f64::from(argb & 0xFF) / 255.0;
+    UIColor::colorWithRed_green_blue_alpha(red, green, blue, alpha)
+}
+
+fn cg_color(argb: u32) -> Retained<CGColor> {
+    // SAFETY: the color is a valid `UIColor` and `CGColor` is retained.
+    unsafe { color(argb).CGColor() }
+}
+
+/// The typed content of a native view.
+///
+/// Leaves that need internal padding keep a separate content view inside the
+/// styled outer view; containers keep a content host that children are added
+/// to. Keeping the concrete class here avoids downcasting on every update.
+enum Content {
+    None,
+    Label(Retained<UILabel>),
+    Field(Retained<UITextField>),
+    Button(Retained<UIButton>),
+    Switch(Retained<UISwitch>),
+    Image(Retained<UIImageView>),
+    Host(Retained<UIView>),
+    Scroll {
+        scroll: Retained<UIScrollView>,
+        host: Retained<UIView>,
+    },
+}
+
+impl Content {
+    fn inset_view(&self) -> Option<&UIView> {
+        match self {
+            Self::Label(view) => Some(view),
+            Self::Field(view) => Some(view),
+            _ => None,
+        }
+    }
+
+    fn children_host(&self, fallback: &Retained<UIView>) -> Retained<UIView> {
+        match self {
+            Self::Host(host) => host.clone(),
+            Self::Scroll { host, .. } => host.clone(),
+            _ => fallback.clone(),
+        }
+    }
+}
+
+/// The native resources owned by one renderable node.
+struct ViewHandle {
+    /// The view that draws the node itself.
+    view: Retained<UIView>,
+    /// The inner content, when the node has one.
+    content: Content,
+    /// The gradient layer drawn behind the content, when the node has one.
+    gradient: Option<Retained<CAGradientLayer>>,
+    /// The nearest renderable ancestor the view lives under.
+    parent: Option<NodeId>,
+    /// The last relative frame applied to the view.
+    frame: Option<Rect>,
+    /// The node's padding, used to inset the content.
+    padding: EdgeInsets,
+}
+
+impl ViewHandle {
+    fn new(view: Retained<UIView>, content: Content, node: &RenderNode) -> Self {
+        Self {
+            view,
+            content,
+            gradient: None,
+            parent: node.parent,
+            frame: None,
+            padding: node.style.padding,
+        }
+    }
+
+    /// The view that hosts the node's native children.
+    fn children_host(&self) -> Retained<UIView> {
+        self.content.children_host(&self.view)
+    }
+}
+
+/// The state of one `RustRootView`.
+struct IosState {
+    handle: u64,
+    runtime: Runtime,
+    app: Box<dyn App>,
+    /// A weak reference so the Rust state does not keep the Swift root view
+    /// alive and prevent its `deinit` from destroying the state.
+    root: Weak<UIView>,
+    views: HashMap<NodeId, ViewHandle>,
+    viewport: Size,
+}
+
+// SAFETY: all access is serialized by the global mutex and happens on the main
+// thread. `Retained<UIView>` is not `Send` on its own, which is what this
+// assertion documents.
+unsafe impl Send for IosState {}
+
+impl IosState {
+    fn new(handle: u64, root: &Retained<UIView>, mtm: MainThreadMarker) -> Self {
+        Self {
+            handle,
+            runtime: Runtime::new(Box::new(IosMeasure::new(mtm))),
+            app: crate::app::create_app(),
+            root: Weak::from_retained(root),
+            views: HashMap::new(),
+            viewport: Size::ZERO,
+        }
+    }
+
+    fn render(&mut self) {
+        let element = self.app.view();
+        let update = self.runtime.update(&element, self.viewport);
+        for op in update.ops {
+            self.apply(op);
+        }
+    }
+
+    fn apply(&mut self, op: Op) {
+        // SAFETY: the runtime renders on the main thread, and every entry point
+        // checks that before locking the state.
+        let mtm = unsafe { MainThreadMarker::new_unchecked() };
+
+        match op {
+            Op::Create(node) => {
+                let handle = self.create_handle(&node, mtm);
+                if let Some(host) = self.parent_host(node.parent) {
+                    host.addSubview(&handle.view);
+                }
+                self.views.insert(node.id, handle);
+            }
+            Op::Update(node) => {
+                if let Some(handle) = self.views.get_mut(&node.id) {
+                    update_content(&handle.content, &node);
+                    apply_style(&handle.view, &node, &mut handle.gradient);
+                    apply_accessibility(&handle.view, &node, mtm);
+                }
+            }
+            Op::Reparent { id, parent } => {
+                let Some(old_parent) = self.views.get(&id).map(|handle| handle.parent) else {
+                    return;
+                };
+                if old_parent != parent {
+                    let view = self.views[&id].view.clone();
+                    if let Some(host) = self.parent_host(parent) {
+                        view.removeFromSuperview();
+                        host.addSubview(&view);
+                    }
+                    if let Some(handle) = self.views.get_mut(&id) {
+                        handle.parent = parent;
+                    }
+                }
+            }
+            Op::Remove { id } => {
+                if let Some(handle) = self.views.remove(&id) {
+                    handle.view.removeFromSuperview();
+                }
+            }
+            Op::Layout {
+                id,
+                frame,
+                content_size,
+            } => self.apply_layout(id, frame, content_size),
+        }
+    }
+
+    /// The view that hosts the children of the given native parent.
+    fn parent_host(&self, parent: Option<NodeId>) -> Option<Retained<UIView>> {
+        match parent.and_then(|id| self.views.get(&id)) {
+            Some(handle) => Some(handle.children_host()),
+            None => self.root.load(),
+        }
+    }
+
+    fn create_handle(&self, node: &RenderNode, mtm: MainThreadMarker) -> ViewHandle {
+        let mut handle = match &node.kind {
+            NodeKind::Text(props) => {
+                let wrapper = UIView::new(mtm);
+                let label = UILabel::new(mtm);
+                update_label(&label, props);
+                wrapper.addSubview(&label);
+                ViewHandle::new(wrapper, Content::Label(label), node)
+            }
+            NodeKind::TextField(props) => {
+                let wrapper = UIView::new(mtm);
+                let field = UITextField::new(mtm);
+                field.setBorderStyle(UITextBorderStyle::None);
+                update_field(&field, props);
+                wire_field(&field, self.handle, node.id, mtm);
+                wrapper.addSubview(&field);
+                ViewHandle::new(wrapper, Content::Field(field), node)
+            }
+            NodeKind::Button(props) => {
+                let button = UIButton::buttonWithType(UIButtonType::System, mtm);
+                update_button(&button, props);
+                wire_click(&button, self.handle, node.id, mtm);
+                let view = cast_view(button.clone());
+                ViewHandle::new(view, Content::Button(button), node)
+            }
+            NodeKind::Switch(props) => {
+                let switch = UISwitch::new(mtm);
+                switch.setOn(props.checked);
+                wire_switch(&switch, self.handle, node.id, mtm);
+                let view = cast_view(switch.clone());
+                ViewHandle::new(view, Content::Switch(switch), node)
+            }
+            NodeKind::Image(props) => {
+                let image = UIImageView::new(mtm);
+                update_image(&image, props);
+                let view = cast_view(image.clone());
+                ViewHandle::new(view, Content::Image(image), node)
+            }
+            NodeKind::Scroll(props) => {
+                let scroll = UIScrollView::new(mtm);
+                scroll.setClipsToBounds(true);
+                scroll.setShowsVerticalScrollIndicator(props.axis == Axis::Vertical);
+                scroll.setShowsHorizontalScrollIndicator(props.axis == Axis::Horizontal);
+                scroll.setAlwaysBounceVertical(props.axis == Axis::Vertical);
+                scroll.setAlwaysBounceHorizontal(props.axis == Axis::Horizontal);
+                let host = UIView::new(mtm);
+                scroll.addSubview(&host);
+                let view = cast_view(scroll.clone());
+                ViewHandle::new(view, Content::Scroll { scroll, host }, node)
+            }
+            NodeKind::Column | NodeKind::Row => {
+                let view = UIView::new(mtm);
+                let host = UIView::new(mtm);
+                view.addSubview(&host);
+                ViewHandle::new(view, Content::Host(host), node)
+            }
+            // A decorated spacer needs a view for its background or border.
+            _ => {
+                let view = UIView::new(mtm);
+                ViewHandle::new(view, Content::None, node)
+            }
+        };
+
+        apply_style(&handle.view, node, &mut handle.gradient);
+        apply_accessibility(&handle.view, node, mtm);
+        handle
+    }
+
+    fn apply_layout(&mut self, id: NodeId, frame: Rect, content_size: Option<Size>) {
+        let Some(handle) = self.views.get_mut(&id) else {
+            return;
+        };
+
+        let rect = CGRect::new(
+            CGPoint::new(f64::from(frame.x), f64::from(frame.y)),
+            CGSize::new(
+                f64::from(frame.width.max(0.0)),
+                f64::from(frame.height.max(0.0)),
+            ),
+        );
+        handle.view.setFrame(rect);
+        handle.frame = Some(frame);
+
+        if let Some(content) = handle.content.inset_view() {
+            content.setFrame(inset(rect.size, handle.padding));
+        }
+
+        match &handle.content {
+            Content::Host(host) => host.setFrame(inset(rect.size, handle.padding)),
+            Content::Scroll { scroll, host } => {
+                let size = content_size.unwrap_or(Size::ZERO);
+                host.setFrame(CGRect::new(
+                    CGPoint::new(
+                        f64::from(handle.padding.left),
+                        f64::from(handle.padding.top),
+                    ),
+                    CGSize::new(
+                        f64::from(size.width.max(0.0)),
+                        f64::from(size.height.max(0.0)),
+                    ),
+                ));
+                scroll.setContentSize(CGSize::new(
+                    f64::from(handle.padding.left + size.width + handle.padding.right),
+                    f64::from(handle.padding.top + size.height + handle.padding.bottom),
+                ));
+            }
+            _ => {}
+        }
+
+        if let Some(gradient) = &handle.gradient {
+            gradient.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), rect.size));
+        }
+    }
+}
+
+fn cast_view<T: Message>(view: Retained<T>) -> Retained<UIView> {
+    // SAFETY: every caller passes a `UIView` subclass.
+    unsafe { Retained::cast_unchecked(view) }
+}
+
+fn inset(size: CGSize, padding: EdgeInsets) -> CGRect {
+    let left = f64::from(padding.left);
+    let top = f64::from(padding.top);
+    let right = f64::from(padding.right);
+    let bottom = f64::from(padding.bottom);
+    CGRect::new(
+        CGPoint::new(left, top),
+        CGSize::new(
+            (size.width - left - right).max(0.0),
+            (size.height - top - bottom).max(0.0),
+        ),
+    )
+}
+
+fn update_content(content: &Content, node: &RenderNode) {
+    match (content, &node.kind) {
+        (Content::Label(label), NodeKind::Text(props)) => update_label(label, props),
+        (Content::Field(field), NodeKind::TextField(props)) => update_field(field, props),
+        (Content::Button(button), NodeKind::Button(props)) => update_button(button, props),
+        (Content::Switch(switch), NodeKind::Switch(props)) => switch.setOn(props.checked),
+        (Content::Image(image), NodeKind::Image(props)) => update_image(image, props),
+        _ => {}
+    }
+}
+
+fn update_label(label: &UILabel, props: &TextProps) {
+    label.setText(Some(&NSString::from_str(&props.content)));
+    let font = system_font(props.size, props.weight);
+    // SAFETY: the font is retained by the label for as long as it is set.
+    unsafe { label.setFont(Some(&font)) };
+    let text_color = color(props.color);
+    // SAFETY: the color is retained by the label for as long as it is set.
+    unsafe { label.setTextColor(Some(&text_color)) };
+    label.setNumberOfLines(props.max_lines.map_or(0, |lines| lines.max(1) as isize));
+    label.setLineBreakMode(if props.ellipsis {
+        NSLineBreakMode::ByTruncatingTail
+    } else {
+        NSLineBreakMode::ByWordWrapping
+    });
+    label.setTextAlignment(match props.align {
+        TextAlign::Start => NSTextAlignment(0),
+        TextAlign::Center => NSTextAlignment(1),
+        TextAlign::End => NSTextAlignment(2),
+    });
+}
+
+fn update_button(button: &UIButton, props: &ButtonProps) {
+    let title = NSString::from_str(&props.label);
+    button.setTitle_forState(Some(&title), UIControlState::Normal);
+    let text_color = color(props.color);
+    button.setTitleColor_forState(Some(&text_color), UIControlState::Normal);
+
+    if let Some(label) = button.titleLabel() {
+        let font = system_font(props.size, props.weight);
+        // SAFETY: the font is retained by the label for as long as it is set.
+        unsafe { label.setFont(Some(&font)) };
+    }
+}
+
+fn update_field(field: &UITextField, props: &TextFieldProps) {
+    let current = field
+        .text()
+        .map(|text| text.to_string())
+        .unwrap_or_default();
+    if current != props.value {
+        field.setText(Some(&NSString::from_str(&props.value)));
+    }
+    field.setPlaceholder(Some(&NSString::from_str(&props.placeholder)));
+    field.setFont(Some(&system_font(props.size, props.weight)));
+    field.setTextColor(Some(&color(props.color)));
+    set_text_input_traits(
+        field,
+        match props.keyboard {
+            KeyboardType::Text => UIKeyboardType::Default,
+            KeyboardType::Email => UIKeyboardType::EmailAddress,
+            KeyboardType::Number => UIKeyboardType::NumberPad,
+            KeyboardType::Phone => UIKeyboardType::PhonePad,
+        },
+        match props.ime_action {
+            ImeAction::Default => UIReturnKeyType::Default,
+            ImeAction::Done => UIReturnKeyType::Done,
+            ImeAction::Next => UIReturnKeyType::Next,
+            ImeAction::Search => UIReturnKeyType::Search,
+            ImeAction::Send => UIReturnKeyType::Send,
+        },
+    );
+    field.setSecureTextEntry(props.secure);
+}
+
+/// Sets the keyboard and return-key traits through the raw runtime.
+///
+/// UIKit implements these `UITextInputTraits` setters through message
+/// forwarding, so objc2's debug-time method lookup does not find them even
+/// though messaging works.
+fn set_text_input_traits(
+    field: &UITextField,
+    keyboard_type: UIKeyboardType,
+    return_key_type: UIReturnKeyType,
+) {
+    let receiver = field as *const UITextField as *mut AnyObject;
+    // SAFETY: both setters take one `NSInteger` argument and return `void`.
+    unsafe {
+        let send: unsafe extern "C-unwind" fn(*mut AnyObject, Sel, isize) =
+            std::mem::transmute(objc2::ffi::objc_msgSend as *const ());
+        send(receiver, objc2::sel!(setKeyboardType:), keyboard_type.0);
+        send(receiver, objc2::sel!(setReturnKeyType:), return_key_type.0);
+    }
+}
+
+fn update_image(view: &UIImageView, props: &ImageProps) {
+    let image = match &props.source {
+        ImageSource::Asset(path) => load_asset(path),
+        // Remote images are not implemented yet; the view keeps an empty frame.
+        ImageSource::Url(_) => None,
+    };
+    view.setImage(image.as_deref());
+    view.setContentMode(match props.scale {
+        ImageScale::Fit => UIViewContentMode::ScaleAspectFit,
+        ImageScale::Fill => UIViewContentMode::ScaleAspectFill,
+    });
+}
+
+fn load_asset(path: &str) -> Option<Retained<UIImage>> {
+    let (stem, extension) = match path.rsplit_once('.') {
+        Some((stem, extension)) => (stem, Some(NSString::from_str(extension))),
+        None => (path, None),
+    };
+    let stem = NSString::from_str(stem);
+    let path = NSBundle::mainBundle().pathForResource_ofType(Some(&stem), extension.as_deref())?;
+    UIImage::imageWithContentsOfFile(&path)
+}
+
+fn apply_style(view: &UIView, node: &RenderNode, gradient: &mut Option<Retained<CAGradientLayer>>) {
+    let style = &node.style;
+    let layer = view.layer();
+
+    let radii = style.corner_radii();
+    let radius = f64::from(
+        radii
+            .top_left
+            .max(radii.top_right)
+            .max(radii.bottom_right)
+            .max(radii.bottom_left),
+    );
+    let mut corners = CACornerMask::empty();
+    if radii.top_left > 0.0 {
+        corners |= CACornerMask::LayerMinXMinYCorner;
+    }
+    if radii.top_right > 0.0 {
+        corners |= CACornerMask::LayerMaxXMinYCorner;
+    }
+    if radii.bottom_right > 0.0 {
+        corners |= CACornerMask::LayerMaxXMaxYCorner;
+    }
+    if radii.bottom_left > 0.0 {
+        corners |= CACornerMask::LayerMinXMaxYCorner;
+    }
+    layer.setCornerRadius(radius);
+    layer.setMaskedCorners(corners);
+
+    let fills_frame =
+        matches!(&node.kind, NodeKind::Image(props) if props.scale == ImageScale::Fill);
+    let clips = matches!(&node.kind, NodeKind::Scroll(_))
+        || fills_frame
+        || (radius > 0.0 && style.elevation <= 0.0);
+    view.setClipsToBounds(clips);
+
+    if style.gradient.is_some() {
+        view.setBackgroundColor(None);
+    } else {
+        view.setBackgroundColor(style.background.map(color).as_deref());
+    }
+
+    if let Some(shape) = style.gradient {
+        let gradient_layer = gradient.get_or_insert_with(CAGradientLayer::new);
+        if gradient_layer.superlayer().is_none() {
+            view.layer().insertSublayer_atIndex(gradient_layer, 0);
+        }
+
+        // `CAGradientLayer.colors` is an `NSArray<id>` of toll-free bridged
+        // `CGColor` objects, so the elements must be typed as `AnyObject` for
+        // the runtime to see the `^@` element encoding.
+        let start: Retained<AnyObject> = unsafe { Retained::cast_unchecked(cg_color(shape.start)) };
+        let end: Retained<AnyObject> = unsafe { Retained::cast_unchecked(cg_color(shape.end)) };
+        let colors: Retained<NSArray> = NSArray::from_retained_slice(&[start, end]);
+        // SAFETY: the array holds two valid `CGColor` objects.
+        unsafe { gradient_layer.setColors(Some(&colors)) };
+        match shape.direction {
+            GradientDirection::Horizontal => {
+                gradient_layer.setStartPoint(CGPoint::new(0.0, 0.5));
+                gradient_layer.setEndPoint(CGPoint::new(1.0, 0.5));
+            }
+            GradientDirection::Vertical => {
+                gradient_layer.setStartPoint(CGPoint::new(0.5, 0.0));
+                gradient_layer.setEndPoint(CGPoint::new(0.5, 1.0));
+            }
+        }
+        gradient_layer.setCornerRadius(radius);
+        gradient_layer.setMaskedCorners(corners);
+        gradient_layer.setMasksToBounds(true);
+        gradient_layer.setFrame(view.bounds());
+    } else if let Some(gradient_layer) = gradient.take() {
+        gradient_layer.removeFromSuperlayer();
+    }
+
+    if let Some(border) = style.border {
+        let border_color = cg_color(border.color);
+        layer.setBorderWidth(f64::from(border.width));
+        layer.setBorderColor(Some(&border_color));
+    } else {
+        layer.setBorderWidth(0.0);
+        layer.setBorderColor(None);
+    }
+
+    view.setAlpha(f64::from(style.opacity.unwrap_or(1.0)));
+
+    if style.elevation > 0.0 {
+        // SAFETY: `CGColor` is retained for as long as the layer keeps it.
+        let shadow = unsafe { UIColor::blackColor().CGColor() };
+        layer.setShadowColor(Some(&shadow));
+        layer.setShadowOpacity(0.18);
+        layer.setShadowRadius(f64::from(style.elevation));
+        layer.setShadowOffset(CGSize::new(0.0, f64::from(style.elevation / 2.0)));
+    } else {
+        layer.setShadowOpacity(0.0);
+    }
+}
+
+/// Applies interaction state and accessibility metadata to a native view.
+fn apply_accessibility(view: &UIView, node: &RenderNode, mtm: MainThreadMarker) {
+    if let Some(label) = &node.style.accessibility_label {
+        let label = NSString::from_str(label);
+        view.setIsAccessibilityElement(true, mtm);
+        view.setAccessibilityLabel(Some(&label), mtm);
+    } else {
+        view.setAccessibilityLabel(None, mtm);
+    }
+
+    let enabled = node.style.enabled.unwrap_or(true);
+    view.setUserInteractionEnabled(enabled);
+    if let Some(control) = as_any(view).downcast_ref::<UIControl>() {
+        control.setEnabled(enabled);
+    }
+}
+
+fn as_any(view: &UIView) -> &AnyObject {
+    // SAFETY: every Objective-C object can be viewed as `AnyObject`.
+    unsafe { &*(view as *const UIView as *const AnyObject) }
+}
+
+fn add_action(
+    control: &UIControl,
+    events: UIControlEvents,
+    identifier: &str,
+    mtm: MainThreadMarker,
+    handler: impl Fn(&UIAction) + 'static,
+) {
+    let block: RcBlock<dyn Fn(NonNull<UIAction>)> =
+        RcBlock::new(move |action: NonNull<UIAction>| {
+            // SAFETY: the block is invoked with a live action by UIKit.
+            handler(unsafe { action.as_ref() });
+        });
+    let title = NSString::from_str("");
+    let identifier = NSString::from_str(identifier);
+    // SAFETY: the block is a valid `UIActionHandler` and is retained by the
+    // action, which is retained by the control.
+    let action = unsafe {
+        UIAction::actionWithTitle_image_identifier_handler(
+            &title,
+            None,
+            Some(&identifier),
+            RcBlock::as_ptr(&block),
+            mtm,
+        )
+    };
+    control.addAction_forControlEvents(&action, events);
+}
+
+fn wire_click(button: &UIButton, handle: u64, id: NodeId, mtm: MainThreadMarker) {
+    add_action(
+        button,
+        UIControlEvents::TouchUpInside,
+        "krabik.click",
+        mtm,
+        move |_| schedule(move || dispatch_click(handle, id)),
+    );
+}
+
+fn wire_switch(switch: &UISwitch, handle: u64, id: NodeId, mtm: MainThreadMarker) {
+    add_action(
+        switch,
+        UIControlEvents::ValueChanged,
+        "krabik.switch",
+        mtm,
+        move |action| {
+            let checked = action
+                .sender()
+                .and_then(|sender| sender.downcast::<UISwitch>().ok())
+                .map(|switch| switch.isOn())
+                .unwrap_or(false);
+            schedule(move || dispatch_checked(handle, id, checked));
+        },
+    );
+}
+
+fn wire_field(field: &UITextField, handle: u64, id: NodeId, mtm: MainThreadMarker) {
+    add_action(
+        field,
+        UIControlEvents::EditingChanged,
+        "krabik.text",
+        mtm,
+        move |action| {
+            let value = action
+                .sender()
+                .and_then(|sender| sender.downcast::<UITextField>().ok())
+                .and_then(|field| field.text())
+                .map(|text| text.to_string())
+                .unwrap_or_default();
+            schedule(move || dispatch_text(handle, id, &value));
+        },
+    );
+    add_action(
+        field,
+        UIControlEvents::EditingDidEndOnExit,
+        "krabik.submit",
+        mtm,
+        move |_| schedule(move || dispatch_submitted(handle, id)),
+    );
+    add_action(
+        field,
+        UIControlEvents::EditingDidBegin,
+        "krabik.focus-begin",
+        mtm,
+        move |_| schedule(move || dispatch_focus(handle, id, true)),
+    );
+    add_action(
+        field,
+        UIControlEvents::EditingDidEnd,
+        "krabik.focus-end",
+        mtm,
+        move |_| schedule(move || dispatch_focus(handle, id, false)),
+    );
+}
+
+/// Defers an event to the next main-queue turn.
+///
+/// UIKit can deliver another action synchronously while we are rebuilding the
+/// tree (for example `EditingDidEnd` when a focused field is removed). Running
+/// the handler asynchronously keeps the state lock from being re-entered.
+fn schedule(work: impl FnOnce() + Send + 'static) {
+    DispatchQueue::main().exec_async(work);
+}
+
+fn with_state(handle: u64, body: impl FnOnce(&mut IosState)) {
+    let mut states = states().lock().expect("ios states");
+    if let Some(state) = states.get_mut(&handle) {
+        body(state);
+    }
+}
+
+/// Runs an event handler, reporting an Objective-C exception instead of
+/// letting it unwind through the C ABI boundary and abort the process.
+fn guard(label: &str, body: impl FnOnce()) {
+    let result = objc2::exception::catch(std::panic::AssertUnwindSafe(body));
+    if let Err(exception) = result {
+        let message = match exception {
+            Some(exception) => format!("{exception:?}"),
+            None => "nil exception".to_string(),
+        };
+        eprintln!("krabik ios: {label} handler raised an exception: {message}");
+    }
+}
+
+fn dispatch_click(handle: u64, id: NodeId) {
+    guard("click", || {
+        with_state(handle, |state| {
+            if let Some(action) = state.runtime.click(id)
+                && state.app.handle(Event::Click { action })
+            {
+                state.render();
+            }
+        });
+    });
+}
+
+fn dispatch_text(handle: u64, id: NodeId, value: &str) {
+    guard("text", || {
+        with_state(handle, |state| {
+            if let Some(action) = state.runtime.text_field_action(id)
+                && state.app.handle(Event::TextChanged { action, value })
+            {
+                state.render();
+            }
+        });
+    });
+}
+
+fn dispatch_submitted(handle: u64, id: NodeId) {
+    guard("submitted", || {
+        with_state(handle, |state| {
+            if let Some(action) = state.runtime.text_field_submit_action(id)
+                && state.app.handle(Event::Submitted { action })
+            {
+                state.render();
+            }
+        });
+    });
+}
+
+fn dispatch_focus(handle: u64, id: NodeId, focused: bool) {
+    guard("focus", || {
+        with_state(handle, |state| {
+            if let Some(action) = state.runtime.text_field_focus_action(id)
+                && state.app.handle(Event::FocusChanged { action, focused })
+            {
+                state.render();
+            }
+        });
+    });
+}
+
+fn dispatch_checked(handle: u64, id: NodeId, checked: bool) {
+    guard("checked", || {
+        with_state(handle, |state| {
+            if let Some(action) = state.runtime.switch_action(id)
+                && state.app.handle(Event::Toggled { action, checked })
+            {
+                state.render();
+            }
+        });
+    });
+}
+
+static STATES: OnceLock<Mutex<HashMap<u64, IosState>>> = OnceLock::new();
+static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
+
+fn states() -> &'static Mutex<HashMap<u64, IosState>> {
+    STATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Creates the Rust-side state for a `RustRootView`.
+///
+/// # Safety
+///
+/// `root` must be a live `UIView` and the call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_create(root: *mut c_void, width: f64, height: f64) -> u64 {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return 0;
+    };
+    // SAFETY: the caller guarantees a live view for the duration of the call.
+    let Some(root) = (unsafe { Retained::retain(root.cast::<UIView>()) }) else {
+        return 0;
+    };
+
+    let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
+    let mut state = IosState::new(handle, &root, mtm);
+    guard("create", || {
+        state.viewport = Size::new(width.max(0.0) as f32, height.max(0.0) as f32);
+        state.render();
+    });
+    states().lock().expect("ios states").insert(handle, state);
+    handle
+}
+
+/// Rebuilds the tree for the new viewport and applies the resulting operations.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_render(handle: u64, width: f64, height: f64) {
+    if MainThreadMarker::new().is_none() {
+        return;
+    }
+    guard("render", || {
+        with_state(handle, |state| {
+            state.viewport = Size::new(width.max(0.0) as f32, height.max(0.0) as f32);
+            state.render();
+        });
+    });
+}
+
+/// Releases the widgets and the Rust state of a `RustRootView`.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_destroy(handle: u64) {
+    let Some(state) = states().lock().expect("ios states").remove(&handle) else {
+        return;
+    };
+    for view in state.views.values() {
+        view.view.removeFromSuperview();
+    }
+}
+
+/// Dispatches a click on a native widget back into the Rust tree.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_click(handle: u64, node_id: u64) {
+    dispatch_click(handle, NodeId(node_id));
+}
+
+/// Dispatches a text edit on a native input back into the Rust tree.
+///
+/// # Safety
+///
+/// `text` must be a valid, NUL-terminated UTF-8 string, and the call must
+/// happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_text_changed(
+    handle: u64,
+    node_id: u64,
+    text: *const c_char,
+) {
+    if text.is_null() {
+        return;
+    }
+    // SAFETY: the caller guarantees a valid NUL-terminated string.
+    let value = unsafe { CStr::from_ptr(text) }.to_string_lossy();
+    dispatch_text(handle, NodeId(node_id), &value);
+}
+
+/// Dispatches a submit on a native input back into the Rust tree.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_submitted(handle: u64, node_id: u64) {
+    dispatch_submitted(handle, NodeId(node_id));
+}
+
+/// Dispatches a focus change on a native input back into the Rust tree.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_focus_changed(handle: u64, node_id: u64, focused: bool) {
+    dispatch_focus(handle, NodeId(node_id), focused);
+}
+
+/// Dispatches a switch toggle back into the Rust tree.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_checked_changed(handle: u64, node_id: u64, checked: bool) {
+    dispatch_checked(handle, NodeId(node_id), checked);
+}

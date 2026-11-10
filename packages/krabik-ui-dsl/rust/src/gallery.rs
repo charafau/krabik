@@ -67,7 +67,7 @@ impl GalleryApp {
                     .align_items(Align::Start)
                     .child(Text::new("Native UI DSL").size(30).bold())
                     .child(caption(
-                        "Every screen is described in Rust and drawn with real Android views.",
+                        "Every screen is described in Rust and drawn with real native views.",
                     ))
                     .child(Spacer::new().grow(0.0).height(8))
                     .child(Button::new("Counter").action("open:counter"))
@@ -103,7 +103,7 @@ impl GalleryApp {
             .child(Text::new("Counter").size(26).bold())
             .child(Text::new(label).size(36).bold().color(COLOR_BLUE))
             .child(caption(
-                "The label is updated in place on the existing native TextView.",
+                "The label is updated in place on the existing native label.",
             ))
             .child(
                 Row::new()
@@ -355,7 +355,7 @@ impl GalleryApp {
                     .child(back_button())
                     .child(Text::new("Media").size(26).bold())
                     .child(caption(
-                        "Bundled assets load instantly; remote images use Coil.",
+                        "Bundled assets load instantly; remote images load from a URL.",
                     ))
                     .child(
                         Image::new(ImageSource::asset("krabik.webp"))
@@ -455,7 +455,7 @@ impl GalleryApp {
                             ),
                     )
                     .child(caption(
-                        "Buttons keep their native ripple and honour enabled state.",
+                        "Buttons keep their native interaction and honour enabled state.",
                     )),
             )
             .into()
