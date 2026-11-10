@@ -66,6 +66,13 @@ shell for each renderer:
   as `staticlib` + `cdylib`, and the Gradle task cross-compiles it for the
   selected ABIs and copies the `.so` into `jniLibs`.
 
+Both Android shells compile the Kotlin view layer from
+[`shared/android/src/main/java`](shared/android/src/main/java) through a shared
+Gradle source set, so the widgets and `KrabikActivity` exist once. Each
+`MainActivity` only loads its own native library (`krabik_ui_dsl` for the
+harness, `krabik_ui_dsl_example` for the example) and installs an app factory
+when it has one.
+
 Per-note delete buttons are built with dynamic actions
 (`format!("note:delete:{index}")`) and covered by an XCUITest and an Espresso
 test. The example crate builds a `cdylib` alongside its `staticlib`, and the
