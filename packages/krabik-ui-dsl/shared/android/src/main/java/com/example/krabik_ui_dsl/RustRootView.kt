@@ -1,9 +1,9 @@
 package com.example.krabik_ui_dsl
 
 import android.content.Context
+import android.util.LongSparseArray
 import android.view.View
 import android.view.ViewGroup
-import android.util.LongSparseArray
 import android.widget.FrameLayout
 import java.lang.ref.WeakReference
 
@@ -13,6 +13,10 @@ import java.lang.ref.WeakReference
  * Rust creates the native widgets as children of this group, gives them exact
  * pixel frames, and receives their clicks. No layout is done in Kotlin beyond
  * measuring the children at the sizes Rust has already calculated.
+ *
+ * The host must load the native renderer (`libkrabik_ui_dsl` or a shell that
+ * statically includes it) before constructing this view; [KrabikActivity]
+ * does that through its `loadNativeLibrary` hook.
  */
 class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener {
 
@@ -197,12 +201,4 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     private external fun nativeOnCheckedChanged(handle: Long, nodeId: Long, checked: Boolean)
 
     private external fun nativeDestroy(handle: Long)
-
-    companion object {
-        init {
-            // The example cdylib statically includes the DSL renderer, so this
-            // one library provides every native entry point of the root view.
-            System.loadLibrary("krabik_ui_dsl_example")
-        }
-    }
 }
