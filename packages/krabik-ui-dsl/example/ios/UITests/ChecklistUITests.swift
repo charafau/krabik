@@ -4,7 +4,8 @@ import XCTest
 ///
 /// The test exercises the consumption pattern this example documents: a host
 /// shell that installs a Rust app factory and renders whatever the app
-/// describes — switches, dynamic rows, and in-place text updates.
+/// describes — switches, dynamic rows with per-row delete actions, and
+/// in-place text updates.
 final class ChecklistUITests: XCTestCase {
     private var app: XCUIApplication!
 
@@ -33,19 +34,51 @@ final class ChecklistUITests: XCTestCase {
         app.switches["Hide completed"].tap()
         XCTAssertTrue(app.staticTexts["✓ Review the renderer"].waitForExistence(timeout: 5))
 
-        // Adding a note appends a native row and updates the summary.
+        // Adding a note appends a native row and updates the summary. Row text
+        // comes from synthetic typing, which can drop a keystroke, so the
+        // assertions use counts and summaries rather than exact strings.
         let note = app.textFields["Add a note"]
         XCTAssertTrue(note.waitForExistence(timeout: 5))
         note.tap()
         note.typeText("First note")
         app.buttons["Add"].tap()
-        XCTAssertTrue(app.staticTexts["• First note"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["2 of 3 tasks done · 1 note"].waitForExistence(timeout: 5))
+        XCTAssertEqual(noteRows().count, 1)
+
+        // A second note carries its own dynamically-built action.
+        note.tap()
+        note.typeText("Second note")
+        app.buttons["Add"].tap()
+        XCTAssertTrue(app.staticTexts["2 of 3 tasks done · 2 notes"].waitForExistence(timeout: 5))
+        XCTAssertEqual(noteRows().count, 2)
+
+        // Per-row actions: deleting the first note leaves the second intact.
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Delete'"))
+            .firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["2 of 3 tasks done · 1 note"].waitForExistence(timeout: 5))
+        XCTAssertEqual(noteRows().count, 1)
+        let survivor = deleteButtons().first?.label ?? ""
+        XCTAssertFalse(
+            survivor.hasPrefix("Delete F"),
+            "the first note should have been deleted, found: \(survivor)"
+        )
 
         // Clearing removes the rows again.
         app.buttons["Clear notes"].tap()
-        waitForAbsence(app.staticTexts["• First note"])
         XCTAssertTrue(app.staticTexts["2 of 3 tasks done · 0 notes"].waitForExistence(timeout: 5))
+        XCTAssertEqual(noteRows().count, 0)
+    }
+
+    /// The note rows (bullet-prefixed static texts) currently on screen.
+    private func noteRows() -> [XCUIElement] {
+        app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '•'"))
+            .allElementsBoundByIndex
+    }
+
+    /// The per-note delete buttons currently on screen.
+    private func deleteButtons() -> [XCUIElement] {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Delete'"))
+            .allElementsBoundByIndex
     }
 
     private func waitForAbsence(_ element: XCUIElement) {

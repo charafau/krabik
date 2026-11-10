@@ -4,6 +4,7 @@
 //! tree, reconciles it with the previous one, lays it out, and emits one batch
 //! of operations for the platform renderer.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::geometry::{Rect, Size};
@@ -83,49 +84,49 @@ impl Runtime {
     }
 
     /// Returns the action of the button with the given identifier, if any.
-    pub fn click(&self, id: NodeId) -> Option<&'static str> {
+    pub fn click(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::Button(props) if !props.action.is_empty() => Some(props.action),
+            NodeKind::Button(props) if !props.action.is_empty() => Some(props.action.clone()),
             _ => None,
         }
     }
 
     /// Returns the action of the switch with the given identifier, if any.
-    pub fn switch_action(&self, id: NodeId) -> Option<&'static str> {
+    pub fn switch_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::Switch(props) if !props.action.is_empty() => Some(props.action),
+            NodeKind::Switch(props) if !props.action.is_empty() => Some(props.action.clone()),
             _ => None,
         }
     }
 
     /// Returns the action of the text input with the given identifier, if any.
-    pub fn text_field_action(&self, id: NodeId) -> Option<&'static str> {
+    pub fn text_field_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::TextField(props) if !props.action.is_empty() => Some(props.action),
+            NodeKind::TextField(props) if !props.action.is_empty() => Some(props.action.clone()),
             _ => None,
         }
     }
 
     /// Returns the submit action of the text input with the given identifier.
-    pub fn text_field_submit_action(&self, id: NodeId) -> Option<&'static str> {
+    pub fn text_field_submit_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
             NodeKind::TextField(props) if !props.submit_action.is_empty() => {
-                Some(props.submit_action)
+                Some(props.submit_action.clone())
             }
             _ => None,
         }
     }
 
     /// Returns the focus action of the text input with the given identifier.
-    pub fn text_field_focus_action(&self, id: NodeId) -> Option<&'static str> {
+    pub fn text_field_focus_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
             NodeKind::TextField(props) if !props.focus_action.is_empty() => {
-                Some(props.focus_action)
+                Some(props.focus_action.clone())
             }
             _ => None,
         }
@@ -217,7 +218,7 @@ mod tests {
             .find(|node| matches!(node.kind, NodeKind::Button(_)))
             .unwrap();
 
-        assert_eq!(runtime.click(button.id), Some("click"));
+        assert_eq!(runtime.click(button.id).as_deref(), Some("click"));
         assert_eq!(runtime.click(ROOT_ID), None);
     }
 
@@ -230,7 +231,7 @@ mod tests {
         runtime.update(&element, viewport());
 
         let field = runtime.tree().children[0].children[0].id;
-        assert_eq!(runtime.text_field_action(field), Some("name"));
+        assert_eq!(runtime.text_field_action(field).as_deref(), Some("name"));
         assert_eq!(runtime.click(field), None);
     }
 
@@ -243,8 +244,25 @@ mod tests {
         runtime.update(&element, viewport());
 
         let switch = runtime.tree().children[0].children[0].id;
-        assert_eq!(runtime.switch_action(switch), Some("notifications"));
+        assert_eq!(
+            runtime.switch_action(switch).as_deref(),
+            Some("notifications")
+        );
         assert_eq!(runtime.switch_action(ROOT_ID), None);
+    }
+
+    #[test]
+    fn actions_can_be_built_dynamically() {
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        let element: Element = Column::new()
+            // A `String` action takes the owned `Cow::Owned` path.
+            .child(Button::new("Delete").action("note:delete:2".to_string()))
+            .into();
+        runtime.update(&element, viewport());
+
+        let button = runtime.tree().children[0].children[0].id;
+        assert_eq!(runtime.click(button).as_deref(), Some("note:delete:2"));
+        assert_eq!(runtime.click(ROOT_ID), None);
     }
 
     #[test]

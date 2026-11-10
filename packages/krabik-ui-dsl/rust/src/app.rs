@@ -10,36 +10,40 @@ use std::sync::OnceLock;
 use crate::ui::Element;
 
 /// A user interaction dispatched by a native widget.
+///
+/// Actions are borrowed for the duration of the [`App::handle`] call. They may
+/// be built dynamically by the application, such as
+/// `format!("note:delete:{index}")` for a row in a list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event<'a> {
     /// A button was pressed.
     Click {
         /// The action configured on the button.
-        action: &'static str,
+        action: &'a str,
     },
     /// The text of an input changed.
     TextChanged {
         /// The action configured on the input.
-        action: &'static str,
+        action: &'a str,
         /// The new text of the input.
         value: &'a str,
     },
     /// The user submitted an input from the keyboard.
     Submitted {
         /// The action configured on the input.
-        action: &'static str,
+        action: &'a str,
     },
     /// An input gained or lost focus.
     FocusChanged {
         /// The action configured on the input.
-        action: &'static str,
+        action: &'a str,
         /// Whether the input is now focused.
         focused: bool,
     },
     /// A switch was toggled.
     Toggled {
         /// The action configured on the switch.
-        action: &'static str,
+        action: &'a str,
         /// Whether the switch is now on.
         checked: bool,
     },
@@ -47,7 +51,7 @@ pub enum Event<'a> {
 
 impl Event<'_> {
     /// The action the event was dispatched for.
-    pub fn action(&self) -> &'static str {
+    pub fn action(&self) -> &str {
         match self {
             Self::Click { action }
             | Self::TextChanged { action, .. }

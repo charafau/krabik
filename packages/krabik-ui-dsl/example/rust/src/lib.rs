@@ -17,7 +17,7 @@ const COLOR_DONE: u32 = 0xFFE6_F4EA;
 
 /// One fixed checklist task.
 ///
-/// Actions are `&'static str`, so each task carries its own constant action.
+/// Tasks keep `&'static str` actions; the notes below build theirs at runtime.
 struct Task {
     title: &'static str,
     action: &'static str,
@@ -106,13 +106,26 @@ impl ChecklistApp {
             .into()
     }
 
-    fn note_row(&self, note: &str) -> Element {
+    /// One note row with a delete button whose action is built at runtime.
+    ///
+    /// This is the dynamic-action pattern: rows that only exist at runtime
+    /// cannot name themselves with `&'static str`, so the action encodes the
+    /// row's index and [`Self::handle`] parses it back out.
+    fn note_row(&self, index: usize, note: &str) -> Element {
         Row::new()
             .width_percent(1.0)
+            .spacing(8)
+            .align_items(Align::Center)
             .padding_each(EdgeInsets::symmetric(12, 8))
             .background(COLOR_SURFACE)
             .corner_radius(8)
             .child(Text::new(format!("• {note}")).size(15).color(COLOR_TEXT))
+            .child(Spacer::new())
+            .child(
+                Button::new("Delete")
+                    .action(format!("note:delete:{index}"))
+                    .accessibility_label(format!("Delete {note}")),
+            )
             .into()
     }
 
@@ -181,7 +194,7 @@ impl App for ChecklistApp {
             .child(Spacer::new().height(8))
             .child(Text::new("Notes").size(20).bold().color(COLOR_TEXT))
             .child(caption(
-                "Notes render as dynamic rows; clearing them exercises node removal.",
+                "Notes are dynamic rows with per-row delete actions built at runtime.",
             ))
             .child(
                 Row::new()
@@ -200,8 +213,8 @@ impl App for ChecklistApp {
 
         if !self.notes.is_empty() {
             column = column.child(Button::new("Clear notes").action("notes:clear"));
-            for note in &self.notes {
-                column = column.child(self.note_row(note));
+            for (index, note) in self.notes.iter().enumerate() {
+                column = column.child(self.note_row(index, note));
             }
         }
 
@@ -221,14 +234,25 @@ impl App for ChecklistApp {
                 self.draft = value.to_string();
                 true
             }
-            Event::Click { action } => match action {
-                "notes:add" => self.add_note(),
-                "notes:clear" => {
-                    self.notes.clear();
-                    true
+            Event::Click { action } => {
+                // Dynamic per-row actions: `note:delete:{index}`.
+                if let Some(index) = action
+                    .strip_prefix("note:delete:")
+                    .and_then(|index| index.parse::<usize>().ok())
+                    && index < self.notes.len()
+                {
+                    self.notes.remove(index);
+                    return true;
                 }
-                _ => false,
-            },
+                match action {
+                    "notes:add" => self.add_note(),
+                    "notes:clear" => {
+                        self.notes.clear();
+                        true
+                    }
+                    _ => false,
+                }
+            }
             Event::Submitted {
                 action: "notes:add",
             } => self.add_note(),

@@ -44,7 +44,10 @@ Implementation notes:
   `layoutSubviews` are coalesced and deferred the same way, so UIKit can never
   re-enter the state mutex while a handler is rendering.
 - `UITextField` keyboard/return-key setters go through raw `objc_msgSend`
-  because UIKit implements them via message forwarding.
+  because UIKit implements them via message forwarding; the trait getters are
+  read the same way (objc2's debug-time method verification rejects them).
+- Field updates skip redundant placeholder/keyboard/secure-entry setters, so a
+  re-render between keystrokes no longer pokes the text input system.
 - Remote URL images download through `NSURLSession`: one download per URL, an
   in-memory cache with in-flight de-duplication, decoded off the main thread
   and applied on the main queue only while the view still expects that URL.
@@ -54,7 +57,9 @@ Implementation notes:
 [`example/`](example/) documents the consumption pattern: a standalone Rust
 crate (`krabik-ui-dsl-example`) that path-depends on the DSL, implements its
 own checklist app, and registers it through `set_app_factory` — plus an Xcode
-shell that installs the app at startup and hosts the root view. The DSL crate
+shell that installs the app at startup and hosts the root view. Per-note
+delete buttons are built with dynamic actions
+(`format!("note:delete:{index}")`) and covered by a UI test. The DSL crate
 gained an `rlib` target so consumers can link it. An equivalent Android shell
 is not written yet.
 
@@ -93,16 +98,23 @@ Events are typed in `rust/src/app.rs`:
 
 ```rust
 pub enum Event<'a> {
-    Click { action: &'static str },
-    TextChanged { action: &'static str, value: &'a str },
-    Submitted { action: &'static str },
-    FocusChanged { action: &'static str, focused: bool },
-    Toggled { action: &'static str, checked: bool },
+    Click { action: &'a str },
+    TextChanged { action: &'a str, value: &'a str },
+    Submitted { action: &'a str },
+    FocusChanged { action: &'a str, focused: bool },
+    Toggled { action: &'a str, checked: bool },
 }
 ```
 
 Unidirectional data flow: `view(state) → handle(event) → render()` is the loop.
 `App::handle()` returns `bool` to signal whether the UI should re-render.
+
+Actions are `Cow<'static, str>` in the props, so builders accept both
+`&'static str` and runtime-built `String`s — e.g.
+`Button::new("Delete").action(format!("note:delete:{index}"))` for a row in a
+list. Events borrow the action for the duration of the `handle` call, so the
+trait signature is unchanged and static actions stay allocation-free. The
+[`example/`](example/) checklist uses this for per-note delete buttons.
 
 ---
 
@@ -131,5 +143,7 @@ In `AndroidState::render`, every node property update issues separate JNI calls 
 - Animations via native platform APIs
 - Native intrinsic measurement for switches and images
 - Disabled-state styling for custom backgrounds (native text already dims)
+- Dynamic `Element::key` (`Cow<'static, str>`) so reordered rows keep their
+  identity across moves — per-row actions already work via dynamic actions
 - More widgets: Checkbox, RadioButton, Slider, ProgressIndicator, DatePicker, Dialog, BottomSheet, Navigation
 - Platform-specific extensions
