@@ -16,7 +16,42 @@ ios = ["uniffi/macro-scaffolding"]
 jni = "0.22"
 taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
 uniffi = { git = "https://github.com/mozilla/uniffi-rs", rev = "c31f4bc025c7a31eae56b49107f50e6d38e76bc7", default-features = false }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
 uniffi-bindgen-kotlin-jni-runtime = { git = "https://github.com/mozilla/uniffi-rs", rev = "c31f4bc025c7a31eae56b49107f50e6d38e76bc7" }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+block2 = "0.6"
+dispatch2 = "0.3"
+objc2 = { version = "0.6", features = ["exception"] }
+objc2-core-foundation = "0.3"
+objc2-core-graphics = "0.3"
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSData", "NSGeometry", "NSObject", "NSString", "NSURL"] }
+objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAGradientLayer", "objc2-core-foundation", "objc2-core-graphics"] }
+objc2-ui-kit = { version = "0.3", features = [
+    "block2",
+    "NSParagraphStyle",
+    "NSText",
+    "UIAction",
+    "UIAccessibility",
+    "UIButton",
+    "UIColor",
+    "UIControl",
+    "UIFont",
+    "UIGeometry",
+    "UIImage",
+    "UIImageView",
+    "UILabel",
+    "UIMenuElement",
+    "UIResponder",
+    "UIScrollView",
+    "UISwitch",
+    "UITextField",
+    "UITextInputTraits",
+    "UIView",
+    "objc2-core-foundation",
+    "objc2-core-graphics",
+] }
 
 [build-dependencies]
 uniffi-bindgen-kotlin-jni = { git = "https://github.com/mozilla/uniffi-rs", rev = "c31f4bc025c7a31eae56b49107f50e6d38e76bc7" }

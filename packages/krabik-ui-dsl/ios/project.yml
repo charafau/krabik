@@ -20,16 +20,29 @@ targets:
     platform: iOS
     sources:
       - path: Sources
-      - path: Generated
-        includes:
-          - "*.swift"
+      - path: Resources
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.krabik-ui-dsl
         PRODUCT_NAME: KrabikUiDsl
-        SWIFT_INCLUDE_PATHS:
-          - $(SRCROOT)/Generated
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/KrabikIOS.h
         LIBRARY_SEARCH_PATHS:
           - $(SRCROOT)/../rust/target/$(RUST_TARGET)/$(CONFIGURATION:lower)
         OTHER_LDFLAGS:
           - -lkrabik_ui_dsl
+    scheme:
+      testTargets:
+        - KrabikUiDslUITests
+
+  KrabikUiDslUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: KrabikUiDsl
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.krabik-ui-dsl-uitests
+        TEST_TARGET_NAME: KrabikUiDsl

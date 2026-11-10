@@ -21,6 +21,32 @@ Application logic is fully decoupled from the renderer.
 - `set_app_factory()` lets users register their own app.
 - Demo gallery lives in [`rust/src/gallery.rs`](rust/src/gallery.rs), not hardcoded in `android.rs`.
 
+### 2. Implement the iOS Renderer ✅
+
+The iOS app drives UIKit directly from Rust through a raw C ABI, mirroring the
+Android renderer's JNI surface. The Swift side is a single `RustRootView` that
+forwards its viewport and owns no UI logic.
+
+| Milestone | Result |
+|---|---|
+| **M0 — build spike** | `build.rs` skips the Kotlin JNI generator on iOS; the staticlib builds for `aarch64-apple-ios-sim --features ios` and the app renders in the simulator. |
+| **M1 — Rust FFI skeleton** | [`ios.rs`](rust/src/ios.rs) behind `#[cfg(target_os = "ios")]`: handle-keyed `Mutex<HashMap<u64, IosState>>` with `create / render / destroy` and typed event entry points mirroring Android. |
+| **M2 — measurement** | `IosMeasure` measures `NSString` text with `UIFont` attributes, including size/weight/max-lines. |
+| **M3 — UIKit widgets** | `UILabel`, `UIButton`, `UISwitch`, `UITextField`, `UIImageView`, `UIScrollView`, plus gradients (`CAGradientLayer`), borders, radii, opacity, elevation, and accessibility labels. |
+| **M4 — root view + parity** | [`RustRootView.swift`](ios/Sources/RustRootView.swift) replaces the placeholder; a UI test drives all ten gallery demos (counter, layouts, typography, alignment, scroll, form, media, styling, controls) and passes on the simulator. |
+| **M5 — CI (optional)** | Not added yet; the Android job remains the only mobile CI job. |
+
+Implementation notes:
+
+- Uses `objc2` / `objc2-ui-kit` / `objc2-foundation` / `objc2-quartz-core` rather than UniFFI.
+- Actions use `UIControl::addAction_forControlEvents` with `RcBlock` handlers.
+- Events are deferred to the next main-queue turn; viewport re-renders from
+  `layoutSubviews` are coalesced and deferred the same way, so UIKit can never
+  re-enter the state mutex while a handler is rendering.
+- `UITextField` keyboard/return-key setters go through raw `objc_msgSend`
+  because UIKit implements them via message forwarding.
+- Remote URL images are not implemented on iOS yet (bundled assets are).
+
 ### 3. Expand Native Widget Set ✅
 
 All core widgets from SPEC.md §7.1 are implemented on Android.
@@ -71,15 +97,12 @@ Unidirectional data flow: `view(state) → handle(event) → render()` is the lo
 
 ## Remaining ❌
 
-### 2. Implement the iOS Renderer ❌ *(next priority)*
+### Verify the Android CI job ❌
 
-The iOS app currently has only placeholder SwiftUI files ([`ContentView.swift`](ios/Sources/ContentView.swift)) calling `getGreeting()`.
-
-**To do:**
-- Implement `ios.rs` mirroring `android.rs`:
-  - `Measure` using UIKit text measurement (`NSAttributedString.boundingRect` or offscreen `UILabel`).
-  - Expose C FFI / UniFFI functions to create, layout, update, and remove `UIView` / `UILabel` / `UIButton` instances.
-- Create a custom `RustRootView: UIView` in Swift that manages native `UIView` children based on Taffy frames and dispatches touch events back to Rust.
+The `android` job in [`ci.yml`](../../../.github/workflows/ci.yml) was validated locally only.
+Push the branch and confirm it passes. The first run is slow (Rust cross-compile + Gradle
+download); later runs are cached. If the runner disagrees on `platforms;android-37.0` or an
+action major, adjust the job.
 
 ### 4. Optimize JNI Performance ⚠️
 
@@ -93,6 +116,8 @@ In `AndroidState::render`, every node property update issues separate JNI calls 
 
 ## Future (not yet started)
 
+- Remote URL images on iOS (bundled assets already work)
+- iOS CI job (`cargo build --target aarch64-apple-ios-sim --features ios`)
 - Virtualized lists (RecyclerView / UICollectionView-based)
 - Animations via native platform APIs
 - Native intrinsic measurement for switches and images
