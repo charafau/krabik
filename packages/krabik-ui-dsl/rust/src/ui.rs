@@ -3,6 +3,8 @@
 //! Applications build a tree of [`Element`]s with the components in this module.
 //! The tree is plain data: it holds no platform handles and no callbacks.
 
+use std::borrow::Cow;
+
 /// A length in logical points (dp on Android, points on iOS).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Length {
@@ -187,7 +189,7 @@ pub struct ButtonProps {
     /// The label shown on the button.
     pub label: String,
     /// The action dispatched when the button is pressed.
-    pub action: &'static str,
+    pub action: Cow<'static, str>,
     /// Font size in logical points.
     pub size: f32,
     /// ARGB text color.
@@ -201,7 +203,7 @@ impl ButtonProps {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
-            action: "",
+            action: Cow::Borrowed(""),
             size: 16.0,
             color: 0xFF00_0000,
             weight: FontWeight::Normal,
@@ -263,11 +265,11 @@ pub struct TextFieldProps {
     /// Hint shown while the input is empty.
     pub placeholder: String,
     /// The action dispatched whenever the text changes.
-    pub action: &'static str,
+    pub action: Cow<'static, str>,
     /// The action dispatched when the user submits the input.
-    pub submit_action: &'static str,
+    pub submit_action: Cow<'static, str>,
     /// The action dispatched when the input gains or loses focus.
-    pub focus_action: &'static str,
+    pub focus_action: Cow<'static, str>,
     /// Whether the input accepts multiple lines of text.
     pub multiline: bool,
     /// Whether the text is obscured while typing.
@@ -290,9 +292,9 @@ impl TextFieldProps {
         Self {
             value: value.into(),
             placeholder: String::new(),
-            action: "",
-            submit_action: "",
-            focus_action: "",
+            action: Cow::Borrowed(""),
+            submit_action: Cow::Borrowed(""),
+            focus_action: Cow::Borrowed(""),
             multiline: false,
             secure: false,
             keyboard: KeyboardType::Text,
@@ -305,12 +307,12 @@ impl TextFieldProps {
 }
 
 /// Platform-independent properties of a switch node.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SwitchProps {
     /// Whether the switch is on.
     pub checked: bool,
     /// The action dispatched whenever the switch is toggled.
-    pub action: &'static str,
+    pub action: Cow<'static, str>,
 }
 
 impl SwitchProps {
@@ -318,7 +320,7 @@ impl SwitchProps {
     pub const fn new(checked: bool) -> Self {
         Self {
             checked,
-            action: "",
+            action: Cow::Borrowed(""),
         }
     }
 }
@@ -921,9 +923,12 @@ impl Button {
     }
 
     /// Sets the action dispatched when the button is pressed.
-    pub fn action(mut self, action: &'static str) -> Self {
+    ///
+    /// Accepts a `&'static str` or an owned `String` for actions built at
+    /// runtime, such as `format!("note:delete:{index}")`.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
         if let ElementKind::Button(props) = &mut self.0.kind {
-            props.action = action;
+            props.action = action.into();
         }
         self
     }
@@ -956,25 +961,34 @@ impl TextField {
     }
 
     /// Sets the action dispatched whenever the text changes.
-    pub fn action(mut self, action: &'static str) -> Self {
+    ///
+    /// Accepts a `&'static str` or an owned `String` for actions built at
+    /// runtime, such as `format!("field:{index}")`.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
         if let ElementKind::TextField(props) = &mut self.0.kind {
-            props.action = action;
+            props.action = action.into();
         }
         self
     }
 
     /// Sets the action dispatched when the user submits the input.
-    pub fn submit_action(mut self, action: &'static str) -> Self {
+    ///
+    /// Accepts a `&'static str` or an owned `String` for actions built at
+    /// runtime.
+    pub fn submit_action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
         if let ElementKind::TextField(props) = &mut self.0.kind {
-            props.submit_action = action;
+            props.submit_action = action.into();
         }
         self
     }
 
     /// Sets the action dispatched when the input gains or loses focus.
-    pub fn focus_action(mut self, action: &'static str) -> Self {
+    ///
+    /// Accepts a `&'static str` or an owned `String` for actions built at
+    /// runtime.
+    pub fn focus_action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
         if let ElementKind::TextField(props) = &mut self.0.kind {
-            props.focus_action = action;
+            props.focus_action = action.into();
         }
         self
     }
@@ -1047,9 +1061,12 @@ impl Switch {
     }
 
     /// Sets the action dispatched whenever the switch is toggled.
-    pub fn action(mut self, action: &'static str) -> Self {
+    ///
+    /// Accepts a `&'static str` or an owned `String` for actions built at
+    /// runtime.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
         if let ElementKind::Switch(props) = &mut self.0.kind {
-            props.action = action;
+            props.action = action.into();
         }
         self
     }
