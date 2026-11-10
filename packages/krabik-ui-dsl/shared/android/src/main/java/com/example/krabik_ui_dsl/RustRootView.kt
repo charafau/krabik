@@ -175,6 +175,13 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
         }
     }
 
+    /** Forwards the scroll offset, in pixels, of a native scroll container. */
+    fun onScrolled(nodeId: Long, offset: Int) {
+        if (handle != 0L) {
+            nativeOnScroll(handle, nodeId, offset.toFloat())
+        }
+    }
+
     /** Releases the Rust state when the activity goes away. */
     fun destroy() {
         if (handle != 0L) {
@@ -199,6 +206,8 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     private external fun nativeOnFocusChanged(handle: Long, nodeId: Long, focused: Boolean)
 
     private external fun nativeOnCheckedChanged(handle: Long, nodeId: Long, checked: Boolean)
+
+    private external fun nativeOnScroll(handle: Long, nodeId: Long, offset: Float)
 
     private external fun nativeDestroy(handle: Long)
 }

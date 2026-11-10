@@ -445,7 +445,12 @@ impl AndroidState {
         node: &RenderNode,
     ) -> JniResult<JObject<'local>> {
         let view = if let NodeKind::Scroll(props) = &node.kind {
-            create_scroll(env, self.context.as_obj(), props.axis == Axis::Horizontal)?
+            create_scroll(
+                env,
+                self.context.as_obj(),
+                self.root.as_obj(),
+                props.axis == Axis::Horizontal,
+            )?
         } else {
             let ids = jni_handles(env)?;
             let context = [JValue::Object(self.context.as_obj())];
@@ -517,6 +522,7 @@ impl AndroidState {
 fn create_scroll<'local>(
     env: &mut Env<'local>,
     context: &JObject<'_>,
+    root: &JObject<'_>,
     horizontal: bool,
 ) -> JniResult<JObject<'local>> {
     let ids = jni_handles(env)?;
@@ -524,7 +530,11 @@ fn create_scroll<'local>(
         .call(
             env,
             &ids.krabik_views,
-            &[JValue::Object(context), JValue::Bool(horizontal)],
+            &[
+                JValue::Object(context),
+                JValue::Bool(horizontal),
+                JValue::Object(root),
+            ],
         )?
         .l()
 }
@@ -1134,6 +1144,35 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnChe
                 checked,
             })
         {
+            state.render(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Dispatches a scroll offset of a native scroll container back to the runtime.
+///
+/// The offset arrives in pixels; the runtime works in logical points. Only a
+/// list whose visible window changed rebuilds, so pixel-level scrolling costs
+/// a lookup and a range check.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnScroll<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    node_id: jlong,
+    offset_px: jfloat,
+) {
+    run(&mut unenv, "nativeOnScroll", |env| {
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        let Some(state) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+
+        let offset = offset_px.max(0.0) / state.density;
+        if state.runtime.scroll(NodeId(node_id as u64), offset) {
             state.render(env)?;
         }
         Ok(())
