@@ -7,6 +7,9 @@
 
 uniffi::setup_scaffolding!();
 
+// The Kotlin JNI scaffolding is generated for Android only. On iOS the
+// renderer uses a plain C ABI instead, and the runtime crate is not linked.
+#[cfg(not(target_os = "ios"))]
 include!(concat!(
     env!("OUT_DIR"),
     "/uniffi_bindgen_kotlin_jni.uniffi.rs"
@@ -27,6 +30,9 @@ pub use gallery::GalleryApp;
 
 #[cfg(target_os = "android")]
 mod android;
+
+#[cfg(target_os = "ios")]
+mod ios;
 
 /// Returns a greeting.
 ///
