@@ -3,6 +3,7 @@ package com.example.krabik_ui_dsl
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 
 /**
  * The only Android widget the Rust UI owns.
@@ -73,6 +74,27 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     override fun onClick(view: View) {
         val nodeId = view.tag as? Long ?: return
         nativeOnClick(handle, nodeId)
+    }
+
+    /**
+     * Applies one node's frame, in pixels.
+     *
+     * Rust calls this once per moved node instead of issuing separate
+     * translation and layout-params calls. The params are mutated in place and
+     * only reassigned when the size changes, so a pure move does not schedule
+     * another layout pass.
+     */
+    fun applyFrame(view: View, x: Int, y: Int, width: Int, height: Int) {
+        val params = view.layoutParams
+        if (params == null) {
+            view.layoutParams = FrameLayout.LayoutParams(width, height)
+        } else if (params.width != width || params.height != height) {
+            params.width = width
+            params.height = height
+            view.layoutParams = params
+        }
+        view.translationX = x.toFloat()
+        view.translationY = y.toFloat()
     }
 
     /** Forwards an edit of a native input back to Rust. */

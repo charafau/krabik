@@ -49,6 +49,19 @@ impl Rect {
         }
     }
 
+    /// Converts the frame to physical pixels for a native view.
+    ///
+    /// The origin is rounded to the nearest pixel; the extents are rounded and
+    /// then clamped to zero, because a native view cannot have a negative size.
+    pub fn to_pixels(self, density: f32) -> PixelFrame {
+        PixelFrame {
+            x: (self.x * density).round() as i32,
+            y: (self.y * density).round() as i32,
+            width: (self.width * density).round().max(0.0) as i32,
+            height: (self.height * density).round().max(0.0) as i32,
+        }
+    }
+
     /// The right edge.
     pub fn right(&self) -> f32 {
         self.x + self.width
@@ -82,5 +95,78 @@ impl Constraints {
             max_width: Some(max_width),
             max_height: None,
         }
+    }
+}
+
+/// A frame converted to physical pixels, as a platform renderer needs it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PixelFrame {
+    /// The left edge in pixels.
+    pub x: i32,
+    /// The top edge in pixels.
+    pub y: i32,
+    /// The horizontal extent in pixels.
+    pub width: i32,
+    /// The vertical extent in pixels.
+    pub height: i32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn converts_points_to_rounded_pixels() {
+        let frame = Rect::new(10.4, 20.2, 100.0, 50.0).to_pixels(2.0);
+
+        assert_eq!(
+            frame,
+            PixelFrame {
+                x: 21,
+                y: 40,
+                width: 200,
+                height: 100,
+            }
+        );
+    }
+
+    #[test]
+    fn density_one_preserves_the_logical_frame() {
+        let frame = Rect::new(3.0, 4.0, 5.0, 6.0).to_pixels(1.0);
+
+        assert_eq!(
+            frame,
+            PixelFrame {
+                x: 3,
+                y: 4,
+                width: 5,
+                height: 6,
+            }
+        );
+    }
+
+    #[test]
+    fn negative_origins_survive_but_sizes_are_clamped() {
+        let frame = Rect::new(-0.8, -1.2, -10.0, -0.1).to_pixels(1.0);
+
+        assert_eq!(frame.x, -1);
+        assert_eq!(frame.y, -1);
+        assert_eq!(frame.width, 0);
+        assert_eq!(frame.height, 0);
+    }
+
+    #[test]
+    fn fractional_density_rounds_to_the_nearest_pixel() {
+        let frame = Rect::new(0.5, 0.4, 0.5, 0.9).to_pixels(3.0);
+
+        assert_eq!(
+            frame,
+            PixelFrame {
+                x: 2,
+                y: 1,
+                width: 2,
+                height: 3,
+            }
+        );
     }
 }

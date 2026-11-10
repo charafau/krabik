@@ -37,8 +37,8 @@ use jni::{Env, jni_sig, jni_str};
 use super::{
     BUTTON_CLASS, FRAME_LAYOUT_CLASS, FRAME_PARAMS_CLASS, IMAGE_VIEW_CLASS, KRABIK_IMAGES_CLASS,
     KRABIK_STYLE_CLASS, KRABIK_VIEWS_CLASS, LAYOUT_PARAMS_CLASS, LONG_CLASS, MEASURE_SPEC_CLASS,
-    SWITCH_CLASS, TEXT_INPUT_CLASS, TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS,
-    checked,
+    RUST_ROOT_VIEW_CLASS, SWITCH_CLASS, TEXT_INPUT_CLASS, TEXT_UTILS_CLASS, TEXT_VIEW_CLASS,
+    TYPEFACE_CLASS, VIEW_CLASS, checked,
 };
 
 const VOID: JavaType = JavaType::Primitive(Primitive::Void);
@@ -212,14 +212,14 @@ pub(super) struct Jni {
     pub(super) krabik_style: Global<JClass<'static>>,
     pub(super) krabik_views: Global<JClass<'static>>,
     pub(super) krabik_images: Global<JClass<'static>>,
+    /// Only keeps `RustRootView` loaded for the cached `applyFrame` ID.
+    pub(super) _rust_root_view: Global<JClass<'static>>,
 
     // `android.view.View`, shared by every widget.
     pub(super) set_padding: Method,
     pub(super) set_enabled: Method,
     pub(super) set_content_description: Method,
     pub(super) set_tag: Method,
-    pub(super) set_x: Method,
-    pub(super) set_y: Method,
     pub(super) set_layout_params: Method,
     pub(super) set_minimum_width: Method,
     pub(super) set_minimum_height: Method,
@@ -250,6 +250,9 @@ pub(super) struct Jni {
     pub(super) set_text_silently: Method,
     pub(super) configure_input: Method,
     pub(super) set_checked_silently: Method,
+
+    // The Rust root view batches one node's frame into a single call.
+    pub(super) apply_frame: Method,
 
     // Statics and their fields.
     pub(super) make_measure_spec: StaticMethod,
@@ -292,6 +295,7 @@ impl Jni {
         let krabik_style = class(env, KRABIK_STYLE_CLASS)?;
         let krabik_views = class(env, KRABIK_VIEWS_CLASS)?;
         let krabik_images = class(env, KRABIK_IMAGES_CLASS)?;
+        let rust_root_view = class(env, RUST_ROOT_VIEW_CLASS)?;
 
         Ok(Self {
             set_padding: method!(env, &view, "setPadding", "(IIII)V", VOID),
@@ -304,8 +308,6 @@ impl Jni {
                 VOID
             ),
             set_tag: method!(env, &view, "setTag", "(Ljava/lang/Object;)V", VOID),
-            set_x: method!(env, &view, "setX", "(F)V", VOID),
-            set_y: method!(env, &view, "setY", "(F)V", VOID),
             set_layout_params: method!(
                 env,
                 &view,
@@ -394,6 +396,14 @@ impl Jni {
             configure_input: method!(env, &text_input, "configure", "(ZZII)V", VOID),
             set_checked_silently: method!(env, &switch, "setCheckedSilently", "(Z)V", VOID),
 
+            apply_frame: method!(
+                env,
+                &rust_root_view,
+                "applyFrame",
+                "(Landroid/view/View;IIII)V",
+                VOID
+            ),
+
             make_measure_spec: static_method!(env, &measure_spec, "makeMeasureSpec", "(II)I", INT),
             long_value_of: static_method!(env, &long, "valueOf", "(J)Ljava/lang/Long;", OBJECT),
             create_scroll: static_method!(
@@ -474,6 +484,7 @@ impl Jni {
             krabik_style,
             krabik_views,
             krabik_images,
+            _rust_root_view: rust_root_view,
         })
     }
 }
