@@ -9,9 +9,18 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
 }
 
+/** Kotlin views and helpers shared with the dev harness. */
+val sharedAndroidSources = rootProject.projectDir.parentFile.parentFile
+  .resolve("shared/android/src/main/java")
+check(sharedAndroidSources.isDirectory) {
+  "Shared Android sources not found at ${sharedAndroidSources.path}"
+}
+
 android {
   namespace = "com.example.krabik_ui_dsl"
   compileSdk = 37
+  sourceSets["main"].java.srcDir(sharedAndroidSources)
+  sourceSets["main"].kotlin.srcDir(sharedAndroidSources)
   defaultConfig {
     // Differs from the dev harness so both apps can be installed side by side.
     applicationId = "com.example.krabik_ui_dsl_example"
