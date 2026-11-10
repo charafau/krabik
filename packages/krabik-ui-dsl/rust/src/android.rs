@@ -5,9 +5,9 @@
 //! change is performed here on native `TextView`/`Button` instances.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 use jni::errors::{Result as JniResult, ThrowRuntimeExAndDefault};
 use jni::objects::{JObject, JString};
@@ -1168,6 +1168,21 @@ fn states() -> &'static Mutex<HashMap<jlong, AndroidState>> {
     STATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Locks the state map for event dispatch, or gives up when a render holds it.
+///
+/// Event entry points and `nativeRender` all run on the Android main thread,
+/// so a real user event can never race a render: while the render lock is
+/// held, the main thread is inside `nativeRender` itself. Lock contention in
+/// an event entry point therefore means the render synchronously triggered a
+/// widget listener (for example `setTransformationMethod` calls `setText`,
+/// which fires the input's text watcher). That callback re-enters the entry
+/// point on the same thread, and `std` mutexes are not re-entrant, so
+/// blocking on the lock would deadlock the UI. Such programmatic echoes are
+/// dropped.
+fn lock_states_for_event() -> Option<MutexGuard<'static, HashMap<jlong, AndroidState>>> {
+    states().try_lock().ok()
+}
+
 /// Creates the Rust-side state for a `RustRootView`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeCreate<'caller>(
@@ -1219,7 +1234,9 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnCli
     node_id: jlong,
 ) {
     run(&mut unenv, "nativeOnClick", |env| {
-        let mut states = states().lock().expect("android states");
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
         let Some(state) = states.get_mut(&handle) else {
             return Ok(());
         };
@@ -1246,7 +1263,9 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnTex
 ) {
     run(&mut unenv, "nativeOnTextChanged", |env| {
         let value = text.try_to_string(env)?;
-        let mut states = states().lock().expect("android states");
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
         let Some(state) = states.get_mut(&handle) else {
             return Ok(());
         };
@@ -1272,7 +1291,9 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSub
     node_id: jlong,
 ) {
     run(&mut unenv, "nativeOnSubmitted", |env| {
-        let mut states = states().lock().expect("android states");
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
         let Some(state) = states.get_mut(&handle) else {
             return Ok(());
         };
@@ -1300,7 +1321,9 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFoc
     focused: jboolean,
 ) {
     run(&mut unenv, "nativeOnFocusChanged", |env| {
-        let mut states = states().lock().expect("android states");
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
         let Some(state) = states.get_mut(&handle) else {
             return Ok(());
         };
@@ -1331,7 +1354,9 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnChe
     checked: jboolean,
 ) {
     run(&mut unenv, "nativeOnCheckedChanged", |env| {
-        let mut states = states().lock().expect("android states");
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
         let Some(state) = states.get_mut(&handle) else {
             return Ok(());
         };
