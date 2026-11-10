@@ -56,12 +56,25 @@ Implementation notes:
 
 [`example/`](example/) documents the consumption pattern: a standalone Rust
 crate (`krabik-ui-dsl-example`) that path-depends on the DSL, implements its
-own checklist app, and registers it through `set_app_factory` — plus an Xcode
-shell that installs the app at startup and hosts the root view. Per-note
-delete buttons are built with dynamic actions
-(`format!("note:delete:{index}")`) and covered by a UI test. The DSL crate
-gained an `rlib` target so consumers can link it. An equivalent Android shell
-is not written yet.
+own checklist app, and registers it through `set_app_factory` — plus a platform
+shell for each renderer:
+
+- **iOS** — an Xcode project whose Swift host calls the C function
+  `krabik_ui_dsl_example_install` at startup and hosts the root view.
+- **Android** — a Gradle project whose `MainActivity` calls the JNI entry point
+  `ExampleBridge.install`, exported by the example `cdylib`. The crate builds
+  as `staticlib` + `cdylib`, and the Gradle task cross-compiles it for the
+  selected ABIs and copies the `.so` into `jniLibs`.
+
+Per-note delete buttons are built with dynamic actions
+(`format!("note:delete:{index}")`) and covered by an XCUITest and an Espresso
+test. The example crate builds a `cdylib` alongside its `staticlib`, and the
+DSL crate exposes `rlib`/`cdylib`/`staticlib` so consumers can link and load it.
+
+Android event entry points try-lock the state map and drop the event when a
+render holds it. All event dispatch and `nativeRender` run on the main thread,
+so contention can only mean a widget listener fired synchronously during a
+render and re-entered the entry point; blocking there would deadlock the UI.
 
 ### 3. Expand Native Widget Set ✅
 
@@ -123,9 +136,15 @@ trait signature is unchanged and static actions stay allocation-free. The
 ### Verify the Android CI job ❌
 
 The `android` job in [`ci.yml`](../../../.github/workflows/ci.yml) was validated locally only.
-Push the branch and confirm it passes. The first run is slow (Rust cross-compile + Gradle
-download); later runs are cached. If the runner disagrees on `platforms;android-37.0` or an
-action major, adjust the job.
+Push the branch and confirm it passes, including the step that assembles the example shell. The
+first run is slow (Rust cross-compile + Gradle download); later runs are cached. If the runner
+disagrees on `platforms;android-37.0` or an action major, adjust the job.
+
+### Run the instrumented tests in CI ❌
+
+Both example shells have UI tests (XCUITest and Espresso), but only the iOS build runs in CI.
+Adding an emulator job (`connectedDebugAndroidTest`) would cover the Android flow, including the
+re-entrant text-input path fixed by the event try-lock.
 
 ### 4. Optimize JNI Performance ⚠️
 
