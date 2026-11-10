@@ -4,7 +4,7 @@
 //! the native widgets. Every widget, every property update, every frame change,
 //! and every event is handled here on native `UILabel`/`UIButton`/… instances.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,7 +17,9 @@ use objc2::runtime::{AnyObject, Sel};
 use objc2::{MainThreadMarker, Message};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGColor;
-use objc2_foundation::{NSArray, NSBundle, NSString};
+use objc2_foundation::{
+    NSArray, NSBundle, NSData, NSError, NSString, NSURL, NSURLResponse, NSURLSession,
+};
 use objc2_quartz_core::{CACornerMask, CAGradientLayer};
 use objc2_ui_kit::{
     NSLineBreakMode, NSObjectUIAccessibility, NSTextAlignment, UIAction, UIButton, UIButtonType,
@@ -216,6 +218,19 @@ impl ViewHandle {
     }
 }
 
+/// Remote image state for one root view.
+#[derive(Default)]
+struct ImageLoader {
+    /// Decoded images keyed by URL. Grows for the session's lifetime, which
+    /// is fine for a demo-sized number of remote images.
+    cache: HashMap<String, Retained<UIImage>>,
+    /// URLs with a download in flight, so repeated renders do not refetch.
+    in_flight: HashSet<String>,
+    /// The URL each image node is currently expected to display. A download
+    /// only updates views whose entry still matches its URL.
+    expected: HashMap<NodeId, String>,
+}
+
 /// The state of one `RustRootView`.
 struct IosState {
     handle: u64,
@@ -225,6 +240,7 @@ struct IosState {
     /// alive and prevent its `deinit` from destroying the state.
     root: Weak<UIView>,
     views: HashMap<NodeId, ViewHandle>,
+    images: ImageLoader,
     viewport: Size,
 }
 
@@ -241,6 +257,7 @@ impl IosState {
             app: crate::app::create_app(),
             root: Weak::from_retained(root),
             views: HashMap::new(),
+            images: ImageLoader::default(),
             viewport: Size::ZERO,
         }
     }
@@ -272,6 +289,20 @@ impl IosState {
                     apply_style(&handle.view, &node, &mut handle.gradient);
                     apply_accessibility(&handle.view, &node, mtm);
                 }
+                // Image updates can start downloads, which needs the state
+                // itself, so they are handled separately from `update_content`.
+                if let NodeKind::Image(props) = &node.kind {
+                    let view = match self.views.get(&node.id) {
+                        Some(handle) => match &handle.content {
+                            Content::Image(image) => Some(image.clone()),
+                            _ => None,
+                        },
+                        None => None,
+                    };
+                    if let Some(view) = view {
+                        self.load_image(node.id, &view, props);
+                    }
+                }
             }
             Op::Reparent { id, parent } => {
                 let Some(old_parent) = self.views.get(&id).map(|handle| handle.parent) else {
@@ -289,6 +320,7 @@ impl IosState {
                 }
             }
             Op::Remove { id } => {
+                self.images.expected.remove(&id);
                 if let Some(handle) = self.views.remove(&id) {
                     handle.view.removeFromSuperview();
                 }
@@ -309,7 +341,7 @@ impl IosState {
         }
     }
 
-    fn create_handle(&self, node: &RenderNode, mtm: MainThreadMarker) -> ViewHandle {
+    fn create_handle(&mut self, node: &RenderNode, mtm: MainThreadMarker) -> ViewHandle {
         let mut handle = match &node.kind {
             NodeKind::Text(props) => {
                 let wrapper = UIView::new(mtm);
@@ -343,7 +375,7 @@ impl IosState {
             }
             NodeKind::Image(props) => {
                 let image = UIImageView::new(mtm);
-                update_image(&image, props);
+                self.load_image(node.id, &image, props);
                 let view = cast_view(image.clone());
                 ViewHandle::new(view, Content::Image(image), node)
             }
@@ -422,6 +454,40 @@ impl IosState {
             gradient.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), rect.size));
         }
     }
+
+    /// Configures an image view for the given properties.
+    ///
+    /// Assets load synchronously; remote URLs load through the cache and
+    /// `NSURLSession`, updating the view when the download finishes.
+    fn load_image(&mut self, id: NodeId, view: &UIImageView, props: &ImageProps) {
+        view.setContentMode(match props.scale {
+            ImageScale::Fit => UIViewContentMode::ScaleAspectFit,
+            ImageScale::Fill => UIViewContentMode::ScaleAspectFill,
+        });
+        match &props.source {
+            ImageSource::Asset(path) => {
+                self.images.expected.remove(&id);
+                view.setImage(load_asset(path).as_deref());
+            }
+            ImageSource::Url(url) => self.load_remote_image(id, view, url),
+        }
+    }
+
+    /// Shows a remote image, downloading it only once per URL.
+    ///
+    /// The view is updated immediately on a cache hit. Otherwise the URL
+    /// starts a single download, and the view is filled in by
+    /// [`finish_download`] when it completes.
+    fn load_remote_image(&mut self, id: NodeId, view: &UIImageView, url: &str) {
+        self.images.expected.insert(id, url.to_string());
+        if let Some(image) = self.images.cache.get(url).map(|image| &**image) {
+            view.setImage(Some(image));
+            return;
+        }
+        if self.images.in_flight.insert(url.to_string()) {
+            start_download(self.handle, id, url);
+        }
+    }
 }
 
 fn cast_view<T: Message>(view: Retained<T>) -> Retained<UIView> {
@@ -449,7 +515,8 @@ fn update_content(content: &Content, node: &RenderNode) {
         (Content::Field(field), NodeKind::TextField(props)) => update_field(field, props),
         (Content::Button(button), NodeKind::Button(props)) => update_button(button, props),
         (Content::Switch(switch), NodeKind::Switch(props)) => switch.setOn(props.checked),
-        (Content::Image(image), NodeKind::Image(props)) => update_image(image, props),
+        // Images are updated by `IosState::load_image`, which starts async
+        // downloads and therefore needs the state itself.
         _ => {}
     }
 }
@@ -536,19 +603,6 @@ fn set_text_input_traits(
         send(receiver, objc2::sel!(setKeyboardType:), keyboard_type.0);
         send(receiver, objc2::sel!(setReturnKeyType:), return_key_type.0);
     }
-}
-
-fn update_image(view: &UIImageView, props: &ImageProps) {
-    let image = match &props.source {
-        ImageSource::Asset(path) => load_asset(path),
-        // Remote images are not implemented yet; the view keeps an empty frame.
-        ImageSource::Url(_) => None,
-    };
-    view.setImage(image.as_deref());
-    view.setContentMode(match props.scale {
-        ImageScale::Fit => UIViewContentMode::ScaleAspectFit,
-        ImageScale::Fill => UIViewContentMode::ScaleAspectFill,
-    });
 }
 
 fn load_asset(path: &str) -> Option<Retained<UIImage>> {
@@ -858,6 +912,64 @@ fn dispatch_checked(handle: u64, id: NodeId, checked: bool) {
             {
                 state.render();
             }
+        });
+    });
+}
+
+/// Starts an `NSURLSession` download for a remote image.
+///
+/// The completion handler decodes the image off the main thread and hands it
+/// to the main queue, where [`finish_download`] applies it.
+fn start_download(handle: u64, id: NodeId, url: &str) {
+    let Some(url_object) = NSURL::URLWithString(&NSString::from_str(url)) else {
+        eprintln!("krabik ios: invalid image URL: {url}");
+        return;
+    };
+    let url = url.to_string();
+    let block = RcBlock::new(
+        move |data: *mut NSData, _: *mut NSURLResponse, _: *mut NSError| {
+            let image = unsafe { data.as_ref() }.and_then(UIImage::imageWithData);
+            let url = url.clone();
+            schedule(move || finish_download(handle, id, url, image));
+        },
+    );
+    // SAFETY: the block is sendable and retained by the task until the
+    // download completes.
+    let task = unsafe {
+        NSURLSession::sharedSession().dataTaskWithURL_completionHandler(&url_object, &block)
+    };
+    task.resume();
+}
+
+/// Applies a finished download to every view that still expects the image.
+fn finish_download(handle: u64, id: NodeId, url: String, image: Option<Retained<UIImage>>) {
+    guard("image", || {
+        with_state(handle, |state| {
+            state.images.in_flight.remove(&url);
+            let Some(image) = image else {
+                // Allow a later render to retry the failed URL, but only if
+                // the node has not moved on to a different one meanwhile.
+                if state.images.expected.get(&id).map(String::as_str) == Some(url.as_str()) {
+                    state.images.expected.remove(&id);
+                }
+                return;
+            };
+            state.images.cache.insert(url.clone(), image.clone());
+            let waiting: Vec<NodeId> = state
+                .images
+                .expected
+                .iter()
+                .filter(|(_, expected)| expected.as_str() == url.as_str())
+                .map(|(node_id, _)| *node_id)
+                .collect();
+            for node_id in waiting {
+                if let Some(view) = state.views.get(&node_id)
+                    && let Content::Image(image_view) = &view.content
+                {
+                    image_view.setImage(Some(&*image));
+                }
+            }
+            state.images.expected.retain(|_, expected| expected != &url);
         });
     });
 }

@@ -1,0 +1,14 @@
+[package]
+name = "krabik-ui-dsl-example"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+krabik-ui-dsl = { path = "../../rust" }
+
+# This crate is a standalone project, mirroring the `rust/` directory that `krabik create`
+# generates. The empty workspace table keeps cargo from adopting a parent workspace.
+[workspace]
