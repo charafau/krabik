@@ -4,10 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-crate-type = ["staticlib"]
+# The staticlib is linked into the iOS app; the cdylib is loaded by the
+# Android app and exports the DSL's JNI entry points plus the install call.
+crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
 krabik-ui-dsl = { path = "../../rust" }
+jni = "0.22"
 
 # This crate is a standalone project, mirroring the `rust/` directory that `krabik create`
 # generates. The empty workspace table keeps cargo from adopting a parent workspace.

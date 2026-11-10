@@ -1,0 +1,140 @@
+package com.example.krabik_ui_dsl
+
+import android.content.Context
+import android.view.View
+import android.view.ViewGroup
+
+/**
+ * The only Android widget the Rust UI owns.
+ *
+ * Rust creates the native widgets as children of this group, gives them exact
+ * pixel frames, and receives their clicks. No layout is done in Kotlin beyond
+ * measuring the children at the sizes Rust has already calculated.
+ */
+class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener {
+
+    private var handle: Long = nativeCreate(
+        context,
+        resources.displayMetrics.density,
+    )
+    private var renderedWidth = -1
+    private var renderedHeight = -1
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val width = MeasureSpec.getSize(widthMeasureSpec)
+        val height = MeasureSpec.getSize(heightMeasureSpec)
+        setMeasuredDimension(width, height)
+
+        if (handle != 0L && width > 0 && height > 0 && (width != renderedWidth || height != renderedHeight)) {
+            renderedWidth = width
+            renderedHeight = height
+            nativeRender(handle, width, height)
+        }
+
+        for (index in 0 until childCount) {
+            val child = getChildAt(index)
+            val params = child.layoutParams
+            val childWidth = params?.width?.takeIf { it >= 0 } ?: width
+            val childHeight = params?.height?.takeIf { it >= 0 } ?: height
+            child.measure(
+                MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(childHeight, MeasureSpec.EXACTLY),
+            )
+        }
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        // Rust positions children with translation. Their own frame is anchored
+        // at the origin and takes the size it calculated for the layout pass.
+        for (index in 0 until childCount) {
+            val child = getChildAt(index)
+            val params = child.layoutParams
+            val width = params?.width?.takeIf { it >= 0 } ?: child.measuredWidth
+            val height = params?.height?.takeIf { it >= 0 } ?: child.measuredHeight
+            if (child.measuredWidth != width || child.measuredHeight != height) {
+                child.measure(
+                    MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
+                )
+            }
+            child.layout(0, 0, width, height)
+        }
+    }
+
+    override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
+        super.onSizeChanged(width, height, oldWidth, oldHeight)
+        if (handle != 0L && width > 0 && height > 0 && (width != renderedWidth || height != renderedHeight)) {
+            renderedWidth = width
+            renderedHeight = height
+            nativeRender(handle, width, height)
+        }
+    }
+
+    override fun onClick(view: View) {
+        val nodeId = view.tag as? Long ?: return
+        nativeOnClick(handle, nodeId)
+    }
+
+    /** Forwards an edit of a native input back to Rust. */
+    fun onTextChanged(nodeId: Long, text: String) {
+        if (handle != 0L) {
+            nativeOnTextChanged(handle, nodeId, text)
+        }
+    }
+
+    /** Forwards a keyboard submit of a native input back to Rust. */
+    fun onSubmitted(nodeId: Long) {
+        if (handle != 0L) {
+            nativeOnSubmitted(handle, nodeId)
+        }
+    }
+
+    /** Forwards a focus change of a native input back to Rust. */
+    fun onFocusChanged(nodeId: Long, focused: Boolean) {
+        if (handle != 0L) {
+            nativeOnFocusChanged(handle, nodeId, focused)
+        }
+    }
+
+    /** Forwards a toggle of a native switch back to Rust. */
+    fun onCheckedChanged(nodeId: Long, checked: Boolean) {
+        if (handle != 0L) {
+            nativeOnCheckedChanged(handle, nodeId, checked)
+        }
+    }
+
+    /** Releases the Rust state when the activity goes away. */
+    fun destroy() {
+        if (handle != 0L) {
+            nativeDestroy(handle)
+            handle = 0L
+        }
+    }
+
+    private external fun nativeCreate(
+        context: Context,
+        density: Float,
+    ): Long
+
+    private external fun nativeRender(handle: Long, widthPx: Int, heightPx: Int)
+
+    private external fun nativeOnClick(handle: Long, nodeId: Long)
+
+    private external fun nativeOnTextChanged(handle: Long, nodeId: Long, text: String)
+
+    private external fun nativeOnSubmitted(handle: Long, nodeId: Long)
+
+    private external fun nativeOnFocusChanged(handle: Long, nodeId: Long, focused: Boolean)
+
+    private external fun nativeOnCheckedChanged(handle: Long, nodeId: Long, checked: Boolean)
+
+    private external fun nativeDestroy(handle: Long)
+
+    companion object {
+        init {
+            // The example cdylib statically includes the DSL renderer, so this
+            // one library provides every native entry point of the root view.
+            System.loadLibrary("krabik_ui_dsl_example")
+        }
+    }
+}
