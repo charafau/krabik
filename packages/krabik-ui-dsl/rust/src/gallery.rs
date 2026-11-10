@@ -3,10 +3,12 @@
 //! Demonstrates the UI components, flexbox layouts, typography, and interactive
 //! state updates in a platform-independent way.
 
+use std::sync::Arc;
+
 use crate::app::{App, Event};
 use crate::ui::{
     Align, Button, Column, CornerRadii, EdgeInsets, Element, Gradient, Image, ImageScale,
-    ImageSource, ImeAction, Justify, KeyboardType, Row, ScrollView, Spacer, Switch, Text,
+    ImageSource, ImeAction, Justify, KeyboardType, List, Row, ScrollView, Spacer, Switch, Text,
     TextAlign, TextField,
 };
 
@@ -34,10 +36,11 @@ pub enum Demo {
     Media,
     Styling,
     Controls,
+    List,
 }
 
 /// The state of the gallery demo application.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GalleryApp {
     pub demo: Demo,
     pub count: i64,
@@ -47,6 +50,24 @@ pub struct GalleryApp {
     pub bio_focused: bool,
     pub submitted: bool,
     pub notifications: bool,
+    /// The thousand rows of the virtualized list demo, shared across rebuilds.
+    pub list_items: Arc<Vec<String>>,
+}
+
+impl Default for GalleryApp {
+    fn default() -> Self {
+        Self {
+            demo: Demo::default(),
+            count: 0,
+            name: String::new(),
+            bio: String::new(),
+            email: String::new(),
+            bio_focused: false,
+            submitted: false,
+            notifications: false,
+            list_items: Arc::new((1..=1000).map(|index| format!("Row {index}")).collect()),
+        }
+    }
 }
 
 impl GalleryApp {
@@ -79,6 +100,7 @@ impl GalleryApp {
                     .child(Button::new("Media").action("open:media"))
                     .child(Button::new("Styling").action("open:styling"))
                     .child(Button::new("Controls").action("open:controls"))
+                    .child(Button::new("List").action("open:list"))
                     .child(caption(
                         "This list scrolls, so every demo stays reachable on small screens.",
                     )),
@@ -461,6 +483,34 @@ impl GalleryApp {
             .into()
     }
 
+    fn list(&self) -> Element {
+        Column::new()
+            .padding(24)
+            .spacing(12)
+            .width_percent(1.0)
+            .height_percent(1.0)
+            .align_items(Align::Start)
+            .child(back_button())
+            .child(Text::new("List").size(26).bold())
+            .child(caption(
+                "1000 rows, but only the ones around the viewport exist as native views.",
+            ))
+            .child(
+                List::new(Arc::clone(&self.list_items))
+                    .item_height(44.0)
+                    .buffer(4)
+                    .key(|item| item.clone())
+                    .row(|item| {
+                        Row::new()
+                            .width_percent(1.0)
+                            .padding_each(EdgeInsets::symmetric(12, 10))
+                            .child(Text::new(item.clone()).size(15))
+                            .into()
+                    }),
+            )
+            .into()
+    }
+
     fn controls(&self) -> Element {
         let state = if self.notifications {
             "Notifications are on."
@@ -552,6 +602,7 @@ impl App for GalleryApp {
             Demo::Media => self.media(),
             Demo::Styling => self.styling(),
             Demo::Controls => self.controls(),
+            Demo::List => self.list(),
         }
     }
 
@@ -600,6 +651,7 @@ impl App for GalleryApp {
                 "open:media" => self.demo = Demo::Media,
                 "open:styling" => self.demo = Demo::Styling,
                 "open:controls" => self.demo = Demo::Controls,
+                "open:list" => self.demo = Demo::List,
                 "counter:add" => self.count += 1,
                 "counter:reset" => self.count = 0,
                 "form:clear" => {

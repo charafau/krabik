@@ -11,7 +11,7 @@ use crate::geometry::{Rect, Size};
 use crate::layout::{self, LayoutResult};
 use crate::measure::Measure;
 use crate::render::{self, Op, Renderer};
-use crate::tree::{self, NodeId, NodeKind, ROOT_ID, UiNode};
+use crate::tree::{self, ListExtent, NodeId, NodeKind, ROOT_ID, UiNode};
 use crate::ui::Element;
 
 /// The result of rebuilding the UI: the used size and the operations to apply.
@@ -35,6 +35,12 @@ pub struct Runtime {
     tree: UiNode,
     layout: LayoutResult,
     measurer: Box<dyn Measure>,
+    /// Scroll offsets in logical points, keyed by the scroll node id.
+    scroll_offsets: HashMap<NodeId, f32>,
+    /// The extent of every list in the last built tree.
+    lists: HashMap<NodeId, ListExtent>,
+    /// The viewport of the last update, needed to window lists on scroll.
+    viewport: Size,
 }
 
 impl Runtime {
@@ -44,12 +50,17 @@ impl Runtime {
             tree: UiNode::empty(),
             layout: LayoutResult::default(),
             measurer,
+            scroll_offsets: HashMap::new(),
+            lists: HashMap::new(),
+            viewport: Size::ZERO,
         }
     }
 
     /// Rebuilds the tree from `element` and returns the batch to apply.
     pub fn update(&mut self, element: &Element, viewport: Size) -> Update {
-        let next = tree::build(element);
+        self.viewport = viewport;
+        let (next, info) = tree::build_with(element, &self.scroll_offsets, viewport);
+        self.lists = info.lists;
 
         let mut ops = render::diff(&self.tree, &next);
         let layout = layout::compute(&next, viewport, self.measurer.as_ref());
@@ -69,6 +80,32 @@ impl Runtime {
         self.layout = layout;
 
         Update { size, ops }
+    }
+
+    /// Records the scroll offset of a list and reports whether its window
+    /// changed and the UI has to be rebuilt.
+    ///
+    /// Sub-pixel and sub-row scrolls only update the stored offset: the
+    /// materialized rows stay valid until the visible range actually moves.
+    pub fn scroll(&mut self, id: NodeId, offset: f32) -> bool {
+        let Some(extent) = self.lists.get(&id).copied() else {
+            return false;
+        };
+
+        let offset = offset.clamp(0.0, tree::max_scroll_offset(extent, self.viewport.height));
+        let previous = self.scroll_offsets.insert(id, offset).unwrap_or(0.0);
+        if (previous - offset).abs() < f32::EPSILON {
+            return false;
+        }
+
+        let before = tree::list_window(extent, self.viewport.height, previous);
+        let after = tree::list_window(extent, self.viewport.height, offset);
+        before != after
+    }
+
+    /// The scroll offset recorded for a node, if any.
+    pub fn scroll_offset(&self, id: NodeId) -> f32 {
+        self.scroll_offsets.get(&id).copied().unwrap_or(0.0)
     }
 
     /// Rebuilds the tree and applies the resulting batch in one call.
@@ -154,7 +191,9 @@ mod tests {
     use crate::geometry::Constraints;
     use crate::measure::ApproximateMeasure;
     use crate::render::RecordingRenderer;
-    use crate::ui::{Button, Column, Switch, Text, TextField, TextProps};
+    use std::sync::Arc;
+
+    use crate::ui::{Button, Column, Length, List, Switch, Text, TextField, TextProps};
 
     fn viewport() -> Size {
         Size::new(300.0, 600.0)
@@ -355,5 +394,81 @@ mod tests {
             "{:?}",
             update.ops
         );
+    }
+
+    fn list_element(count: usize) -> Element {
+        List::new(Arc::new(
+            (0..count)
+                .map(|index| format!("Row {index}"))
+                .collect::<Vec<_>>(),
+        ))
+        .item_height(50.0)
+        .buffer(2)
+        .key(|item| item.clone())
+        .row(|item| Text::new(item.clone()).into())
+        .into()
+    }
+
+    #[test]
+    fn scrolling_within_a_row_does_not_rebuild() {
+        let element = list_element(100);
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&element, Size::new(300.0, 200.0));
+        let list_id = runtime.tree().children[0].id;
+
+        // The first row is 50 points tall, so 10 points stay in the same window.
+        assert!(!runtime.scroll(list_id, 10.0));
+        assert_eq!(runtime.scroll_offset(list_id), 10.0);
+    }
+
+    #[test]
+    fn scrolling_past_a_row_asks_for_a_rebuild() {
+        let element = list_element(100);
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&element, Size::new(300.0, 200.0));
+        let list_id = runtime.tree().children[0].id;
+
+        assert!(runtime.scroll(list_id, 60.0));
+    }
+
+    #[test]
+    fn scrolling_is_clamped_to_the_content() {
+        let element = list_element(10);
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&element, Size::new(300.0, 200.0));
+        let list_id = runtime.tree().children[0].id;
+
+        // 10 rows of 50 points in a 200-point viewport: 300 points of travel.
+        runtime.scroll(list_id, 10_000.0);
+        assert_eq!(runtime.scroll_offset(list_id), 300.0);
+    }
+
+    #[test]
+    fn a_rebuild_uses_the_recorded_scroll_offset() {
+        let element = list_element(100);
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&element, Size::new(300.0, 200.0));
+        let list_id = runtime.tree().children[0].id;
+
+        assert!(runtime.scroll(list_id, 350.0));
+        runtime.update(&element, Size::new(300.0, 200.0));
+
+        let scrolled = &runtime.tree().children[0].children[0].children;
+        // A leading spacer marks the five rows that scrolled above the window
+        // (row 7 is the first visible one, with a buffer of two).
+        assert!(matches!(scrolled[0].kind, NodeKind::Spacer));
+        assert_eq!(scrolled[0].style.height, Length::Points(5.0 * 50.0));
+        assert_eq!(
+            scrolled.last().unwrap().style.height,
+            Length::Points((100.0 - 13.0) * 50.0)
+        );
+    }
+
+    #[test]
+    fn scrolling_an_unknown_node_is_ignored() {
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&screen("Hello"), viewport());
+
+        assert!(!runtime.scroll(NodeId(999), 100.0));
     }
 }
