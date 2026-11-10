@@ -148,11 +148,31 @@ re-entrant text-input path fixed by the event try-lock.
 
 ### 4. Optimize JNI Performance ⚠️
 
-In `AndroidState::render`, every node property update issues separate JNI calls (`find_class`, `call_method`, `setX`, `setY`, etc.).
+**Class/method ID caching ✅**
 
-**To do:**
-- **Class/Method ID caching**: `env.find_class(TEXT_VIEW_CLASS)` and similar are called dynamically inside helper functions. Caching `jclass` and `jmethodID` handles at startup avoids JNI method table lookups on every layout pass.
-- **Batching operations**: Instead of per-node JNI calls, serialize layout updates into batched arrays passed as a single Kotlin call to `RustRootView`.
+Every property update used to resolve its class and method by name
+(`FindClass` + `GetMethodID`) before the call, so a single frame paid hundreds
+of JNI table lookups. [`android/handles.rs`](rust/src/android/handles.rs) now
+resolves every class, method, field and constructor once, in `nativeCreate`
+(where the app's class loader is current), and holds global references to the
+declaring classes so the IDs stay valid for the process lifetime. The render
+paths call through small typed wrappers that keep the previous exception
+checks.
+
+Measured on the `Pixel_10` emulator (API 37.1, arm64) with a temporary timer
+around `AndroidState::render`, 60 taps of the Counter demo's "Add one" button:
+
+| | median | mean | min |
+|---|---|---|---|
+| before | 546 µs | 1009 µs | 447 µs |
+| cached handles | 396 µs | 770 µs | 339 µs |
+
+**Remaining: batching operations**
+
+Each node update still crosses JNI once per property (`setX`, `setY`,
+`setLayoutParams`, `setPadding`, …). Serializing layout updates into batched
+arrays passed as a single Kotlin call to `RustRootView` is the next step.
+
 
 ---
 
