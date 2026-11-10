@@ -4,6 +4,8 @@
 //! The tree is plain data: it holds no platform handles and no callbacks.
 
 use std::borrow::Cow;
+use std::fmt;
+use std::sync::Arc;
 
 /// A length in logical points (dp on Android, points on iOS).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -342,6 +344,41 @@ pub struct ScrollProps {
     pub axis: Axis,
 }
 
+/// The item source of a virtualized [`List`].
+///
+/// Keys and rows are closures so the runtime can materialize only the items in
+/// the window. They must be `Send + Sync` because the app may render on any
+/// thread.
+#[derive(Clone)]
+pub(crate) struct ListProps {
+    pub(crate) item_count: usize,
+    pub(crate) item_height: f32,
+    pub(crate) buffer: usize,
+    pub(crate) keys: Arc<dyn Fn(usize) -> String + Send + Sync>,
+    pub(crate) rows: Arc<dyn Fn(usize) -> Element + Send + Sync>,
+}
+
+impl fmt::Debug for ListProps {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ListProps")
+            .field("item_count", &self.item_count)
+            .field("item_height", &self.item_height)
+            .field("buffer", &self.buffer)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for ListProps {
+    /// Row sources are opaque; two lists are equal when their visible
+    /// configuration matches and they share the same item source.
+    fn eq(&self, other: &Self) -> bool {
+        self.item_count == other.item_count
+            && self.item_height == other.item_height
+            && self.buffer == other.buffer
+            && Arc::ptr_eq(&self.keys, &other.keys)
+    }
+}
+
 /// Where an image is loaded from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImageSource {
@@ -543,6 +580,7 @@ pub(crate) enum ElementKind {
     Switch(SwitchProps),
     Image(ImageProps),
     Scroll(ScrollProps),
+    List(ListProps),
 }
 
 impl ElementKind {
@@ -564,6 +602,7 @@ impl ElementKind {
                 Axis::Vertical => 8,
                 Axis::Horizontal => 9,
             },
+            Self::List(_) => 11,
         }
     }
 }
@@ -1107,6 +1146,100 @@ impl Image {
 impl From<Image> for Element {
     fn from(component: Image) -> Self {
         component.0
+    }
+}
+
+/// Derives the key of one list item.
+type KeyBuilder<T> = Box<dyn Fn(&T) -> String + Send + Sync>;
+
+/// Builds the element of one list item.
+type RowBuilder<T> = Box<dyn Fn(&T) -> Element + Send + Sync>;
+
+/// A virtualized vertical list.
+///
+/// Only the rows around the viewport are turned into elements and native
+/// views; the rest of the content is empty space, so the scroll extent and the
+/// scrollbar still reflect every item. Give the list a bounded area, normally
+/// by placing it in a sized or growing container.
+///
+/// Keys must be unique among the items; they keep a row's native view alive
+/// while it scrolls through the window.
+pub struct List<T> {
+    items: Arc<Vec<T>>,
+    item_height: f32,
+    buffer: usize,
+    key: Option<KeyBuilder<T>>,
+    row: Option<RowBuilder<T>>,
+}
+
+impl<T: Send + Sync + 'static> List<T> {
+    /// Creates a list over the given items.
+    ///
+    /// Pass an `Arc<Vec<_>>` to avoid copying the data on every rebuild.
+    pub fn new(items: impl Into<Arc<Vec<T>>>) -> Self {
+        Self {
+            items: items.into(),
+            item_height: 56.0,
+            buffer: 3,
+            key: None,
+            row: None,
+        }
+    }
+
+    /// Sets the fixed height of every row, which drives the window calculation.
+    pub fn item_height(mut self, height: impl IntoPoints) -> Self {
+        self.item_height = height.into_points().max(1.0);
+        self
+    }
+
+    /// Materializes this many extra rows above and below the viewport.
+    pub fn buffer(mut self, rows: usize) -> Self {
+        self.buffer = rows;
+        self
+    }
+
+    /// Derives the stable, unique key of an item.
+    pub fn key(mut self, key: impl Fn(&T) -> String + Send + Sync + 'static) -> Self {
+        self.key = Some(Box::new(key));
+        self
+    }
+
+    /// Builds the element of one item. Called only for visible items.
+    pub fn row(mut self, row: impl Fn(&T) -> Element + Send + Sync + 'static) -> Self {
+        self.row = Some(Box::new(row));
+        self
+    }
+}
+
+impl<T: Send + Sync + 'static> From<List<T>> for Element {
+    fn from(list: List<T>) -> Self {
+        let key = list.key.expect("List::key must be set");
+        let row = list.row.expect("List::row must be set");
+        let items = list.items;
+
+        let keys = {
+            let items = Arc::clone(&items);
+            Arc::new(move |index: usize| key(&items[index]))
+                as Arc<dyn Fn(usize) -> String + Send + Sync>
+        };
+        let rows = {
+            let items = Arc::clone(&items);
+            Arc::new(move |index: usize| row(&items[index]))
+                as Arc<dyn Fn(usize) -> Element + Send + Sync>
+        };
+
+        let mut element = Element::container(ElementKind::List(ListProps {
+            item_count: items.len(),
+            item_height: list.item_height,
+            buffer: list.buffer,
+            keys,
+            rows,
+        }));
+        // A list is a scroll region: it grows into the space its flex parent
+        // leaves and spans the cross axis.
+        element.style.width = Length::Percent(1.0);
+        element.style.grow = 1.0;
+        element
     }
 }
 
