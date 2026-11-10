@@ -37,6 +37,7 @@ pub enum Demo {
     Styling,
     Controls,
     List,
+    ListVariable,
 }
 
 /// The state of the gallery demo application.
@@ -52,6 +53,8 @@ pub struct GalleryApp {
     pub notifications: bool,
     /// The thousand rows of the virtualized list demo, shared across rebuilds.
     pub list_items: Arc<Vec<String>>,
+    /// Rows of mixed height for the measured-list demo.
+    pub variable_items: Arc<Vec<String>>,
 }
 
 impl Default for GalleryApp {
@@ -66,6 +69,13 @@ impl Default for GalleryApp {
             submitted: false,
             notifications: false,
             list_items: Arc::new((1..=1000).map(|index| format!("Row {index}")).collect()),
+            variable_items: Arc::new(
+                (1..=300)
+                    .map(|index| {
+                        format!("Row {index} - {}", "wrapping text ".repeat(1 + index % 4))
+                    })
+                    .collect(),
+            ),
         }
     }
 }
@@ -101,6 +111,7 @@ impl GalleryApp {
                     .child(Button::new("Styling").action("open:styling"))
                     .child(Button::new("Controls").action("open:controls"))
                     .child(Button::new("List").action("open:list"))
+                    .child(Button::new("List (variable)").action("open:list-variable"))
                     .child(caption(
                         "This list scrolls, so every demo stays reachable on small screens.",
                     )),
@@ -511,6 +522,33 @@ impl GalleryApp {
             .into()
     }
 
+    fn list_variable(&self) -> Element {
+        Column::new()
+            .padding(24)
+            .spacing(12)
+            .width_percent(1.0)
+            .height_percent(1.0)
+            .align_items(Align::Start)
+            .child(back_button())
+            .child(Text::new("List (variable)").size(26).bold())
+            .child(caption(
+                "Rows are measured on first sight; scrolling past them uses the cached heights.",
+            ))
+            .child(
+                List::new(Arc::clone(&self.variable_items))
+                    .buffer(4)
+                    .key(|item| item.clone())
+                    .row(|item| {
+                        Row::new()
+                            .width_percent(1.0)
+                            .padding_each(EdgeInsets::symmetric(12, 10))
+                            .child(Text::new(item.clone()).size(15).width_percent(1.0))
+                            .into()
+                    }),
+            )
+            .into()
+    }
+
     fn controls(&self) -> Element {
         let state = if self.notifications {
             "Notifications are on."
@@ -603,6 +641,7 @@ impl App for GalleryApp {
             Demo::Styling => self.styling(),
             Demo::Controls => self.controls(),
             Demo::List => self.list(),
+            Demo::ListVariable => self.list_variable(),
         }
     }
 
@@ -652,6 +691,7 @@ impl App for GalleryApp {
                 "open:styling" => self.demo = Demo::Styling,
                 "open:controls" => self.demo = Demo::Controls,
                 "open:list" => self.demo = Demo::List,
+                "open:list-variable" => self.demo = Demo::ListVariable,
                 "counter:add" => self.count += 1,
                 "counter:reset" => self.count = 0,
                 "form:clear" => {
