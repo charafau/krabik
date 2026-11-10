@@ -103,6 +103,25 @@ final class GalleryUITests: XCTestCase {
         capture("10-controls")
         back()
 
+        // The list materializes only the rows around the viewport; scrolling
+        // must release the earlier ones and pull in later ones.
+        if !app.buttons["List"].isHittable {
+            app.swipeUp()
+        }
+        open("List")
+        XCTAssertTrue(app.staticTexts["Row 1"].waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(rowNumbers().count, 40)
+        for _ in 0..<8 {
+            app.swipeUp()
+        }
+        waitForAbsence(app.staticTexts["Row 1"])
+        let numbers = rowNumbers()
+        XCTAssertFalse(numbers.contains(1), "row 1 stayed in the window")
+        XCTAssertGreaterThan(numbers.max() ?? 0, 5, "scrolling did not advance the window")
+        XCTAssertLessThanOrEqual(numbers.count, 40, "window grew to \(numbers.count)")
+        capture("11-list")
+        back()
+
         XCTAssertTrue(app.staticTexts["Native UI DSL"].waitForExistence(timeout: 5))
     }
 
@@ -116,6 +135,21 @@ final class GalleryUITests: XCTestCase {
     private func back() {
         app.buttons["Back"].tap()
         XCTAssertTrue(app.staticTexts["Native UI DSL"].waitForExistence(timeout: 5))
+    }
+
+    private func rowNumbers() -> [Int] {
+        app.staticTexts
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Row "))
+            .allElementsBoundByIndex
+            .compactMap { Int($0.label.dropFirst("Row ".count)) }
+    }
+
+    private func waitForAbsence(_ element: XCUIElement) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: element,
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: 5), .completed)
     }
 
     private func capture(_ name: String) {

@@ -7,14 +7,14 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use block2::RcBlock;
 use dispatch2::DispatchQueue;
 use objc2::rc::{Retained, Weak};
-use objc2::runtime::{AnyObject, Sel};
-use objc2::{MainThreadMarker, Message};
+use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject, Sel};
+use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGColor;
 use objc2_foundation::{
@@ -24,8 +24,8 @@ use objc2_quartz_core::{CACornerMask, CAGradientLayer};
 use objc2_ui_kit::{
     NSLineBreakMode, NSObjectUIAccessibility, NSTextAlignment, UIAction, UIButton, UIButtonType,
     UIColor, UIControl, UIControlEvents, UIControlState, UIFont, UIImage, UIImageView,
-    UIKeyboardType, UILabel, UIReturnKeyType, UIScrollView, UISwitch, UITextBorderStyle,
-    UITextField, UITextInputTraits, UIView, UIViewContentMode,
+    UIKeyboardType, UILabel, UIReturnKeyType, UIScrollView, UIScrollViewDelegate, UISwitch,
+    UITextBorderStyle, UITextField, UITextInputTraits, UIView, UIViewContentMode,
 };
 
 use crate::app::{App, Event};
@@ -147,6 +147,75 @@ fn cg_color(argb: u32) -> Retained<CGColor> {
     unsafe { color(argb).CGColor() }
 }
 
+/// The state shared between a scroll view's delegate and its deferred update.
+///
+/// `scrollViewDidScroll` fires for every frame of a gesture; the latest offset
+/// is stored here and only one main-queue update is scheduled at a time.
+#[derive(Default)]
+struct ScrollShared {
+    latest: AtomicU64,
+    scheduled: AtomicBool,
+}
+
+/// What a scroll delegate remembers about its node.
+struct ScrollDelegateIvars {
+    handle: u64,
+    id: NodeId,
+    horizontal: bool,
+    shared: Arc<ScrollShared>,
+}
+
+objc2::define_class!(
+    // Scroll callbacks arrive on the main thread, so the delegate is
+    // main-thread-only and uses the main-thread `alloc`.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "KrabikScrollDelegate"]
+    #[ivars = ScrollDelegateIvars]
+    struct ScrollDelegate;
+
+    unsafe impl NSObjectProtocol for ScrollDelegate {}
+
+    unsafe impl UIScrollViewDelegate for ScrollDelegate {
+        #[unsafe(method(scrollViewDidScroll:))]
+        fn scroll_view_did_scroll(&self, scroll_view: &UIScrollView) {
+            let ivars = self.ivars();
+            let offset = scroll_view.contentOffset();
+            let value = if ivars.horizontal { offset.x } else { offset.y }.max(0.0);
+            ivars
+                .shared
+                .latest
+                .store(value.to_bits(), Ordering::Relaxed);
+            if ivars.shared.scheduled.swap(true, Ordering::AcqRel) {
+                return;
+            }
+
+            let shared = Arc::clone(&ivars.shared);
+            let handle = ivars.handle;
+            let id = ivars.id;
+            schedule(move || {
+                shared.scheduled.store(false, Ordering::Release);
+                let offset = f64::from_bits(shared.latest.load(Ordering::Acquire));
+                dispatch_scroll(handle, id, offset);
+            });
+        }
+    }
+);
+
+impl ScrollDelegate {
+    fn new(handle: u64, id: NodeId, horizontal: bool, mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(ScrollDelegateIvars {
+            handle,
+            id,
+            horizontal,
+            shared: Arc::new(ScrollShared::default()),
+        });
+        // SAFETY: `NSObject`'s initializer returns an initialized instance of
+        // this class with the ivars already set.
+        unsafe { objc2::msg_send![super(this), init] }
+    }
+}
+
 /// The typed content of a native view.
 ///
 /// Leaves that need internal padding keep a separate content view inside the
@@ -163,6 +232,8 @@ enum Content {
     Scroll {
         scroll: Retained<UIScrollView>,
         host: Retained<UIView>,
+        /// Keeps the delegate alive for as long as the scroll view exists.
+        _delegate: Retained<ScrollDelegate>,
     },
 }
 
@@ -388,8 +459,21 @@ impl IosState {
                 scroll.setAlwaysBounceHorizontal(props.axis == Axis::Horizontal);
                 let host = UIView::new(mtm);
                 scroll.addSubview(&host);
+                let delegate =
+                    ScrollDelegate::new(self.handle, node.id, props.axis == Axis::Horizontal, mtm);
+                // SAFETY: the delegate is owned by the view handle below and
+                // only reads the scroll view's offset.
+                unsafe { scroll.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
                 let view = cast_view(scroll.clone());
-                ViewHandle::new(view, Content::Scroll { scroll, host }, node)
+                ViewHandle::new(
+                    view,
+                    Content::Scroll {
+                        scroll,
+                        host,
+                        _delegate: delegate,
+                    },
+                    node,
+                )
             }
             NodeKind::Column | NodeKind::Row => {
                 let view = UIView::new(mtm);
@@ -430,7 +514,7 @@ impl IosState {
 
         match &handle.content {
             Content::Host(host) => host.setFrame(inset(rect.size, handle.padding)),
-            Content::Scroll { scroll, host } => {
+            Content::Scroll { scroll, host, .. } => {
                 let size = content_size.unwrap_or(Size::ZERO);
                 host.setFrame(CGRect::new(
                     CGPoint::new(
@@ -951,6 +1035,16 @@ fn dispatch_checked(handle: u64, id: NodeId, checked: bool) {
                     checked,
                 })
             {
+                state.render();
+            }
+        });
+    });
+}
+
+fn dispatch_scroll(handle: u64, id: NodeId, offset: f64) {
+    guard("scroll", || {
+        with_state(handle, |state| {
+            if state.runtime.scroll(id, offset as f32) {
                 state.render();
             }
         });
