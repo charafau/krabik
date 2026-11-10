@@ -34,7 +34,7 @@ forwards its viewport and owns no UI logic.
 | **M2 — measurement** | `IosMeasure` measures `NSString` text with `UIFont` attributes, including size/weight/max-lines. |
 | **M3 — UIKit widgets** | `UILabel`, `UIButton`, `UISwitch`, `UITextField`, `UIImageView`, `UIScrollView`, plus gradients (`CAGradientLayer`), borders, radii, opacity, elevation, and accessibility labels. |
 | **M4 — root view + parity** | [`RustRootView.swift`](ios/Sources/RustRootView.swift) replaces the placeholder; a UI test drives all ten gallery demos (counter, layouts, typography, alignment, scroll, form, media, styling, controls) and passes on the simulator. |
-| **M5 — CI (optional)** | Not added yet; the Android job remains the only mobile CI job. |
+| **M5 — CI** | The `ios` job in [`ci.yml`](../../../.github/workflows/ci.yml) lints and builds the `aarch64-apple-ios-sim` static library. Like the Android job, it was validated locally only so far. |
 
 Implementation notes:
 
@@ -45,7 +45,18 @@ Implementation notes:
   re-enter the state mutex while a handler is rendering.
 - `UITextField` keyboard/return-key setters go through raw `objc_msgSend`
   because UIKit implements them via message forwarding.
-- Remote URL images are not implemented on iOS yet (bundled assets are).
+- Remote URL images download through `NSURLSession`: one download per URL, an
+  in-memory cache with in-flight de-duplication, decoded off the main thread
+  and applied on the main queue only while the view still expects that URL.
+
+### 2b. Standalone example app ✅
+
+[`example/`](example/) documents the consumption pattern: a standalone Rust
+crate (`krabik-ui-dsl-example`) that path-depends on the DSL, implements its
+own checklist app, and registers it through `set_app_factory` — plus an Xcode
+shell that installs the app at startup and hosts the root view. The DSL crate
+gained an `rlib` target so consumers can link it. An equivalent Android shell
+is not written yet.
 
 ### 3. Expand Native Widget Set ✅
 
@@ -116,8 +127,6 @@ In `AndroidState::render`, every node property update issues separate JNI calls 
 
 ## Future (not yet started)
 
-- Remote URL images on iOS (bundled assets already work)
-- iOS CI job (`cargo build --target aarch64-apple-ios-sim --features ios`)
 - Virtualized lists (RecyclerView / UICollectionView-based)
 - Animations via native platform APIs
 - Native intrinsic measurement for switches and images

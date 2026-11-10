@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-crate-type = ["cdylib", "staticlib"]
+# The rlib lets consumer crates (see `example/`) link the DSL; the cdylib is
+# the Android JNI library and the staticlib is linked into the iOS app.
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 # macro-scaffolding is required by the standard Swift bindings generator. It is opt-in so it
 # doesn't clash with the JNI scaffolding used by Android.
@@ -26,7 +28,7 @@ dispatch2 = "0.3"
 objc2 = { version = "0.6", features = ["exception"] }
 objc2-core-foundation = "0.3"
 objc2-core-graphics = "0.3"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSData", "NSGeometry", "NSObject", "NSString", "NSURL"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSData", "NSError", "NSGeometry", "NSObject", "NSString", "NSURL", "NSURLResponse", "NSURLSession"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAGradientLayer", "objc2-core-foundation", "objc2-core-graphics"] }
 objc2-ui-kit = { version = "0.3", features = [
     "block2",
