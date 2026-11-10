@@ -25,6 +25,11 @@ pub mod runtime;
 pub mod tree;
 pub mod ui;
 
+// Only the Android renderer consumes the packed frame arrays; the module stays
+// compiled everywhere so its tests run on the host.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod frame_batch;
+
 pub use app::{App, create_app, set_app_factory};
 pub use gallery::GalleryApp;
 
