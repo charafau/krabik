@@ -167,11 +167,31 @@ around `AndroidState::render`, 60 taps of the Counter demo's "Add one" button:
 | before | 546 µs | 1009 µs | 447 µs |
 | cached handles | 396 µs | 770 µs | 339 µs |
 
-**Remaining: batching operations**
+**One call per frame update ✅**
 
-Each node update still crosses JNI once per property (`setX`, `setY`,
-`setLayoutParams`, `setPadding`, …). Serializing layout updates into batched
-arrays passed as a single Kotlin call to `RustRootView` is the next step.
+A layout update used to cost four crossings per node: `setX`, `setY`, a new
+`FrameLayout.LayoutParams` allocation and `setLayoutParams`. `RustRootView`
+now exposes `applyFrame(view, x, y, width, height)`; the Kotlin side mutates
+the existing params, reassigns them only when the size changed, and updates
+the translation. A pure move no longer allocates or schedules a layout pass.
+
+Measured on the `Pixel_10` emulator (API 37.1, arm64) with a temporary timer
+around the operation loop, forcing a full re-layout by alternating the
+viewport width (about 12 layout operations per frame):
+
+| | median | mean | p90 |
+|---|---|---|---|
+| four calls per node | 372 µs | 568 µs | 1008 µs |
+| `applyFrame` | 348 µs | 428 µs | 706 µs |
+
+**Remaining: batching operations ⚠️**
+
+A full render of the same screen takes about 2.6 ms, of which applying the
+operations is only ~0.35 ms; the rest is tree building, layout and text
+measurement. Array batching (a constant number of crossings per frame) has a
+low ceiling here and is not worth the registry it needs unless profiles of
+large lists show the apply loop dominating. Revisit alongside virtualized
+lists.
 
 
 ---
