@@ -423,7 +423,7 @@ impl Jni {
                 env,
                 &krabik_views,
                 "createScroll",
-                "(Landroid/content/Context;Z)Landroid/view/ViewGroup;",
+                "(Landroid/content/Context;ZLcom/example/krabik_ui_dsl/RustRootView;)Landroid/view/ViewGroup;",
                 OBJECT
             ),
             load_image: static_method!(
