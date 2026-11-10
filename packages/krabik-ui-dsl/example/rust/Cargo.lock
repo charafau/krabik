@@ -467,6 +467,7 @@ dependencies = [
 name = "krabik-ui-dsl-example"
 version = "0.1.0"
 dependencies = [
+ "jni",
  "krabik-ui-dsl",
 ]
 
