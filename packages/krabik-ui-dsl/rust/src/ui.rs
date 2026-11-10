@@ -352,7 +352,8 @@ pub struct ScrollProps {
 #[derive(Clone)]
 pub(crate) struct ListProps {
     pub(crate) item_count: usize,
-    pub(crate) item_height: f32,
+    pub(crate) item_height: Option<f32>,
+    pub(crate) estimated_height: f32,
     pub(crate) buffer: usize,
     pub(crate) keys: Arc<dyn Fn(usize) -> String + Send + Sync>,
     pub(crate) rows: Arc<dyn Fn(usize) -> Element + Send + Sync>,
@@ -1166,7 +1167,8 @@ type RowBuilder<T> = Box<dyn Fn(&T) -> Element + Send + Sync>;
 /// while it scrolls through the window.
 pub struct List<T> {
     items: Arc<Vec<T>>,
-    item_height: f32,
+    item_height: Option<f32>,
+    estimated_height: f32,
     buffer: usize,
     key: Option<KeyBuilder<T>>,
     row: Option<RowBuilder<T>>,
@@ -1179,16 +1181,26 @@ impl<T: Send + Sync + 'static> List<T> {
     pub fn new(items: impl Into<Arc<Vec<T>>>) -> Self {
         Self {
             items: items.into(),
-            item_height: 56.0,
+            item_height: None,
+            estimated_height: 56.0,
             buffer: 3,
             key: None,
             row: None,
         }
     }
 
-    /// Sets the fixed height of every row, which drives the window calculation.
+    /// Fixes every row to the same height.
+    ///
+    /// Without it the list measures each row and caches the result, which
+    /// tolerates mixed row heights at the cost of a measurement pass.
     pub fn item_height(mut self, height: impl IntoPoints) -> Self {
-        self.item_height = height.into_points().max(1.0);
+        self.item_height = Some(height.into_points().max(1.0));
+        self
+    }
+
+    /// Sets the height assumed for rows that have not been measured yet.
+    pub fn estimated_height(mut self, height: impl IntoPoints) -> Self {
+        self.estimated_height = height.into_points().max(1.0);
         self
     }
 
@@ -1231,6 +1243,7 @@ impl<T: Send + Sync + 'static> From<List<T>> for Element {
         let mut element = Element::container(ElementKind::List(ListProps {
             item_count: items.len(),
             item_height: list.item_height,
+            estimated_height: list.estimated_height,
             buffer: list.buffer,
             keys,
             rows,
