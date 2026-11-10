@@ -97,15 +97,18 @@ needs no repositioning when the window slides.
   visible index range moves; sub-row scrolls just update the stored offset.
 - Android reports offsets from `KrabikScrollView` (coalesced to once per frame,
   pixels converted to points in `nativeOnScroll`).
+- iOS reports offsets from a `UIScrollViewDelegate` implemented in Rust; the
+  latest value is coalesced into one main-queue update, matching the other
+  deferred events.
 - Gallery demo: 1000 rows with a 44-point row height and a four-row buffer.
 
 Covered by Rust tests (window maths, spacer geometry, row-id stability,
 rebuild throttling) and an Espresso test that scrolls the demo and asserts the
 materialized row count stays bounded.
 
-**Remaining on this track:** iOS renders lists but does not report scroll
-offsets yet, so it shows the first window (`UIScrollViewDelegate` wiring), and
-rows are fixed-height until the measurement/prefix-sum phase.
+**Remaining on this track:** rows are fixed-height until the measurement and
+prefix-sum phase; scrolling a focused field out of the window also loses its
+native state.
 
 ### 3. Expand Native Widget Set ✅
 
