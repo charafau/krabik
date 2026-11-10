@@ -17,6 +17,7 @@ use jni::sys::{jboolean, jfloat, jint, jlong};
 use jni::{Env, EnvUnowned, JValue, JavaVM, jni_sig, jni_str};
 
 use crate::app::{App, Event};
+use crate::frame_batch::FrameBatch;
 use crate::geometry::{Constraints, Rect, Size};
 use crate::measure::Measure;
 use crate::render::{Op, RenderNode};
@@ -305,8 +306,30 @@ impl AndroidState {
     fn render(&mut self, env: &mut Env<'_>) -> JniResult<()> {
         let element = self.app.view();
         let update = self.runtime.update(&element, self.viewport);
+        let mut frames = FrameBatch::new();
         for op in update.ops {
+            if let Op::Layout {
+                id,
+                frame,
+                content_size,
+            } = op
+            {
+                if let Some(handle) = self.views.get(&id) {
+                    frames.push(id, frame, self.density);
+                    if let Some(size) = content_size {
+                        apply_content_size(env, handle.children_host.as_obj(), size, self.density)?;
+                    }
+                }
+                if let Some(handle) = self.views.get_mut(&id) {
+                    handle.frame = Some(frame);
+                }
+                continue;
+            }
             self.apply(env, op)?;
+        }
+
+        if !frames.is_empty() {
+            apply_layouts(env, self.root.as_obj(), &frames)?;
         }
         Ok(())
     }
@@ -393,28 +416,17 @@ impl AndroidState {
                         host,
                         &[JValue::Object(handle.view.as_obj())],
                     )?;
+                    jni_handles(env)?.unregister_view.call_void(
+                        env,
+                        self.root.as_obj(),
+                        &[JValue::Long(id.0 as jlong)],
+                    )?;
                 }
                 self.views.remove(&id);
             }
-            Op::Layout {
-                id,
-                frame,
-                content_size,
-            } => {
-                if let Some(handle) = self.views.get_mut(&id) {
-                    apply_frame(
-                        env,
-                        self.root.as_obj(),
-                        handle.view.as_obj(),
-                        frame,
-                        self.density,
-                    )?;
-                    if let Some(size) = content_size {
-                        apply_content_size(env, handle.children_host.as_obj(), size, self.density)?;
-                    }
-                    handle.frame = Some(frame);
-                }
-            }
+            // `render` collects every layout operation into one batch, so this
+            // arm is only reachable if an operation is applied out of band.
+            Op::Layout { .. } => {}
         }
         Ok(())
     }
@@ -492,6 +504,11 @@ impl AndroidState {
         apply_style(env, &view, node)?;
         apply_accessibility(env, &view, node)?;
         set_tag(env, &view, node.id.0 as jlong)?;
+        jni_handles(env)?.register_view.call_void(
+            env,
+            self.root.as_obj(),
+            &[JValue::Long(node.id.0 as jlong), JValue::Object(&view)],
+        )?;
 
         Ok(view)
     }
@@ -844,6 +861,20 @@ fn apply_frame(
             JValue::Int(pixels.width),
             JValue::Int(pixels.height),
         ],
+    )
+}
+
+/// Applies a batch of node frames with one call into `RustRootView`.
+fn apply_layouts(env: &mut Env<'_>, root: &JObject<'_>, frames: &FrameBatch) -> JniResult<()> {
+    let ids = env.new_long_array(frames.len())?;
+    ids.set_region(env, 0, frames.ids())?;
+    let values = env.new_int_array(frames.frames().len())?;
+    values.set_region(env, 0, frames.frames())?;
+
+    jni_handles(env)?.apply_layouts.call_void(
+        env,
+        root,
+        &[JValue::Object(&ids), JValue::Object(&values)],
     )
 }
 

@@ -253,6 +253,10 @@ pub(super) struct Jni {
 
     // The Rust root view batches one node's frame into a single call.
     pub(super) apply_frame: Method,
+    /// The same, for a whole batch of frames in one crossing.
+    pub(super) apply_layouts: Method,
+    pub(super) register_view: Method,
+    pub(super) unregister_view: Method,
 
     // Statics and their fields.
     pub(super) make_measure_spec: StaticMethod,
@@ -403,6 +407,15 @@ impl Jni {
                 "(Landroid/view/View;IIII)V",
                 VOID
             ),
+            apply_layouts: method!(env, &rust_root_view, "applyLayouts", "([J[I)V", VOID),
+            register_view: method!(
+                env,
+                &rust_root_view,
+                "registerView",
+                "(JLandroid/view/View;)V",
+                VOID
+            ),
+            unregister_view: method!(env, &rust_root_view, "unregisterView", "(J)V", VOID),
 
             make_measure_spec: static_method!(env, &measure_spec, "makeMeasureSpec", "(II)I", INT),
             long_value_of: static_method!(env, &long, "valueOf", "(J)Ljava/lang/Long;", OBJECT),
