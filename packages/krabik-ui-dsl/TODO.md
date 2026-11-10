@@ -184,14 +184,19 @@ viewport width (about 12 layout operations per frame):
 | four calls per node | 372 µs | 568 µs | 1008 µs |
 | `applyFrame` | 348 µs | 428 µs | 706 µs |
 
-**Remaining: batching operations ⚠️**
+**Batched operations ✅**
 
-A full render of the same screen takes about 2.6 ms, of which applying the
-operations is only ~0.35 ms; the rest is tree building, layout and text
-measurement. Array batching (a constant number of crossings per frame) has a
-low ceiling here and is not worth the registry it needs unless profiles of
-large lists show the apply loop dominating. Revisit alongside virtualized
-lists.
+`RustRootView.applyLayouts(ids, frames)` applies a whole frame of layout
+updates with one crossing: two primitive arrays plus a registry of node ids to
+views. Rust registers a view when it creates it and unregisters it when it
+removes it; Kotlin keeps weak references, so a missed unregister can never keep
+a detached view alive. The per-node `applyFrame` call stays for reparenting,
+which moves exactly one view.
+
+Applying operations is only ~0.35 ms of a ~2.6 ms full render on the demo
+screens, so the end-to-end gain is small there. The batch API is about the
+shape of the cost: it no longer grows with the number of nodes, which is what
+matters for large lists.
 
 
 ---

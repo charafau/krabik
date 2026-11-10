@@ -13,6 +13,7 @@ import androidx.test.espresso.action.ViewActions.typeText
 import androidx.test.espresso.matcher.ViewMatchers.withHint
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -90,6 +91,43 @@ class LayoutTest {
             closeSoftKeyboard(),
         )
         onView(withText("Add")).perform(click())
+    }
+
+    /**
+     * The batch API addresses views by node id, so the registry must gain a
+     * view when Rust creates one and lose it when Rust removes it.
+     */
+    @Test
+    fun registryTracksCreatedAndRemovedViews() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            var baseline = 0
+            scenario.onActivity { activity ->
+                baseline = findRustRoot(activity.window.decorView)!!.registeredViewCount()
+            }
+            assertTrue("no views registered", baseline > 0)
+
+            addNote("Tracked note")
+            scenario.onActivity { activity ->
+                val count = findRustRoot(activity.window.decorView)!!.registeredViewCount()
+                assertTrue("note did not register views: $count <= $baseline", count > baseline)
+            }
+
+            onView(withText("Clear notes")).perform(click())
+            scenario.onActivity { activity ->
+                val count = findRustRoot(activity.window.decorView)!!.registeredViewCount()
+                assertEquals("removed views stayed registered", baseline, count)
+            }
+        }
+    }
+
+    private fun findRustRoot(view: View): RustRootView? {
+        if (view is RustRootView) return view
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                findRustRoot(view.getChildAt(index))?.let { return it }
+            }
+        }
+        return null
     }
 
     private fun findText(root: View, text: String): TextView? {

@@ -3,7 +3,9 @@ package com.example.krabik_ui_dsl
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
+import android.util.LongSparseArray
 import android.widget.FrameLayout
+import java.lang.ref.WeakReference
 
 /**
  * The only Android widget the Rust UI owns.
@@ -20,6 +22,9 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     )
     private var renderedWidth = -1
     private var renderedHeight = -1
+
+    /** Views by node id, so a layout batch can address them without an array of objects. */
+    private val nodeViews = LongSparseArray<WeakReference<View>>()
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
@@ -85,6 +90,47 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
      * another layout pass.
      */
     fun applyFrame(view: View, x: Int, y: Int, width: Int, height: Int) {
+        applyFrameInternal(view, x, y, width, height)
+    }
+
+    /**
+     * Applies a batch of frames.
+     *
+     * [ids] holds one node id per frame and [frames] four integers per id in
+     * `x, y, width, height` order. Unknown ids are skipped, which can only
+     * happen for a node whose view was already removed.
+     */
+    fun applyLayouts(ids: LongArray, frames: IntArray) {
+        var offset = 0
+        for (id in ids) {
+            val view = nodeViews.get(id)?.get()
+            if (view != null) {
+                applyFrameInternal(
+                    view,
+                    frames[offset],
+                    frames[offset + 1],
+                    frames[offset + 2],
+                    frames[offset + 3],
+                )
+            }
+            offset += 4
+        }
+    }
+
+    /** Remembers a node's view so a later batch can address it by id. */
+    fun registerView(nodeId: Long, view: View) {
+        nodeViews.put(nodeId, WeakReference(view))
+    }
+
+    /** Forgets a node's view after Rust removed it. */
+    fun unregisterView(nodeId: Long) {
+        nodeViews.remove(nodeId)
+    }
+
+    /** The number of registered views, for tests. */
+    fun registeredViewCount(): Int = nodeViews.size()
+
+    private fun applyFrameInternal(view: View, x: Int, y: Int, width: Int, height: Int) {
         val params = view.layoutParams
         if (params == null) {
             view.layoutParams = FrameLayout.LayoutParams(width, height)
