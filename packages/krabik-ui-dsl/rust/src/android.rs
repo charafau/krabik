@@ -27,6 +27,10 @@ use crate::ui::{
     ImeAction, KeyboardType, SwitchProps, TextAlign, TextFieldProps, TextProps,
 };
 
+mod handles;
+
+use self::handles::get as jni_handles;
+
 const TEXT_VIEW_CLASS: &JNIStr = jni_str!("android/widget/TextView");
 const BUTTON_CLASS: &JNIStr = jni_str!("android/widget/Button");
 const FRAME_LAYOUT_CLASS: &JNIStr = jni_str!("android/widget/FrameLayout");
@@ -121,60 +125,33 @@ struct MeasureKey {
 
 impl AndroidMeasure {
     fn new(env: &mut Env<'_>, vm: &JavaVM, context: &JObject<'_>, density: f32) -> JniResult<Self> {
-        let class = jcall!(env, env.find_class(TEXT_VIEW_CLASS))?;
-        let view = jcall!(
-            env,
-            env.new_object(
-                &class,
-                jni_sig!("(Landroid/content/Context;)V"),
-                &[JValue::Object(context)],
-            )
-        )?;
+        let ids = jni_handles(env)?;
+        let view = ids
+            .text_view_ctor
+            .construct(env, &ids.text_view, &[JValue::Object(context)])?;
 
-        let _ = jcall!(
+        ids.set_include_font_padding
+            .call_void(env, &view, &[JValue::Bool(false)])?;
+        ids.set_padding.call_void(
             env,
-            env.call_method(
-                &view,
-                jni_str!("setIncludeFontPadding"),
-                jni_sig!("(Z)V"),
-                &[JValue::Bool(false)],
-            )
-        )?;
-        let _ = jcall!(
-            env,
-            env.call_method(
-                &view,
-                jni_str!("setPadding"),
-                jni_sig!("(IIII)V"),
-                &[
-                    JValue::Int(0),
-                    JValue::Int(0),
-                    JValue::Int(0),
-                    JValue::Int(0),
-                ],
-            )
+            &view,
+            &[
+                JValue::Int(0),
+                JValue::Int(0),
+                JValue::Int(0),
+                JValue::Int(0),
+            ],
         )?;
 
         // `TextView.setText` consults the layout params while it decides
         // whether to request another layout pass, even for a detached view.
-        let params_class = jcall!(env, env.find_class(LAYOUT_PARAMS_CLASS))?;
-        let params = jcall!(
+        let params = ids.layout_params_ctor.construct(
             env,
-            env.new_object(
-                &params_class,
-                jni_sig!("(II)V"),
-                &[JValue::Int(WRAP_CONTENT), JValue::Int(WRAP_CONTENT)],
-            )
+            &ids.layout_params,
+            &[JValue::Int(WRAP_CONTENT), JValue::Int(WRAP_CONTENT)],
         )?;
-        let _ = jcall!(
-            env,
-            env.call_method(
-                &view,
-                jni_str!("setLayoutParams"),
-                jni_sig!("(Landroid/view/ViewGroup$LayoutParams;)V"),
-                &[JValue::Object(&params)],
-            )
-        )?;
+        ids.set_layout_params
+            .call_void(env, &view, &[JValue::Object(&params)])?;
 
         Ok(Self {
             vm: vm.clone(),
@@ -193,23 +170,13 @@ impl AndroidMeasure {
         let view = self.text_view.as_obj();
 
         let string = jcall!(env, env.new_string(&text.content))?;
-        let _ = jcall!(
+        let ids = jni_handles(env)?;
+        ids.set_text
+            .call_void(env, view, &[JValue::Object(string.as_ref())])?;
+        ids.set_text_size.call_void(
             env,
-            env.call_method(
-                view,
-                jni_str!("setText"),
-                jni_sig!("(Ljava/lang/CharSequence;)V"),
-                &[JValue::Object(string.as_ref())],
-            )
-        )?;
-        let _ = jcall!(
-            env,
-            env.call_method(
-                view,
-                jni_str!("setTextSize"),
-                jni_sig!("(IF)V"),
-                &[JValue::Int(COMPLEX_UNIT_SP), JValue::Float(text.size)],
-            )
+            view,
+            &[JValue::Int(COMPLEX_UNIT_SP), JValue::Float(text.size)],
         )?;
         let bold = matches!(text.weight, FontWeight::Bold);
         apply_typeface(env, view, bold)?;
@@ -224,26 +191,12 @@ impl AndroidMeasure {
         };
         let height = measure_spec(env, 0, MEASURE_UNSPECIFIED)?;
 
-        let _ = jcall!(
-            env,
-            env.call_method(
-                view,
-                jni_str!("measure"),
-                jni_sig!("(II)V"),
-                &[JValue::Int(width), JValue::Int(height)],
-            )
-        )?;
+        let ids = jni_handles(env)?;
+        ids.measure
+            .call_void(env, view, &[JValue::Int(width), JValue::Int(height)])?;
 
-        let measured_width = jcall!(
-            env,
-            env.call_method(view, jni_str!("getMeasuredWidth"), jni_sig!("()I"), &[])
-        )?
-        .i()?;
-        let measured_height = jcall!(
-            env,
-            env.call_method(view, jni_str!("getMeasuredHeight"), jni_sig!("()I"), &[])
-        )?
-        .i()?;
+        let measured_width = ids.measured_width.call(env, view, &[])?.i()?;
+        let measured_height = ids.measured_height.call(env, view, &[])?.i()?;
 
         Ok(Size::new(
             measured_width as f32 / self.density,
@@ -290,17 +243,14 @@ impl Measure for AndroidMeasure {
 }
 
 fn measure_spec(env: &mut Env<'_>, size: jint, mode: jint) -> JniResult<jint> {
-    let class = jcall!(env, env.find_class(MEASURE_SPEC_CLASS))?;
-    jcall!(
-        env,
-        env.call_static_method(
-            &class,
-            jni_str!("makeMeasureSpec"),
-            jni_sig!("(II)I"),
+    let ids = jni_handles(env)?;
+    ids.make_measure_spec
+        .call(
+            env,
+            &ids.measure_spec,
             &[JValue::Int(size), JValue::Int(mode)],
-        )
-    )?
-    .i()
+        )?
+        .i()
 }
 
 /// The native resources owned by one renderable node.
@@ -369,28 +319,18 @@ impl AndroidState {
                 }
 
                 let parent_host = self.parent_host(node.parent);
-                let _ = jcall!(
-                    env,
-                    env.call_method(
-                        parent_host,
-                        jni_str!("addView"),
-                        jni_sig!("(Landroid/view/View;)V"),
-                        &[JValue::Object(&view)],
-                    )
-                )?;
+                {
+                    let ids = jni_handles(env)?;
+                    ids.add_view
+                        .call_void(env, parent_host, &[JValue::Object(&view)])?;
+                }
 
                 let children_host = if matches!(node.kind, NodeKind::Scroll(_)) {
                     // A scroll view wraps a single host that holds the content.
-                    let host = jcall!(
-                        env,
-                        env.call_method(
-                            &view,
-                            jni_str!("getChildAt"),
-                            jni_sig!("(I)Landroid/view/View;"),
-                            &[JValue::Int(0)],
-                        )
-                    )?
-                    .l()?;
+                    let host = jni_handles(env)?
+                        .get_child_at
+                        .call(env, &view, &[JValue::Int(0)])?
+                        .l()?;
                     jcall!(env, env.new_global_ref(&host))?
                 } else {
                     jcall!(env, env.new_global_ref(&view))?
@@ -421,24 +361,13 @@ impl AndroidState {
                     let new_host = self.parent_host(parent);
                     let view = self.views[&id].view.as_obj();
 
-                    let _ = jcall!(
-                        env,
-                        env.call_method(
-                            old_host,
-                            jni_str!("removeView"),
-                            jni_sig!("(Landroid/view/View;)V"),
-                            &[JValue::Object(view)],
-                        )
-                    )?;
-                    let _ = jcall!(
-                        env,
-                        env.call_method(
-                            new_host,
-                            jni_str!("addView"),
-                            jni_sig!("(Landroid/view/View;)V"),
-                            &[JValue::Object(view)],
-                        )
-                    )?;
+                    {
+                        let ids = jni_handles(env)?;
+                        ids.remove_view
+                            .call_void(env, old_host, &[JValue::Object(view)])?;
+                        ids.add_view
+                            .call_void(env, new_host, &[JValue::Object(view)])?;
+                    }
                 }
 
                 let frame = self.views[&id].frame;
@@ -452,14 +381,10 @@ impl AndroidState {
             Op::Remove { id } => {
                 if let Some(handle) = self.views.get(&id) {
                     let host = self.parent_host(handle.parent);
-                    let _ = jcall!(
+                    jni_handles(env)?.remove_view.call_void(
                         env,
-                        env.call_method(
-                            host,
-                            jni_str!("removeView"),
-                            jni_sig!("(Landroid/view/View;)V"),
-                            &[JValue::Object(handle.view.as_obj())],
-                        )
+                        host,
+                        &[JValue::Object(handle.view.as_obj())],
                     )?;
                 }
                 self.views.remove(&id);
@@ -497,44 +422,39 @@ impl AndroidState {
         let view = if let NodeKind::Scroll(props) = &node.kind {
             create_scroll(env, self.context.as_obj(), props.axis == Axis::Horizontal)?
         } else {
-            let class_name = match &node.kind {
-                NodeKind::Text(_) => TEXT_VIEW_CLASS,
-                NodeKind::Button(_) => BUTTON_CLASS,
-                NodeKind::TextField(_) => TEXT_INPUT_CLASS,
-                NodeKind::Switch(_) => SWITCH_CLASS,
-                NodeKind::Image(_) => IMAGE_VIEW_CLASS,
+            let ids = jni_handles(env)?;
+            let context = [JValue::Object(self.context.as_obj())];
+            let child_context = [
+                JValue::Object(self.context.as_obj()),
+                JValue::Object(self.root.as_obj()),
+                JValue::Long(node.id.0 as jlong),
+            ];
+
+            match &node.kind {
+                NodeKind::Text(_) => ids
+                    .text_view_ctor
+                    .construct(env, &ids.text_view, &context)?,
+                NodeKind::Button(_) => ids.button_ctor.construct(env, &ids.button, &context)?,
+                NodeKind::TextField(_) => {
+                    ids.text_input_ctor
+                        .construct(env, &ids.text_input, &child_context)?
+                }
+                NodeKind::Switch(_) => {
+                    ids.switch_ctor
+                        .construct(env, &ids.switch, &child_context)?
+                }
+                NodeKind::Image(_) => {
+                    ids.image_view_ctor
+                        .construct(env, &ids.image_view, &context)?
+                }
                 // Decorated layout containers become real containers so they can
                 // draw behind their children and clip them to rounded corners.
-                NodeKind::Column | NodeKind::Row => FRAME_LAYOUT_CLASS,
-                NodeKind::Spacer => VIEW_CLASS,
+                NodeKind::Column | NodeKind::Row => {
+                    ids.frame_layout_ctor
+                        .construct(env, &ids.frame_layout, &context)?
+                }
+                NodeKind::Spacer => ids.view_ctor.construct(env, &ids.view, &context)?,
                 _ => return Ok(JObject::null()),
-            };
-
-            let class = jcall!(env, env.find_class(class_name))?;
-            if matches!(node.kind, NodeKind::TextField(_) | NodeKind::Switch(_)) {
-                jcall!(
-                    env,
-                    env.new_object(
-                        &class,
-                        jni_sig!(
-                            "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
-                        ),
-                        &[
-                            JValue::Object(self.context.as_obj()),
-                            JValue::Object(self.root.as_obj()),
-                            JValue::Long(node.id.0 as jlong),
-                        ],
-                    )
-                )?
-            } else {
-                jcall!(
-                    env,
-                    env.new_object(
-                        &class,
-                        jni_sig!("(Landroid/content/Context;)V"),
-                        &[JValue::Object(self.context.as_obj())],
-                    )
-                )?
             }
         };
 
@@ -549,14 +469,10 @@ impl AndroidState {
         }
         if matches!(node.kind, NodeKind::Button(_)) {
             configure_button(env, &view)?;
-            let _ = jcall!(
+            jni_handles(env)?.set_on_click_listener.call_void(
                 env,
-                env.call_method(
-                    &view,
-                    jni_str!("setOnClickListener"),
-                    jni_sig!("(Landroid/view/View$OnClickListener;)V"),
-                    &[JValue::Object(self.root.as_obj())],
-                )
+                &view,
+                &[JValue::Object(self.root.as_obj())],
             )?;
         }
         apply_padding(env, &view, node.style.padding, self.density)?;
@@ -573,17 +489,14 @@ fn create_scroll<'local>(
     context: &JObject<'_>,
     horizontal: bool,
 ) -> JniResult<JObject<'local>> {
-    let class = jcall!(env, env.find_class(KRABIK_VIEWS_CLASS))?;
-    let value = jcall!(
-        env,
-        env.call_static_method(
-            &class,
-            jni_str!("createScroll"),
-            jni_sig!("(Landroid/content/Context;Z)Landroid/view/ViewGroup;"),
+    let ids = jni_handles(env)?;
+    ids.create_scroll
+        .call(
+            env,
+            &ids.krabik_views,
             &[JValue::Object(context), JValue::Bool(horizontal)],
-        )
-    )?;
-    value.l()
+        )?
+        .l()
 }
 
 fn update_view(
@@ -612,23 +525,18 @@ fn update_image(env: &mut Env<'_>, view: &JObject<'_>, props: &ImageProps) -> Jn
         ImageSource::Url(url) => (url.as_str(), false),
     };
     let source = jcall!(env, env.new_string(source))?;
-    let class = jcall!(env, env.find_class(KRABIK_IMAGES_CLASS))?;
+    let ids = jni_handles(env)?;
 
-    jcall!(
+    ids.load_image.call_void(
         env,
-        env.call_static_method(
-            &class,
-            jni_str!("load"),
-            jni_sig!("(Landroid/widget/ImageView;Ljava/lang/String;ZZ)V"),
-            &[
-                JValue::Object(view),
-                JValue::Object(source.as_ref()),
-                JValue::Bool(is_asset),
-                JValue::Bool(matches!(props.scale, ImageScale::Fill)),
-            ],
-        )
-    )?;
-    Ok(())
+        &ids.krabik_images,
+        &[
+            JValue::Object(view),
+            JValue::Object(source.as_ref()),
+            JValue::Bool(is_asset),
+            JValue::Bool(matches!(props.scale, ImageScale::Fill)),
+        ],
+    )
 }
 
 fn update_text_field(
@@ -637,45 +545,21 @@ fn update_text_field(
     props: &TextFieldProps,
 ) -> JniResult<()> {
     let value = jcall!(env, env.new_string(&props.value))?;
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setTextSilently"),
-            jni_sig!("(Ljava/lang/String;)V"),
-            &[JValue::Object(value.as_ref())],
-        )
-    )?;
+    let ids = jni_handles(env)?;
+    ids.set_text_silently
+        .call_void(env, view, &[JValue::Object(value.as_ref())])?;
 
     let hint = jcall!(env, env.new_string(&props.placeholder))?;
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setHint"),
-            jni_sig!("(Ljava/lang/CharSequence;)V"),
-            &[JValue::Object(hint.as_ref())],
-        )
-    )?;
+    ids.set_hint
+        .call_void(env, view, &[JValue::Object(hint.as_ref())])?;
 
-    let _ = jcall!(
+    ids.set_text_size.call_void(
         env,
-        env.call_method(
-            view,
-            jni_str!("setTextSize"),
-            jni_sig!("(IF)V"),
-            &[JValue::Int(COMPLEX_UNIT_SP), JValue::Float(props.size)],
-        )
+        view,
+        &[JValue::Int(COMPLEX_UNIT_SP), JValue::Float(props.size)],
     )?;
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setTextColor"),
-            jni_sig!("(I)V"),
-            &[JValue::Int(props.color as jint)],
-        )
-    )?;
+    ids.set_text_color
+        .call_void(env, view, &[JValue::Int(props.color as jint)])?;
 
     let keyboard = match props.keyboard {
         KeyboardType::Text => 0,
@@ -690,19 +574,15 @@ fn update_text_field(
         ImeAction::Search => 3,
         ImeAction::Send => 4,
     };
-    let _ = jcall!(
+    ids.configure_input.call_void(
         env,
-        env.call_method(
-            view,
-            jni_str!("configure"),
-            jni_sig!("(ZZII)V"),
-            &[
-                JValue::Bool(props.secure),
-                JValue::Bool(props.multiline),
-                JValue::Int(keyboard),
-                JValue::Int(ime_action),
-            ],
-        )
+        view,
+        &[
+            JValue::Bool(props.secure),
+            JValue::Bool(props.multiline),
+            JValue::Int(keyboard),
+            JValue::Int(ime_action),
+        ],
     )?;
     // `configure` changes the input type and line mode, which can reset the
     // typeface, so the font is applied after the platform configuration.
@@ -711,16 +591,9 @@ fn update_text_field(
 }
 
 fn update_switch(env: &mut Env<'_>, view: &JObject<'_>, props: &SwitchProps) -> JniResult<()> {
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setCheckedSilently"),
-            jni_sig!("(Z)V"),
-            &[JValue::Bool(props.checked)],
-        )
-    )?;
-    Ok(())
+    jni_handles(env)?
+        .set_checked_silently
+        .call_void(env, view, &[JValue::Bool(props.checked)])
 }
 
 fn update_text(env: &mut Env<'_>, view: &JObject<'_>, kind: &NodeKind) -> JniResult<()> {
@@ -731,53 +604,22 @@ fn update_text(env: &mut Env<'_>, view: &JObject<'_>, kind: &NodeKind) -> JniRes
     // The off-screen view used for measurement disables font padding. Do the
     // same here so the rendered metrics match the measured ones, otherwise the
     // extra padding pushes descenders out of the frame.
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setIncludeFontPadding"),
-            jni_sig!("(Z)V"),
-            &[JValue::Bool(false)],
-        )
-    )?;
+    let ids = jni_handles(env)?;
+    ids.set_include_font_padding
+        .call_void(env, view, &[JValue::Bool(false)])?;
 
     let string = jcall!(env, env.new_string(content))?;
-    let _ = jcall!(
+    ids.set_text
+        .call_void(env, view, &[JValue::Object(string.as_ref())])?;
+    ids.set_text_size.call_void(
         env,
-        env.call_method(
-            view,
-            jni_str!("setText"),
-            jni_sig!("(Ljava/lang/CharSequence;)V"),
-            &[JValue::Object(string.as_ref())],
-        )
+        view,
+        &[JValue::Int(COMPLEX_UNIT_SP), JValue::Float(size)],
     )?;
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setTextSize"),
-            jni_sig!("(IF)V"),
-            &[JValue::Int(COMPLEX_UNIT_SP), JValue::Float(size)],
-        )
-    )?;
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setLetterSpacing"),
-            jni_sig!("(F)V"),
-            &[JValue::Float(0.0)],
-        )
-    )?;
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setTextColor"),
-            jni_sig!("(I)V"),
-            &[JValue::Int(color as jint)],
-        )
-    )?;
+    ids.set_letter_spacing
+        .call_void(env, view, &[JValue::Float(0.0)])?;
+    ids.set_text_color
+        .call_void(env, view, &[JValue::Int(color as jint)])?;
 
     apply_typeface(env, view, matches!(weight, FontWeight::Bold))?;
     apply_text_limits(env, view, text_limits(kind))?;
@@ -788,15 +630,8 @@ fn update_text(env: &mut Env<'_>, view: &JObject<'_>, kind: &NodeKind) -> JniRes
             TextAlign::Center => GRAVITY_CENTER_HORIZONTAL,
             TextAlign::End => GRAVITY_END,
         };
-        let _ = jcall!(
-            env,
-            env.call_method(
-                view,
-                jni_str!("setGravity"),
-                jni_sig!("(I)V"),
-                &[JValue::Int(gravity)],
-            )
-        )?;
+        ids.set_gravity
+            .call_void(env, view, &[JValue::Int(gravity)])?;
     }
 
     Ok(())
@@ -819,64 +654,31 @@ fn apply_text_limits(
     let max_lines = max_lines.map_or(jint::MAX, |lines| {
         lines.max(1).min(jint::MAX as u32) as jint
     });
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setMaxLines"),
-            jni_sig!("(I)V"),
-            &[JValue::Int(max_lines)],
-        )
-    )?;
+    let ids = jni_handles(env)?;
+    ids.set_max_lines
+        .call_void(env, view, &[JValue::Int(max_lines)])?;
 
     let truncate_at = if ellipsis {
-        let class = jcall!(env, env.find_class(TEXT_UTILS_CLASS))?;
-        jcall!(
-            env,
-            env.get_static_field(
-                &class,
-                jni_str!("END"),
-                jni_sig!("Landroid/text/TextUtils$TruncateAt;"),
-            )
-        )?
-        .l()?
+        ids.truncate_at_end.get(env, &ids.truncate_at)?.l()?
     } else {
         JObject::null()
     };
 
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setEllipsize"),
-            jni_sig!("(Landroid/text/TextUtils$TruncateAt;)V"),
-            &[JValue::Object(&truncate_at)],
-        )
-    )?;
+    ids.set_ellipsize
+        .call_void(env, view, &[JValue::Object(&truncate_at)])?;
     Ok(())
 }
 
 fn apply_typeface(env: &mut Env<'_>, view: &JObject<'_>, bold: bool) -> JniResult<()> {
-    let class = jcall!(env, env.find_class(TYPEFACE_CLASS))?;
+    let ids = jni_handles(env)?;
     let field = if bold {
-        jni_str!("DEFAULT_BOLD")
+        ids.typeface_default_bold
     } else {
-        jni_str!("DEFAULT")
+        ids.typeface_default
     };
-    let typeface = jcall!(
-        env,
-        env.get_static_field(&class, field, jni_sig!("Landroid/graphics/Typeface;"))
-    )?
-    .l()?;
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setTypeface"),
-            jni_sig!("(Landroid/graphics/Typeface;)V"),
-            &[JValue::Object(&typeface)],
-        )
-    )?;
+    let typeface = field.get(env, &ids.typeface)?.l()?;
+    ids.set_typeface
+        .call_void(env, view, &[JValue::Object(&typeface)])?;
     Ok(())
 }
 
@@ -889,57 +691,26 @@ fn text_properties(kind: &NodeKind) -> Option<(&str, f32, u32, FontWeight)> {
 }
 
 fn configure_button(env: &mut Env<'_>, view: &JObject<'_>) -> JniResult<()> {
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setAllCaps"),
-            jni_sig!("(Z)V"),
-            &[JValue::Bool(false)],
-        )
-    )?;
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setMinimumHeight"),
-            jni_sig!("(I)V"),
-            &[JValue::Int(0)],
-        )
-    )?;
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setMinimumWidth"),
-            jni_sig!("(I)V"),
-            &[JValue::Int(0)],
-        )
-    )?;
+    let ids = jni_handles(env)?;
+    ids.set_all_caps
+        .call_void(env, view, &[JValue::Bool(false)])?;
+    ids.set_minimum_height
+        .call_void(env, view, &[JValue::Int(0)])?;
+    ids.set_minimum_width
+        .call_void(env, view, &[JValue::Int(0)])?;
     // The layout already reserves the button's chrome padding around the
     // label, so the label is centred instead of relying on native insets.
-    let _ = jcall!(
+    ids.set_gravity
+        .call_void(env, view, &[JValue::Int(GRAVITY_CENTER)])?;
+    ids.set_padding.call_void(
         env,
-        env.call_method(
-            view,
-            jni_str!("setGravity"),
-            jni_sig!("(I)V"),
-            &[JValue::Int(GRAVITY_CENTER)],
-        )
-    )?;
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setPadding"),
-            jni_sig!("(IIII)V"),
-            &[
-                JValue::Int(0),
-                JValue::Int(0),
-                JValue::Int(0),
-                JValue::Int(0),
-            ],
-        )
+        view,
+        &[
+            JValue::Int(0),
+            JValue::Int(0),
+            JValue::Int(0),
+            JValue::Int(0),
+        ],
     )?;
     Ok(())
 }
@@ -951,100 +722,79 @@ fn apply_padding(
     density: f32,
 ) -> JniResult<()> {
     let px = |points: f32| (points * density).round() as jint;
-    let _ = jcall!(
+    jni_handles(env)?.set_padding.call_void(
         env,
-        env.call_method(
-            view,
-            jni_str!("setPadding"),
-            jni_sig!("(IIII)V"),
-            &[
-                JValue::Int(px(padding.left)),
-                JValue::Int(px(padding.top)),
-                JValue::Int(px(padding.right)),
-                JValue::Int(px(padding.bottom)),
-            ],
-        )
+        view,
+        &[
+            JValue::Int(px(padding.left)),
+            JValue::Int(px(padding.top)),
+            JValue::Int(px(padding.right)),
+            JValue::Int(px(padding.bottom)),
+        ],
     )?;
     Ok(())
 }
 
 fn apply_style(env: &mut Env<'_>, view: &JObject<'_>, node: &RenderNode) -> JniResult<()> {
-    let class = jcall!(env, env.find_class(KRABIK_STYLE_CLASS))?;
+    let ids = jni_handles(env)?;
     let background = node.style.background;
     let gradient = node.style.gradient;
     let radii = node.style.corner_radii();
     let border = node.style.border;
     let ripple = matches!(node.kind, NodeKind::Button(_));
 
-    jcall!(
+    ids.apply_style.call_void(
         env,
-        env.call_static_method(
-            &class,
-            jni_str!("apply"),
-            jni_sig!("(Landroid/view/View;IZIIZZFFFFFZFIZFZF)V"),
-            &[
-                JValue::Object(view),
-                JValue::Int(background.unwrap_or(0) as jint),
-                JValue::Bool(background.is_some()),
-                JValue::Int(gradient.map_or(0, |gradient| gradient.start) as jint),
-                JValue::Int(gradient.map_or(0, |gradient| gradient.end) as jint),
-                JValue::Bool(gradient.is_some()),
-                JValue::Bool(gradient.is_some_and(|gradient| {
-                    gradient.direction == GradientDirection::Horizontal
-                })),
-                JValue::Float(node.style.corner_radius),
-                JValue::Float(radii.top_left),
-                JValue::Float(radii.top_right),
-                JValue::Float(radii.bottom_right),
-                JValue::Float(radii.bottom_left),
-                JValue::Bool(node.style.corner_radii.is_some()),
-                JValue::Float(border.map_or(0.0, |border| border.width)),
-                JValue::Int(border.map_or(0, |border| border.color) as jint),
-                JValue::Bool(border.is_some()),
-                JValue::Float(node.style.opacity.unwrap_or(1.0)),
-                JValue::Bool(ripple),
-                JValue::Float(node.style.elevation),
-            ],
-        )
+        &ids.krabik_style,
+        &[
+            JValue::Object(view),
+            JValue::Int(background.unwrap_or(0) as jint),
+            JValue::Bool(background.is_some()),
+            JValue::Int(gradient.map_or(0, |gradient| gradient.start) as jint),
+            JValue::Int(gradient.map_or(0, |gradient| gradient.end) as jint),
+            JValue::Bool(gradient.is_some()),
+            JValue::Bool(
+                gradient
+                    .is_some_and(|gradient| gradient.direction == GradientDirection::Horizontal),
+            ),
+            JValue::Float(node.style.corner_radius),
+            JValue::Float(radii.top_left),
+            JValue::Float(radii.top_right),
+            JValue::Float(radii.bottom_right),
+            JValue::Float(radii.bottom_left),
+            JValue::Bool(node.style.corner_radii.is_some()),
+            JValue::Float(border.map_or(0.0, |border| border.width)),
+            JValue::Int(border.map_or(0, |border| border.color) as jint),
+            JValue::Bool(border.is_some()),
+            JValue::Float(node.style.opacity.unwrap_or(1.0)),
+            JValue::Bool(ripple),
+            JValue::Float(node.style.elevation),
+        ],
     )?;
     Ok(())
 }
 
 /// Applies interaction state and accessibility metadata to a native view.
 fn apply_accessibility(env: &mut Env<'_>, view: &JObject<'_>, node: &RenderNode) -> JniResult<()> {
+    let ids = jni_handles(env)?;
     // Always set the flag so removing `.enabled(false)` restores the view.
-    let _ = jcall!(
+    ids.set_enabled.call_void(
         env,
-        env.call_method(
-            view,
-            jni_str!("setEnabled"),
-            jni_sig!("(Z)V"),
-            &[JValue::Bool(node.style.enabled.unwrap_or(true))],
-        )
+        view,
+        &[JValue::Bool(node.style.enabled.unwrap_or(true))],
     )?;
 
     match &node.style.accessibility_label {
         Some(label) => {
             let label = jcall!(env, env.new_string(label))?;
-            let _ = jcall!(
-                env,
-                env.call_method(
-                    view,
-                    jni_str!("setContentDescription"),
-                    jni_sig!("(Ljava/lang/CharSequence;)V"),
-                    &[JValue::Object(label.as_ref())],
-                )
-            )?;
+            ids.set_content_description
+                .call_void(env, view, &[JValue::Object(label.as_ref())])?;
         }
         None => {
-            let _ = jcall!(
+            ids.set_content_description.call_void(
                 env,
-                env.call_method(
-                    view,
-                    jni_str!("setContentDescription"),
-                    jni_sig!("(Ljava/lang/CharSequence;)V"),
-                    &[JValue::Object(&JObject::null())],
-                )
+                view,
+                &[JValue::Object(&JObject::null())],
             )?;
         }
     }
@@ -1052,27 +802,13 @@ fn apply_accessibility(env: &mut Env<'_>, view: &JObject<'_>, node: &RenderNode)
 }
 
 fn set_tag(env: &mut Env<'_>, view: &JObject<'_>, id: jlong) -> JniResult<()> {
-    let class = jcall!(env, env.find_class(LONG_CLASS))?;
-    let tag = jcall!(
-        env,
-        env.call_static_method(
-            &class,
-            jni_str!("valueOf"),
-            jni_sig!("(J)Ljava/lang/Long;"),
-            &[JValue::Long(id)],
-        )
-    )?
-    .l()?;
+    let ids = jni_handles(env)?;
+    let tag = ids
+        .long_value_of
+        .call(env, &ids.long, &[JValue::Long(id)])?
+        .l()?;
 
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setTag"),
-            jni_sig!("(Ljava/lang/Object;)V"),
-            &[JValue::Object(&tag)],
-        )
-    )?;
+    ids.set_tag.call_void(env, view, &[JValue::Object(&tag)])?;
     Ok(())
 }
 
@@ -1080,24 +816,9 @@ fn apply_layout(env: &mut Env<'_>, view: &JObject<'_>, frame: Rect, density: f32
     let x = (frame.x * density).round() as jint;
     let y = (frame.y * density).round() as jint;
     apply_size(env, view, frame.width, frame.height, density)?;
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setX"),
-            jni_sig!("(F)V"),
-            &[JValue::Float(x as f32)],
-        )
-    )?;
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setY"),
-            jni_sig!("(F)V"),
-            &[JValue::Float(y as f32)],
-        )
-    )?;
+    let ids = jni_handles(env)?;
+    ids.set_x.call_void(env, view, &[JValue::Float(x as f32)])?;
+    ids.set_y.call_void(env, view, &[JValue::Float(y as f32)])?;
     Ok(())
 }
 
@@ -1112,25 +833,15 @@ fn apply_size(
     let width = (width * density).round().max(0.0) as jint;
     let height = (height * density).round().max(0.0) as jint;
 
-    let class = jcall!(env, env.find_class(FRAME_PARAMS_CLASS))?;
-    let params = jcall!(
+    let ids = jni_handles(env)?;
+    let params = ids.frame_params_ctor.construct(
         env,
-        env.new_object(
-            &class,
-            jni_sig!("(II)V"),
-            &[JValue::Int(width), JValue::Int(height)],
-        )
+        &ids.frame_params,
+        &[JValue::Int(width), JValue::Int(height)],
     )?;
 
-    let _ = jcall!(
-        env,
-        env.call_method(
-            view,
-            jni_str!("setLayoutParams"),
-            jni_sig!("(Landroid/view/ViewGroup$LayoutParams;)V"),
-            &[JValue::Object(&params)],
-        )
-    )?;
+    ids.set_layout_params
+        .call_void(env, view, &[JValue::Object(&params)])?;
     Ok(())
 }
 
@@ -1149,15 +860,11 @@ fn apply_content_size(
 
     let width = (size.width * density).round().max(0.0) as jint;
     let height = (size.height * density).round().max(0.0) as jint;
-    for (method, value) in [
-        (jni_str!("setMinimumWidth"), width),
-        (jni_str!("setMinimumHeight"), height),
-    ] {
-        let _ = jcall!(
-            env,
-            env.call_method(host, method, jni_sig!("(I)V"), &[JValue::Int(value)],)
-        )?;
-    }
+    let ids = jni_handles(env)?;
+    ids.set_minimum_width
+        .call_void(env, host, &[JValue::Int(width)])?;
+    ids.set_minimum_height
+        .call_void(env, host, &[JValue::Int(height)])?;
     Ok(())
 }
 
@@ -1192,6 +899,10 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeCreat
     density: jfloat,
 ) -> jlong {
     run(&mut unenv, "nativeCreate", |env| {
+        // Resolving the handles here is what makes the app's own Kotlin
+        // classes visible: `FindClass` uses the class loader of this entry
+        // point, which is the app's.
+        jni_handles(env)?;
         let state = AndroidState::new(env, &context, &this, density)?;
         let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
         states()
