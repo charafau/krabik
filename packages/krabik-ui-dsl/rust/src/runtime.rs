@@ -11,7 +11,9 @@ use crate::geometry::{Rect, Size};
 use crate::layout::{self, LayoutResult};
 use crate::measure::Measure;
 use crate::render::{self, Op, Renderer};
-use crate::tree::{self, ListExtent, NodeId, NodeKind, ROOT_ID, UiNode};
+use crate::tree::{
+    self, BuildInfo, ListExtent, ListMeasurements, NodeId, NodeKind, ROOT_ID, UiNode,
+};
 use crate::ui::Element;
 
 /// The result of rebuilding the UI: the used size and the operations to apply.
@@ -39,6 +41,8 @@ pub struct Runtime {
     scroll_offsets: HashMap<NodeId, f32>,
     /// The extent of every list in the last built tree.
     lists: HashMap<NodeId, ListExtent>,
+    /// Measured heights and prefix sums for variable-height lists.
+    measurements: HashMap<NodeId, ListMeasurements>,
     /// The viewport of the last update, needed to window lists on scroll.
     viewport: Size,
 }
@@ -52,6 +56,7 @@ impl Runtime {
             measurer,
             scroll_offsets: HashMap::new(),
             lists: HashMap::new(),
+            measurements: HashMap::new(),
             viewport: Size::ZERO,
         }
     }
@@ -59,11 +64,32 @@ impl Runtime {
     /// Rebuilds the tree from `element` and returns the batch to apply.
     pub fn update(&mut self, element: &Element, viewport: Size) -> Update {
         self.viewport = viewport;
-        let (next, info) = tree::build_with(element, &self.scroll_offsets, viewport);
+
+        // Variable-height lists converge in a couple of passes: the first one
+        // measures the rows it materialized, the next uses those heights to
+        // recompute the prefix sums and the window. Cap the loop so a row whose
+        // height oscillates with the window cannot spin forever.
+        let mut iteration = 0;
+        let (next, info, layout) = loop {
+            let (next, info) = tree::build_with_measurements(
+                element,
+                &self.scroll_offsets,
+                viewport,
+                &mut self.measurements,
+            );
+            for id in &info.reset_scroll {
+                self.scroll_offsets.remove(id);
+            }
+            let layout = layout::compute(&next, viewport, self.measurer.as_ref());
+            let changed = self.record_heights(&info, &layout);
+            iteration += 1;
+            if !changed || iteration >= 3 {
+                break (next, info, layout);
+            }
+        };
         self.lists = info.lists;
 
         let mut ops = render::diff(&self.tree, &next);
-        let layout = layout::compute(&next, viewport, self.measurer.as_ref());
         ops.extend(render::diff_layout(
             &self.tree,
             &next,
@@ -82,6 +108,34 @@ impl Runtime {
         Update { size, ops }
     }
 
+    /// Stores the heights the last layout produced for variable-height rows.
+    ///
+    /// Returns whether anything changed, which asks for another build so the
+    /// prefix sums and the materialized window follow the new measurements.
+    fn record_heights(&mut self, info: &BuildInfo, layout: &LayoutResult) -> bool {
+        let mut changed = false;
+
+        for (list_id, rows) in &info.rows {
+            let Some(measurement) = self.measurements.get_mut(list_id) else {
+                continue;
+            };
+
+            for (row_id, key_hash) in rows {
+                let Some(frame) = layout.frames.get(row_id) else {
+                    continue;
+                };
+                let height = frame.height.max(0.0);
+                let previous = measurement.heights.get(key_hash).copied().unwrap_or(-1.0);
+                if (previous - height).abs() > 0.5 {
+                    measurement.heights.insert(*key_hash, height);
+                    changed = true;
+                }
+            }
+        }
+
+        changed
+    }
+
     /// Records the scroll offset of a list and reports whether its window
     /// changed and the UI has to be rebuilt.
     ///
@@ -92,14 +146,38 @@ impl Runtime {
             return false;
         };
 
-        let offset = offset.clamp(0.0, tree::max_scroll_offset(extent, self.viewport.height));
+        let Some(height) = extent.item_height else {
+            let Some(measurement) = self.measurements.get_mut(&id) else {
+                return false;
+            };
+            let total = measurement.prefix.last().copied().unwrap_or(0.0);
+            let offset = offset.clamp(0.0, (total - self.viewport.height).max(0.0));
+            let previous = self.scroll_offsets.insert(id, offset).unwrap_or(0.0);
+            if (previous - offset).abs() < f32::EPSILON {
+                return false;
+            }
+
+            let before = measurement.window;
+            let after = tree::variable_window(
+                &measurement.prefix,
+                self.viewport.height,
+                offset,
+                extent.buffer,
+            );
+            return before != after;
+        };
+
+        let offset = offset.clamp(
+            0.0,
+            (extent.count as f32 * height - self.viewport.height).max(0.0),
+        );
         let previous = self.scroll_offsets.insert(id, offset).unwrap_or(0.0);
         if (previous - offset).abs() < f32::EPSILON {
             return false;
         }
 
-        let before = tree::list_window(extent, self.viewport.height, previous);
-        let after = tree::list_window(extent, self.viewport.height, offset);
+        let before = tree::fixed_window(extent, self.viewport.height, previous);
+        let after = tree::fixed_window(extent, self.viewport.height, offset);
         before != after
     }
 
@@ -462,6 +540,73 @@ mod tests {
             scrolled.last().unwrap().style.height,
             Length::Points((100.0 - 13.0) * 50.0)
         );
+    }
+
+    #[test]
+    fn variable_rows_are_measured_and_scrollable() {
+        let element: Element = List::new(Arc::new(
+            (0..200)
+                .map(|index| "word ".repeat(1 + index % 5))
+                .collect::<Vec<_>>(),
+        ))
+        .buffer(2)
+        .key(|item| item.clone())
+        .row(|item| Text::new(item.clone()).into())
+        .into();
+
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&element, Size::new(120.0, 200.0));
+        let list_id = runtime.tree().children[0].id;
+
+        let measurement = &runtime.measurements[&list_id];
+        assert_eq!(measurement.prefix.len(), 201);
+        assert!(measurement.heights.len() >= 4);
+        let mut distinct: Vec<i32> = measurement
+            .heights
+            .values()
+            .map(|height| (height * 10.0).round() as i32)
+            .collect();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert!(distinct.len() > 1, "rows should have different heights");
+
+        // Repeating an offset changes nothing.
+        assert!(!runtime.scroll(list_id, 0.0));
+        // Far enough to move the materialized range.
+        assert!(runtime.scroll(list_id, 600.0));
+
+        runtime.update(&element, Size::new(120.0, 200.0));
+        let scrolled = &runtime.tree().children[0].children[0].children;
+        assert!(matches!(scrolled[0].kind, NodeKind::Spacer));
+    }
+
+    #[test]
+    fn a_different_list_on_the_same_node_resets_the_scroll() {
+        let element = |prefix: &str| -> Element {
+            List::new(Arc::new(
+                (0..100)
+                    .map(|index| format!("{prefix}{index}"))
+                    .collect::<Vec<_>>(),
+            ))
+            .buffer(2)
+            .key(|item| item.clone())
+            .row(|item| Text::new(item.clone()).into())
+            .into()
+        };
+
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&element("A"), Size::new(200.0, 200.0));
+        let id = runtime.tree().children[0].id;
+
+        assert!(runtime.scroll(id, 500.0));
+        runtime.update(&element("A"), Size::new(200.0, 200.0));
+        assert!(runtime.scroll_offset(id) > 0.0);
+
+        // Same position, so the same node id, but a different list: the
+        // previous scroll position and heights must not leak into it.
+        runtime.update(&element("B"), Size::new(200.0, 200.0));
+        assert_eq!(runtime.scroll_offset(id), 0.0);
+        assert_eq!(runtime.measurements[&id].window.0, 0);
     }
 
     #[test]

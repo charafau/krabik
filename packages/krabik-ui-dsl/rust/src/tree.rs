@@ -110,10 +110,41 @@ impl UiNode {
 pub struct ListExtent {
     /// The number of items in the list.
     pub count: usize,
-    /// The fixed height of one row, in logical points.
-    pub item_height: f32,
+    /// The fixed row height, when the list declares one.
+    pub item_height: Option<f32>,
     /// Extra rows materialized above and below the viewport.
     pub buffer: usize,
+}
+
+/// Heights measured for a variable-height list.
+#[derive(Clone, Debug)]
+pub struct ListMeasurements {
+    /// Measured row heights in logical points, keyed by the item key hash.
+    pub heights: HashMap<u64, f32>,
+    /// Height used for rows that have not been measured yet.
+    pub estimate: f32,
+    /// The layout width the measurements belong to.
+    pub width: f32,
+    /// Prefix sums of the row heights; `prefix[i]` is the offset of item `i`.
+    pub prefix: Vec<f32>,
+    /// The materialized range of the last build.
+    pub window: (usize, usize),
+    /// A hash of the item keys, used to notice that a different list now owns
+    /// this node id (for example after switching screens).
+    pub signature: u64,
+}
+
+impl Default for ListMeasurements {
+    fn default() -> Self {
+        Self {
+            heights: HashMap::new(),
+            estimate: 56.0,
+            width: 0.0,
+            prefix: Vec::new(),
+            window: (0, 0),
+            signature: 0,
+        }
+    }
 }
 
 /// What a build learned about the tree, besides the tree itself.
@@ -121,6 +152,12 @@ pub struct ListExtent {
 pub struct BuildInfo {
     /// The extent of every list, keyed by its scroll node id.
     pub lists: HashMap<NodeId, ListExtent>,
+    /// Materialized rows per list, with the key hash needed to store their
+    /// measured height after layout.
+    pub rows: HashMap<NodeId, Vec<(NodeId, u64)>>,
+    /// Lists whose scroll position must be forgotten because the items they
+    /// show changed.
+    pub reset_scroll: Vec<NodeId>,
 }
 
 /// Converts a declarative element into the internal tree.
@@ -138,11 +175,24 @@ pub fn build_with(
     offsets: &HashMap<NodeId, f32>,
     viewport: Size,
 ) -> (UiNode, BuildInfo) {
+    let mut measurements = HashMap::new();
+    build_with_measurements(element, offsets, viewport, &mut measurements)
+}
+
+/// Converts a declarative element into the internal tree, reusing measured
+/// row heights across rebuilds.
+pub fn build_with_measurements(
+    element: &Element,
+    offsets: &HashMap<NodeId, f32>,
+    viewport: Size,
+    measurements: &mut HashMap<NodeId, ListMeasurements>,
+) -> (UiNode, BuildInfo) {
     let mut info = BuildInfo::default();
     let mut root = UiNode::empty();
     let mut context = BuildContext {
         offsets,
         viewport,
+        measurements,
         info: &mut info,
     };
     root.children
@@ -154,29 +204,57 @@ pub fn build_with(
 struct BuildContext<'a> {
     offsets: &'a HashMap<NodeId, f32>,
     viewport: Size,
+    measurements: &'a mut HashMap<NodeId, ListMeasurements>,
     info: &'a mut BuildInfo,
 }
 
-/// The half-open range of items a list materializes for a viewport and offset.
+/// The half-open range of items a fixed-height list materializes.
 ///
 /// The range includes `buffer` rows on each side so small scrolls do not
 /// immediately cross a boundary.
-pub fn list_window(extent: ListExtent, viewport: f32, offset: f32) -> (usize, usize) {
-    if extent.count == 0 || extent.item_height <= 0.0 {
+pub fn fixed_window(extent: ListExtent, viewport: f32, offset: f32) -> (usize, usize) {
+    let height = extent.item_height.unwrap_or(0.0);
+    if extent.count == 0 || height <= 0.0 {
         return (0, 0);
     }
 
-    let offset = offset.clamp(0.0, max_scroll_offset(extent, viewport));
-    let first = (offset / extent.item_height).floor() as usize;
-    let visible = ((viewport / extent.item_height).ceil() as usize).max(1);
+    let offset = offset.clamp(0.0, (extent.count as f32 * height - viewport).max(0.0));
+    let first = (offset / height).floor() as usize;
+    let visible = ((viewport / height).ceil() as usize).max(1);
     let start = first.saturating_sub(extent.buffer).min(extent.count);
     let end = (first + visible + extent.buffer).min(extent.count);
     (start, end)
 }
 
-/// The largest meaningful scroll offset of a list.
-pub fn max_scroll_offset(extent: ListExtent, viewport: f32) -> f32 {
-    (extent.count as f32 * extent.item_height - viewport).max(0.0)
+/// The half-open range of items a variable-height list materializes.
+pub fn variable_window(
+    prefix: &[f32],
+    viewport: f32,
+    offset: f32,
+    buffer: usize,
+) -> (usize, usize) {
+    let count = prefix.len().saturating_sub(1);
+    if count == 0 {
+        return (0, 0);
+    }
+    let total = prefix[count];
+    if total <= 0.0 {
+        return (0, 0);
+    }
+
+    let offset = offset.clamp(0.0, (total - viewport).max(0.0));
+    let limit = offset + viewport.max(1.0);
+    // The item containing the offset is the one whose end is the first past
+    // it; the visible range ends at the first item that starts at or after the
+    // viewport's bottom edge.
+    let first = prefix
+        .partition_point(|end| *end <= offset)
+        .saturating_sub(1)
+        .min(count.saturating_sub(1));
+    let visible_end = prefix.partition_point(|start| *start < limit).min(count);
+    let start = first.saturating_sub(buffer);
+    let end = visible_end.saturating_add(buffer).max(start + 1).min(count);
+    (start, end)
 }
 
 fn root_style() -> Style {
@@ -255,8 +333,42 @@ fn build_list(element: &Element, id: NodeId, props: &ListProps, cx: &mut BuildCo
     };
     cx.info.lists.insert(id, extent);
 
+    let (column, rows) = match props.item_height {
+        Some(height) => build_fixed_rows(id, props, height, cx),
+        None => build_variable_rows(id, props, cx),
+    };
+
+    if !rows.is_empty() {
+        cx.info.rows.insert(id, rows);
+    }
+
+    UiNode {
+        id,
+        kind: NodeKind::Scroll(ScrollProps {
+            axis: Axis::Vertical,
+        }),
+        style: element.style.clone(),
+        children: vec![column],
+    }
+}
+
+/// Builds the spacer/rows/spacer content of a fixed-height list.
+fn build_fixed_rows(
+    id: NodeId,
+    props: &ListProps,
+    height: f32,
+    cx: &mut BuildContext,
+) -> (UiNode, Vec<(NodeId, u64)>) {
     let offset = cx.offsets.get(&id).copied().unwrap_or(0.0);
-    let (start, end) = list_window(extent, cx.viewport.height, offset);
+    let (start, end) = fixed_window(
+        ListExtent {
+            count: props.item_count,
+            item_height: Some(height),
+            buffer: props.buffer,
+        },
+        cx.viewport.height,
+        offset,
+    );
 
     let column_id = node_id(id, 0, None, ElementKind::Column.tag());
     let mut children = Vec::with_capacity(end - start + 2);
@@ -265,7 +377,7 @@ fn build_list(element: &Element, id: NodeId, props: &ListProps, cx: &mut BuildCo
         children.push(build_spacer(
             column_id,
             children.len(),
-            start as f32 * props.item_height,
+            start as f32 * height,
             cx,
         ));
     }
@@ -273,7 +385,7 @@ fn build_list(element: &Element, id: NodeId, props: &ListProps, cx: &mut BuildCo
     for index in start..end {
         let mut row = Element::container(ElementKind::Column);
         row.style.width = Length::Percent(1.0);
-        row.style.height = Length::Points(props.item_height);
+        row.style.height = Length::Points(height);
         row.key = Some(Cow::Owned((props.keys)(index)));
         row.children.push((props.rows)(index));
 
@@ -285,28 +397,120 @@ fn build_list(element: &Element, id: NodeId, props: &ListProps, cx: &mut BuildCo
         children.push(build_spacer(
             column_id,
             children.len(),
-            (props.item_count - end) as f32 * props.item_height,
+            (props.item_count - end) as f32 * height,
             cx,
         ));
     }
 
-    let column = UiNode {
-        id: column_id,
+    (content_column(column_id, children), Vec::new())
+}
+
+/// Builds the spacer/rows/spacer content of a variable-height list.
+///
+/// Unmeasured rows use the running estimate; measured rows are read back after
+/// layout by the runtime, which rebuilds until the window stabilizes.
+fn build_variable_rows(
+    id: NodeId,
+    props: &ListProps,
+    cx: &mut BuildContext,
+) -> (UiNode, Vec<(NodeId, u64)>) {
+    let mut measurement = cx.measurements.remove(&id).unwrap_or_default();
+    // The estimate is configuration, not state: keeping it stable means the
+    // total content height only changes when a row is actually measured, so a
+    // scroll clamp cannot feed back into another window change.
+    measurement.estimate = props.estimated_height;
+    if (measurement.width - cx.viewport.width).abs() > 0.5 {
+        // Heights depend on the available width; measurements from a different
+        // width are not comparable.
+        measurement.heights.clear();
+        measurement.width = cx.viewport.width;
+    }
+
+    let keys: Vec<String> = (0..props.item_count)
+        .map(|index| (props.keys)(index))
+        .collect();
+
+    let mut signature = 0xcbf2_9ce4_8422_2325_u64;
+    for key in &keys {
+        signature ^= hash_string(key);
+        signature = signature.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    signature ^= props.item_count as u64;
+    if measurement.signature != signature {
+        // The node id survived a screen change, but the list it renders is a
+        // different one: cached heights and the scroll position belong to the
+        // previous list.
+        measurement.heights.clear();
+        measurement.window = (0, 0);
+        measurement.signature = signature;
+        cx.info.reset_scroll.push(id);
+    }
+
+    let mut prefix = Vec::with_capacity(props.item_count + 1);
+    prefix.push(0.0);
+    let mut total = 0.0;
+    for key in &keys {
+        let hash = hash_string(key);
+        total += measurement
+            .heights
+            .get(&hash)
+            .copied()
+            .unwrap_or(measurement.estimate);
+        prefix.push(total);
+    }
+    measurement.prefix = prefix.clone();
+
+    let offset = if cx.info.reset_scroll.contains(&id) {
+        0.0
+    } else {
+        cx.offsets.get(&id).copied().unwrap_or(0.0)
+    };
+    let (start, end) = variable_window(&prefix, cx.viewport.height, offset, props.buffer);
+    measurement.window = (start, end);
+
+    let column_id = node_id(id, 0, None, ElementKind::Column.tag());
+    let mut children = Vec::with_capacity(end - start + 2);
+    let mut rows = Vec::with_capacity(end - start);
+
+    if start > 0 {
+        children.push(build_spacer(column_id, children.len(), prefix[start], cx));
+    }
+
+    for (index, key) in keys.iter().enumerate().take(end).skip(start) {
+        let key = key.clone();
+        let mut row = Element::container(ElementKind::Column);
+        row.style.width = Length::Percent(1.0);
+        row.key = Some(Cow::Owned(key.clone()));
+        row.children.push((props.rows)(index));
+
+        let position = children.len();
+        let node = build_node(&row, column_id, position, cx);
+        rows.push((node.id, hash_string(&key)));
+        children.push(node);
+    }
+
+    if end < props.item_count {
+        children.push(build_spacer(
+            column_id,
+            children.len(),
+            (total - prefix[end]).max(0.0),
+            cx,
+        ));
+    }
+
+    cx.measurements.insert(id, measurement);
+    (content_column(column_id, children), rows)
+}
+
+fn content_column(id: NodeId, children: Vec<UiNode>) -> UiNode {
+    UiNode {
+        id,
         kind: NodeKind::Column,
         style: Style {
             width: Length::Percent(1.0),
             ..Style::default()
         },
         children,
-    };
-
-    UiNode {
-        id,
-        kind: NodeKind::Scroll(ScrollProps {
-            axis: Axis::Vertical,
-        }),
-        style: element.style.clone(),
-        children: vec![column],
     }
 }
 
@@ -456,9 +660,50 @@ mod tests {
         // Four visible rows plus two buffered ones, plus the trailing spacer.
         assert_eq!(column.children.len(), 7);
         assert_eq!(info.lists[&scroll.id].count, 100);
-        assert_eq!(info.lists[&scroll.id].item_height, 50.0);
+        assert_eq!(info.lists[&scroll.id].item_height, Some(50.0));
         // The spacer represents the 94 rows that are not materialized.
         assert_eq!(column.children[6].style.height, Length::Points(94.0 * 50.0));
+    }
+
+    #[test]
+    fn variable_window_follows_prefix_offsets() {
+        let prefix = [0.0, 50.0, 100.0, 200.0, 250.0];
+
+        assert_eq!(variable_window(&prefix, 100.0, 0.0, 0), (0, 2));
+        assert_eq!(variable_window(&prefix, 100.0, 60.0, 0), (1, 3));
+        assert_eq!(variable_window(&prefix, 100.0, 60.0, 1), (0, 4));
+        assert_eq!(variable_window(&prefix, 100.0, 1_000.0, 0), (2, 4));
+        assert_eq!(variable_window(&[], 100.0, 0.0, 0), (0, 0));
+    }
+
+    #[test]
+    fn a_variable_list_starts_from_estimated_heights() {
+        let element: Element = crate::ui::List::new(Arc::new(
+            (0..100)
+                .map(|index| format!("Row {index}"))
+                .collect::<Vec<_>>(),
+        ))
+        .buffer(2)
+        .key(|item| item.clone())
+        .row(|item| crate::ui::Text::new(item.clone()).into())
+        .into();
+
+        let mut measurements = HashMap::new();
+        let (tree, info) = build_with_measurements(
+            &element,
+            &HashMap::new(),
+            Size::new(300.0, 200.0),
+            &mut measurements,
+        );
+
+        let list_id = tree.children[0].id;
+        assert_eq!(info.lists[&list_id].item_height, None);
+        assert_eq!(measurements[&list_id].prefix.len(), 101);
+        assert_eq!(measurements[&list_id].prefix[100], 56.0 * 100.0);
+        let rows = &info.rows[&list_id];
+        assert!(rows.len() >= 4, "window too small: {}", rows.len());
+        // The column holds the rows plus the trailing spacer.
+        assert_eq!(tree.children[0].children[0].children.len(), rows.len() + 1);
     }
 
     #[test]
