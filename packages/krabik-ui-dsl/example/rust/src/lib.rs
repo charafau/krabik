@@ -5,6 +5,8 @@
 //! registers itself through [`set_app_factory`]. It contains no platform code;
 //! the iOS shell in `../ios` links it and renders it with native UIKit views.
 
+use jni::EnvUnowned;
+use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Event, set_app_factory};
 use krabik_ui_dsl::ui::{
     Align, Button, Column, EdgeInsets, Element, Row, ScrollView, Spacer, Switch, Text, TextField,
@@ -274,5 +276,22 @@ fn caption(content: &str) -> Text {
 /// Must be called before any root view is created, and only once.
 #[unsafe(no_mangle)]
 pub extern "C" fn krabik_ui_dsl_example_install() {
+    ChecklistApp::install();
+}
+
+/// JNI entry point called by the Android host before creating the root view.
+///
+/// The Android shell loads this crate's `cdylib`, which statically includes
+/// the DSL renderer, so this one library provides the `RustRootView` JNI
+/// entry points as well as this factory install.
+///
+/// # Safety
+///
+/// Must be called before any root view is created, and only once.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_ExampleBridge_install<'caller>(
+    _env: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+) {
     ChecklistApp::install();
 }
