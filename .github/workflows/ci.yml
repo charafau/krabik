@@ -65,10 +65,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
-      # the UI DSL crate is its own workspace, so point the cache at it
+      # the DSL crate and the example crate are separate workspaces, so point
+      # the cache at both
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: packages/krabik-ui-dsl/rust
+          workspaces: |
+            packages/krabik-ui-dsl/rust
+            packages/krabik-ui-dsl/example/rust
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -81,6 +84,11 @@ jobs:
       # arm64 is the production ABI; building it also compiles the Kotlin and JNI code
       - name: Assemble debug APK
         working-directory: packages/krabik-ui-dsl/android
+        run: ./gradlew :app:assembleDebug --no-daemon -PkrabikAbis=arm64-v8a
+      # the example shell is a separate Gradle project; building it also proves
+      # the example cdylib exports the JNI install entry point the app loads
+      - name: Assemble the example debug APK
+        working-directory: packages/krabik-ui-dsl/example/android
         run: ./gradlew :app:assembleDebug --no-daemon -PkrabikAbis=arm64-v8a
 
   ios:
