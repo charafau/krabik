@@ -48,10 +48,16 @@ example/
 │   ├── UITests/             # XCUITests for the Rust-built UI
 │   └── KrabikUiDslExample.xcodeproj
 └── android/                 # Gradle app shell
-    ├── app/src/main/java/   # Activity, RustRootView, JNI declaration, native views
+    ├── app/src/main/java/   # MainActivity and ExampleBridge
     ├── app/src/androidTest/ # Espresso test for the Rust-built UI
-    └── app/build.gradle.kts # Cross-compiles ../rust and copies the .so into jniLibs
+    └── app/build.gradle.kts # Cross-compiles ../rust and wires the shared sources
 ```
+
+Both Android shells (this one and the DSL's dev harness) compile the Kotlin view
+layer from `../../shared/android/src/main/java` through a shared Gradle source
+set, so `RustRootView`, `KrabikActivity` and the custom widgets exist once. Each
+shell's `MainActivity` only loads its own native library and, here, installs the
+checklist app.
 
 ## Requirements
 
