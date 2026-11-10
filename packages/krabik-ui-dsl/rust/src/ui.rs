@@ -576,7 +576,7 @@ impl ElementKind {
 pub struct Element {
     pub(crate) kind: ElementKind,
     pub(crate) style: Style,
-    pub(crate) key: Option<&'static str>,
+    pub(crate) key: Option<Cow<'static, str>>,
     pub(crate) children: Vec<Element>,
 }
 
@@ -607,8 +607,8 @@ impl Element {
     }
 
     /// The key that identifies the element among its siblings.
-    pub fn key(&self) -> Option<&'static str> {
-        self.key
+    pub fn key(&self) -> Option<&str> {
+        self.key.as_deref()
     }
 }
 
@@ -743,8 +743,12 @@ macro_rules! style_builder {
             }
 
             /// Identifies the node among its siblings across rebuilds.
-            pub fn key(mut self, key: &'static str) -> Self {
-                self.0.key = Some(key);
+            ///
+            /// Keys must be unique among siblings and stable across rebuilds.
+            /// Both static strings and owned `String`s are accepted, which lets
+            /// list rows derive their key from the item they represent.
+            pub fn key(mut self, key: impl Into<Cow<'static, str>>) -> Self {
+                self.0.key = Some(key.into());
                 self
             }
         }

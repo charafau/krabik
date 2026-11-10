@@ -130,12 +130,7 @@ fn build_node(element: &Element, parent: NodeId, index: usize) -> UiNode {
         ElementKind::Scroll(props) => NodeKind::Scroll(*props),
     };
 
-    let children = element
-        .children
-        .iter()
-        .enumerate()
-        .map(|(index, child)| build_node(child, id, index))
-        .collect();
+    let children = build_children(element, id);
 
     UiNode {
         id,
@@ -145,12 +140,37 @@ fn build_node(element: &Element, parent: NodeId, index: usize) -> UiNode {
     }
 }
 
+fn build_children(element: &Element, parent: NodeId) -> Vec<UiNode> {
+    // Duplicate keys would hash two siblings to the same identifier, which
+    // silently aliases their native views. Fail loudly in debug builds.
+    #[cfg(debug_assertions)]
+    {
+        let mut keys = std::collections::HashSet::new();
+        for child in &element.children {
+            if let Some(key) = child.key() {
+                debug_assert!(
+                    keys.insert(key),
+                    "duplicate element key {key:?} among the children of {parent:?}"
+                );
+            }
+        }
+    }
+
+    element
+        .children
+        .iter()
+        .enumerate()
+        .map(|(index, child)| build_node(child, parent, index))
+        .collect()
+}
+
 /// Derives a node identifier from its parent, position or key, and kind.
 ///
 /// The identifier is stable while the node stays at the same position, which is
 /// what keeps native widgets alive across rebuilds. Supplying a key keeps the
-/// identifier stable when earlier siblings are inserted or removed.
-fn node_id(parent: NodeId, index: usize, key: Option<&'static str>, tag: u64) -> NodeId {
+/// identifier stable when earlier siblings are inserted or removed; keys must
+/// therefore be unique among siblings.
+fn node_id(parent: NodeId, index: usize, key: Option<&str>, tag: u64) -> NodeId {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64; // FNV-1a offset basis
 
     let mut mix = |value: u64| {
@@ -295,6 +315,84 @@ mod tests {
         let first_b = &first.children[0].children[1];
         let second_b = &second.children[0].children[1];
         assert_eq!(first_b.id, second_b.id);
+    }
+
+    #[test]
+    fn dynamic_keys_hash_like_static_keys() {
+        let borrowed = build(&Column::new().child(Text::new("a").key("item-7")).into());
+        let owned = build(
+            &Column::new()
+                .child(Text::new("a").key(String::from("item-7")))
+                .into(),
+        );
+
+        assert_eq!(
+            borrowed.children[0].children[0].id,
+            owned.children[0].children[0].id
+        );
+    }
+
+    #[test]
+    fn inserting_an_unkeyed_sibling_keeps_keyed_identifiers() {
+        let first = build(
+            &Column::new()
+                .child(Text::new("a").key("a"))
+                .child(Text::new("b").key("b"))
+                .into(),
+        );
+        let second = build(
+            &Column::new()
+                .child(Text::new("new"))
+                .child(Text::new("a").key("a"))
+                .child(Text::new("b").key("b"))
+                .into(),
+        );
+
+        assert_eq!(
+            first.children[0].children[0].id,
+            second.children[0].children[1].id
+        );
+        assert_eq!(
+            first.children[0].children[1].id,
+            second.children[0].children[2].id
+        );
+    }
+
+    #[test]
+    fn changing_a_key_changes_only_that_identifier() {
+        let first = build(
+            &Column::new()
+                .child(Text::new("a").key("a"))
+                .child(Text::new("b").key("b"))
+                .into(),
+        );
+        let second = build(
+            &Column::new()
+                .child(Text::new("a").key("a-changed"))
+                .child(Text::new("b").key("b"))
+                .into(),
+        );
+
+        assert_ne!(
+            first.children[0].children[0].id,
+            second.children[0].children[0].id
+        );
+        assert_eq!(
+            first.children[0].children[1].id,
+            second.children[0].children[1].id
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "duplicate element key")]
+    fn duplicate_sibling_keys_panic() {
+        build(
+            &Column::new()
+                .child(Text::new("a").key("dup"))
+                .child(Text::new("b").key("dup"))
+                .into(),
+        );
     }
 
     #[test]
