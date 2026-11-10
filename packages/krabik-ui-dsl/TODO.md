@@ -136,6 +136,11 @@ list. Events borrow the action for the duration of the `handle` call, so the
 trait signature is unchanged and static actions stay allocation-free. The
 [`example/`](example/) checklist uses this for per-note delete buttons.
 
+Element keys are `Cow<'static, str>`, so a component can be keyed with a
+runtime string (for example an item id in a list) as well as a static one.
+Keys must be unique among siblings; a debug build asserts it, because two
+siblings with the same key would hash to the same node identifier.
+
 ---
 
 ## Remaining ❌
@@ -214,7 +219,5 @@ matters for large lists.
 - Animations via native platform APIs
 - Native intrinsic measurement for switches and images
 - Disabled-state styling for custom backgrounds (native text already dims)
-- Dynamic `Element::key` (`Cow<'static, str>`) so reordered rows keep their
-  identity across moves — per-row actions already work via dynamic actions
 - More widgets: Checkbox, RadioButton, Slider, ProgressIndicator, DatePicker, Dialog, BottomSheet, Navigation
 - Platform-specific extensions
