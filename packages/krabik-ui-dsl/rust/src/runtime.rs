@@ -167,6 +167,49 @@ mod tests {
             .into()
     }
 
+    /// Layout operations are applied after every other operation of a batch.
+    fn assert_layout_suffix(ops: &[Op]) {
+        if let Some(first) = ops.iter().position(|op| matches!(op, Op::Layout { .. })) {
+            assert!(
+                ops[first..]
+                    .iter()
+                    .all(|op| matches!(op, Op::Layout { .. })),
+                "layout operations must come last: {ops:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn layout_operations_come_last_in_every_batch() {
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+
+        let update = runtime.update(&screen("Hello"), viewport());
+        assert!(
+            update.ops.iter().any(|op| matches!(op, Op::Create(_))),
+            "{:?}",
+            update.ops
+        );
+        assert_layout_suffix(&update.ops);
+
+        // An update and a layout change in the same frame.
+        let update = runtime.update(&screen("Hello, Rust!"), Size::new(200.0, 500.0));
+        assert!(
+            update.ops.iter().any(|op| matches!(op, Op::Update(_))),
+            "{:?}",
+            update.ops
+        );
+        assert_layout_suffix(&update.ops);
+
+        // Viewport-only changes emit layouts and nothing else.
+        let update = runtime.update(&screen("Hello, Rust!"), Size::new(180.0, 400.0));
+        assert!(!update.ops.is_empty(), "{:?}", update.ops);
+        assert!(
+            update.ops.iter().all(|op| matches!(op, Op::Layout { .. })),
+            "{:?}",
+            update.ops
+        );
+    }
+
     #[test]
     fn the_first_update_creates_every_native_node() {
         let mut runtime = Runtime::new(Box::new(ApproximateMeasure));

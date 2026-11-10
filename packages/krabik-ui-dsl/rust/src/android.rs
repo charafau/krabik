@@ -45,6 +45,7 @@ const LAYOUT_PARAMS_CLASS: &JNIStr = jni_str!("android/view/ViewGroup$LayoutPara
 /// sized view uses `FrameLayout.LayoutParams`, which is a safe superset.
 const FRAME_PARAMS_CLASS: &JNIStr = jni_str!("android/widget/FrameLayout$LayoutParams");
 const KRABIK_STYLE_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikStyle");
+const RUST_ROOT_VIEW_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/RustRootView");
 const TEXT_INPUT_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikTextInput");
 const SWITCH_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSwitch");
 const KRABIK_IMAGES_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikImages");
@@ -372,7 +373,13 @@ impl AndroidState {
 
                 let frame = self.views[&id].frame;
                 if let Some(frame) = frame {
-                    apply_layout(env, self.views[&id].view.as_obj(), frame, self.density)?;
+                    apply_frame(
+                        env,
+                        self.root.as_obj(),
+                        self.views[&id].view.as_obj(),
+                        frame,
+                        self.density,
+                    )?;
                 }
                 if let Some(handle) = self.views.get_mut(&id) {
                     handle.parent = parent;
@@ -395,7 +402,13 @@ impl AndroidState {
                 content_size,
             } => {
                 if let Some(handle) = self.views.get_mut(&id) {
-                    apply_layout(env, handle.view.as_obj(), frame, self.density)?;
+                    apply_frame(
+                        env,
+                        self.root.as_obj(),
+                        handle.view.as_obj(),
+                        frame,
+                        self.density,
+                    )?;
                     if let Some(size) = content_size {
                         apply_content_size(env, handle.children_host.as_obj(), size, self.density)?;
                     }
@@ -812,14 +825,26 @@ fn set_tag(env: &mut Env<'_>, view: &JObject<'_>, id: jlong) -> JniResult<()> {
     Ok(())
 }
 
-fn apply_layout(env: &mut Env<'_>, view: &JObject<'_>, frame: Rect, density: f32) -> JniResult<()> {
-    let x = (frame.x * density).round() as jint;
-    let y = (frame.y * density).round() as jint;
-    apply_size(env, view, frame.width, frame.height, density)?;
-    let ids = jni_handles(env)?;
-    ids.set_x.call_void(env, view, &[JValue::Float(x as f32)])?;
-    ids.set_y.call_void(env, view, &[JValue::Float(y as f32)])?;
-    Ok(())
+/// Applies one node's frame with a single call into `RustRootView`.
+fn apply_frame(
+    env: &mut Env<'_>,
+    root: &JObject<'_>,
+    view: &JObject<'_>,
+    frame: Rect,
+    density: f32,
+) -> JniResult<()> {
+    let pixels = frame.to_pixels(density);
+    jni_handles(env)?.apply_frame.call_void(
+        env,
+        root,
+        &[
+            JValue::Object(view),
+            JValue::Int(pixels.x),
+            JValue::Int(pixels.y),
+            JValue::Int(pixels.width),
+            JValue::Int(pixels.height),
+        ],
+    )
 }
 
 /// Gives the view exact pixel dimensions without moving it.
