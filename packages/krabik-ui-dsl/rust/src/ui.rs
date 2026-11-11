@@ -1216,9 +1216,14 @@ impl<T: Send + Sync + 'static> List<T> {
 
     /// Uses a native recycler for scrolling and view recycling.
     ///
-    /// Requires a fixed `.item_height(..)`; variable heights fall back to the
-    /// windowed implementation. Recycled rows are re-created on bind, so they
-    /// should stay simple.
+    /// On Android this swaps the windowed scroll container for a `RecyclerView`
+    /// and on iOS for a `UICollectionView`. `item_height` is optional: with it
+    /// the holder has a fixed height, without it Rust measures each row and the
+    /// holder wraps the content.
+    ///
+    /// Recycled rows are rebuilt by diffing the previous tree of their holder,
+    /// so they may contain any widget. A new render revision rebinds the
+    /// attached rows, which is how application state changes reach a row.
     pub fn recycled(mut self) -> Self {
         self.mode = ListMode::Recycled;
         self

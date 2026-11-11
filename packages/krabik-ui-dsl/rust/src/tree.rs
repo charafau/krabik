@@ -78,7 +78,28 @@ pub struct RecyclerProps {
     /// The number of items the recycler reports.
     pub item_count: usize,
     /// The fixed height of one row, in logical points.
-    pub item_height: f32,
+    ///
+    /// `None` lets the recycler size every row from the height its content
+    /// needs, which the renderer reports back after laying the row out.
+    pub item_height: Option<f32>,
+    /// A counter that changes whenever the application description was rebuilt.
+    ///
+    /// RecyclerView owns the rows and would otherwise never notice that an app
+    /// state change altered the content of visible rows. A new revision asks
+    /// the adapter to rebind the attached cells; the renderer diffs each row,
+    /// so unchanged widgets are not touched.
+    pub revision: u64,
+}
+
+impl RecyclerProps {
+    /// A recycler before the runtime stamps its revision.
+    pub fn new(item_count: usize, item_height: Option<f32>) -> Self {
+        Self {
+            item_count,
+            item_height,
+            revision: 0,
+        }
+    }
 }
 
 /// A node of the internal UI tree.
@@ -218,6 +239,30 @@ pub fn build_at(element: &Element, root: NodeId) -> (UiNode, BuildInfo) {
         .children
         .push(build_node(element, root, 0, &mut context));
     (tree_root, info)
+}
+
+/// The identifier of one recycled row's subtree root.
+///
+/// Deriving it from the list and the item index keeps a row's widget ids stable
+/// across rebinds while keeping them out of the main tree's identifier space.
+#[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+pub(crate) fn row_root(list: NodeId, index: usize) -> NodeId {
+    let mixed = list.0.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (index as u64);
+    NodeId(mixed | 1)
+}
+
+/// Stamps the current render revision into every recycled list.
+///
+/// RecyclerView's adapter needs a signal to rebind its attached cells when the
+/// application description changed; the revision is part of the node's
+/// properties, so a new value produces an update operation.
+pub(crate) fn stamp_recycler_revision(node: &mut UiNode, revision: u64) {
+    if let NodeKind::Recycler(props) = &mut node.kind {
+        props.revision = revision;
+    }
+    for child in &mut node.children {
+        stamp_recycler_revision(child, revision);
+    }
 }
 
 /// Converts a declarative element into the internal tree with scroll state.
@@ -413,17 +458,11 @@ fn build_children(element: &Element, parent: NodeId, cx: &mut BuildContext) -> V
 /// as native views. Rows sit at their absolute content position, which means a
 /// native scroll needs no repositioning when the window changes.
 fn build_list(element: &Element, id: NodeId, props: &ListProps, cx: &mut BuildContext) -> UiNode {
-    if props.mode == ListMode::Recycled
-        && let Some(height) = props.item_height
-        && cfg!(target_os = "android")
-    {
+    if props.mode == ListMode::Recycled && cfg!(any(target_os = "android", target_os = "ios")) {
         cx.info.recycled.insert(id, props.clone());
         return UiNode {
             id,
-            kind: NodeKind::Recycler(RecyclerProps {
-                item_count: props.item_count,
-                item_height: height,
-            }),
+            kind: NodeKind::Recycler(RecyclerProps::new(props.item_count, props.item_height)),
             style: element.style.clone(),
             children: Vec::new(),
         };
@@ -1059,5 +1098,52 @@ mod tests {
         assert_eq!(index.len(), preorder(&tree).len());
         assert_eq!(find(&tree, tree.children[0].id), Some(&tree.children[0]));
         assert!(find(&tree, NodeId(12345)).is_none());
+    }
+
+    #[test]
+    fn row_roots_are_stable_and_unique_per_item() {
+        let list = NodeId(7);
+        assert_eq!(row_root(list, 3), row_root(list, 3));
+        assert_ne!(row_root(list, 3), row_root(list, 4));
+        assert_ne!(row_root(list, 3), row_root(NodeId(8), 3));
+        // The root must never collide with the synthetic tree root.
+        assert_ne!(row_root(list, 0), ROOT_ID);
+    }
+
+    #[test]
+    fn stamping_reaches_nested_recyclers() {
+        let mut tree = UiNode {
+            id: ROOT_ID,
+            kind: NodeKind::Root,
+            style: Style::default(),
+            children: vec![UiNode {
+                id: NodeId(10),
+                kind: NodeKind::Recycler(RecyclerProps::new(4, None)),
+                style: Style::default(),
+                children: vec![UiNode {
+                    id: NodeId(11),
+                    kind: NodeKind::Recycler(RecyclerProps::new(2, Some(10.0))),
+                    style: Style::default(),
+                    children: Vec::new(),
+                }],
+            }],
+        };
+
+        stamp_recycler_revision(&mut tree, 42);
+
+        for child in &tree.children[0].children {
+            match &child.kind {
+                NodeKind::Recycler(props) => assert_eq!(props.revision, 42),
+                _ => panic!("expected a recycler"),
+            }
+        }
+        assert!(matches!(
+            &tree.children[0].kind,
+            NodeKind::Recycler(RecyclerProps {
+                revision: 42,
+                item_height: None,
+                ..
+            })
+        ));
     }
 }
