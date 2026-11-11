@@ -38,6 +38,7 @@ pub enum Demo {
     Controls,
     List,
     ListVariable,
+    ListRecycled,
 }
 
 /// The state of the gallery demo application.
@@ -55,6 +56,8 @@ pub struct GalleryApp {
     pub list_items: Arc<Vec<String>>,
     /// Rows of mixed height for the measured-list demo.
     pub variable_items: Arc<Vec<String>>,
+    /// How many buttons inside recycled rows were pressed.
+    pub recycled_taps: usize,
 }
 
 impl Default for GalleryApp {
@@ -69,6 +72,7 @@ impl Default for GalleryApp {
             submitted: false,
             notifications: false,
             list_items: Arc::new((1..=1000).map(|index| format!("Row {index}")).collect()),
+            recycled_taps: 0,
             variable_items: Arc::new(
                 (1..=300)
                     .map(|index| {
@@ -112,6 +116,7 @@ impl GalleryApp {
                     .child(Button::new("Controls").action("open:controls"))
                     .child(Button::new("List").action("open:list"))
                     .child(Button::new("List (variable)").action("open:list-variable"))
+                    .child(Button::new("List (recycled)").action("open:list-recycled"))
                     .child(caption(
                         "This list scrolls, so every demo stays reachable on small screens.",
                     )),
@@ -549,6 +554,37 @@ impl GalleryApp {
             .into()
     }
 
+    fn list_recycled(&self) -> Element {
+        Column::new()
+            .padding(24)
+            .spacing(12)
+            .width_percent(1.0)
+            .height_percent(1.0)
+            .align_items(Align::Start)
+            .child(back_button())
+            .child(Text::new("List (recycled)").size(26).bold())
+            .child(caption(
+                "A native RecyclerView owns scrolling; Rust builds each row on bind.",
+            ))
+            .child(Text::new(format!("Taps: {}", self.recycled_taps)).size(15))
+            .child(
+                List::new(Arc::clone(&self.list_items))
+                    .item_height(56.0)
+                    .recycled()
+                    .key(|item| item.clone())
+                    .row(|item| {
+                        Row::new()
+                            .width_percent(1.0)
+                            .padding_each(EdgeInsets::symmetric(12, 6))
+                            .align_items(Align::Center)
+                            .child(Text::new(item.clone()).size(15).grow(1.0))
+                            .child(Button::new("Tap").action("recycled:tap"))
+                            .into()
+                    }),
+            )
+            .into()
+    }
+
     fn controls(&self) -> Element {
         let state = if self.notifications {
             "Notifications are on."
@@ -642,6 +678,7 @@ impl App for GalleryApp {
             Demo::Controls => self.controls(),
             Demo::List => self.list(),
             Demo::ListVariable => self.list_variable(),
+            Demo::ListRecycled => self.list_recycled(),
         }
     }
 
@@ -692,6 +729,8 @@ impl App for GalleryApp {
                 "open:controls" => self.demo = Demo::Controls,
                 "open:list" => self.demo = Demo::List,
                 "open:list-variable" => self.demo = Demo::ListVariable,
+                "open:list-recycled" => self.demo = Demo::ListRecycled,
+                "recycled:tap" => self.recycled_taps += 1,
                 "counter:add" => self.count += 1,
                 "counter:reset" => self.count = 0,
                 "form:clear" => {
