@@ -26,8 +26,9 @@ use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Axis, EdgeInsets, FontWeight, GradientDirection, ImageProps, ImageScale, ImageSource,
-    ImeAction, KeyboardType, SwitchProps, TextAlign, TextFieldProps, TextProps,
+    Axis, CheckProps, EdgeInsets, FontWeight, GradientDirection, ImageProps, ImageScale,
+    ImageSource, ImeAction, KeyboardType, ProgressProps, SliderProps, SwitchProps, TextAlign,
+    TextFieldProps, TextProps,
 };
 
 mod handles;
@@ -51,6 +52,10 @@ const KRABIK_STYLE_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSt
 const RUST_ROOT_VIEW_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/RustRootView");
 const TEXT_INPUT_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikTextInput");
 const SWITCH_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSwitch");
+const CHECKBOX_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikCheckBox");
+const RADIO_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioButton");
+const SEEK_BAR_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSeekBar");
+const PROGRESS_BAR_CLASS: &JNIStr = jni_str!("android/widget/ProgressBar");
 const KRABIK_IMAGES_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikImages");
 const KRABIK_VIEWS_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikViews");
 const KRABIK_RECYCLERS_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRecyclers");
@@ -281,6 +286,7 @@ struct RowAction {
     submit: Option<Cow<'static, str>>,
     focus: Option<Cow<'static, str>>,
     toggle: Option<Cow<'static, str>>,
+    value: Option<Cow<'static, str>>,
 }
 
 /// One recycled row currently bound to a holder.
@@ -603,6 +609,26 @@ impl AndroidState {
                     ids.switch_ctor
                         .construct(env, &ids.switch, &child_context)?
                 }
+                NodeKind::Checkbox(_) => {
+                    ids.checkbox_ctor
+                        .construct(env, &ids.checkbox, &child_context)?
+                }
+                NodeKind::RadioButton(_) => {
+                    ids.radio_ctor
+                        .construct(env, &ids.radio_button, &child_context)?
+                }
+                NodeKind::Slider(_) => {
+                    ids.seek_bar_ctor
+                        .construct(env, &ids.seek_bar, &child_context)?
+                }
+                NodeKind::Progress(_) => ids
+                    .create_progress
+                    .call(
+                        env,
+                        &ids.krabik_views,
+                        &[JValue::Object(self.context.as_obj())],
+                    )?
+                    .l()?,
                 NodeKind::Image(_) => {
                     ids.image_view_ctor
                         .construct(env, &ids.image_view, &context)?
@@ -630,6 +656,14 @@ impl AndroidState {
             update_text_field(env, &view, props)?;
         } else if let NodeKind::Switch(props) = &node.kind {
             update_switch(env, &view, props)?;
+        } else if let NodeKind::Checkbox(props) = &node.kind {
+            update_check(env, &view, props, false)?;
+        } else if let NodeKind::RadioButton(props) = &node.kind {
+            update_check(env, &view, props, true)?;
+        } else if let NodeKind::Slider(props) = &node.kind {
+            update_slider(env, &view, props)?;
+        } else if let NodeKind::Progress(props) = &node.kind {
+            update_progress(env, &view, props)?;
         } else if let NodeKind::Image(props) = &node.kind {
             update_image(env, &view, props)?;
         } else {
@@ -780,6 +814,18 @@ impl AndroidState {
                     action.toggle = Some(props.action.clone());
                     any = true;
                 }
+                NodeKind::Checkbox(props) if !props.action.is_empty() => {
+                    action.toggle = Some(props.action.clone());
+                    any = true;
+                }
+                NodeKind::RadioButton(props) if !props.action.is_empty() => {
+                    action.toggle = Some(props.action.clone());
+                    any = true;
+                }
+                NodeKind::Slider(props) if !props.action.is_empty() => {
+                    action.value = Some(props.action.clone());
+                    any = true;
+                }
                 NodeKind::TextField(props) => {
                     if !props.action.is_empty() {
                         action.text = Some(props.action.clone());
@@ -889,6 +935,14 @@ fn update_view(
         update_text_field(env, view, props)?;
     } else if let NodeKind::Switch(props) = &node.kind {
         update_switch(env, view, props)?;
+    } else if let NodeKind::Checkbox(props) = &node.kind {
+        update_check(env, view, props, false)?;
+    } else if let NodeKind::RadioButton(props) = &node.kind {
+        update_check(env, view, props, true)?;
+    } else if let NodeKind::Slider(props) = &node.kind {
+        update_slider(env, view, props)?;
+    } else if let NodeKind::Progress(props) = &node.kind {
+        update_progress(env, view, props)?;
     } else if let NodeKind::Image(props) = &node.kind {
         update_image(env, view, props)?;
     } else {
@@ -974,6 +1028,71 @@ fn update_switch(env: &mut Env<'_>, view: &JObject<'_>, props: &SwitchProps) -> 
     jni_handles(env)?
         .set_checked_silently
         .call_void(env, view, &[JValue::Bool(props.checked)])
+}
+
+fn update_check(
+    env: &mut Env<'_>,
+    view: &JObject<'_>,
+    props: &CheckProps,
+    radio: bool,
+) -> JniResult<()> {
+    let ids = jni_handles(env)?;
+    ids.set_include_font_padding
+        .call_void(env, view, &[JValue::Bool(false)])?;
+    let label = jcall!(env, env.new_string(&props.label))?;
+    ids.set_text
+        .call_void(env, view, &[JValue::Object(label.as_ref())])?;
+    ids.set_text_size.call_void(
+        env,
+        view,
+        &[JValue::Int(COMPLEX_UNIT_SP), JValue::Float(props.size)],
+    )?;
+    ids.set_text_color
+        .call_void(env, view, &[JValue::Int(props.color as jint)])?;
+    ids.set_max_lines.call_void(env, view, &[JValue::Int(1)])?;
+    let ellipsis = ids.truncate_at_end.get(env, &ids.truncate_at)?;
+    ids.set_ellipsize
+        .call_void(env, view, &[JValue::Object(ellipsis.l()?.as_ref())])?;
+    apply_typeface(env, view, matches!(props.weight, FontWeight::Bold))?;
+
+    let setter = if radio {
+        ids.radio_set_checked_silently
+    } else {
+        ids.checkbox_set_checked_silently
+    };
+    setter.call_void(env, view, &[JValue::Bool(props.checked)])
+}
+
+fn update_slider(env: &mut Env<'_>, view: &JObject<'_>, props: &SliderProps) -> JniResult<()> {
+    let ids = jni_handles(env)?;
+    let max = props.max.max(props.min + 0.001);
+    ids.configure_seek_bar.call_void(
+        env,
+        view,
+        &[
+            JValue::Float(props.min),
+            JValue::Float(max),
+            JValue::Int(props.color as jint),
+        ],
+    )?;
+    ids.seek_set_value_silently.call_void(
+        env,
+        view,
+        &[JValue::Float(props.value.clamp(props.min, max))],
+    )
+}
+
+fn update_progress(env: &mut Env<'_>, view: &JObject<'_>, props: &ProgressProps) -> JniResult<()> {
+    let ids = jni_handles(env)?;
+    ids.update_progress.call_void(
+        env,
+        &ids.krabik_views,
+        &[
+            JValue::Object(view),
+            JValue::Float(props.value),
+            JValue::Int(props.color as jint),
+        ],
+    )
 }
 
 fn update_text(env: &mut Env<'_>, view: &JObject<'_>, kind: &NodeKind) -> JniResult<()> {
@@ -1590,7 +1709,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnChe
         };
 
         let id = NodeId(node_id as u64);
-        let action = state.runtime.switch_action(id).or_else(|| {
+        let action = state.runtime.toggle_action(id).or_else(|| {
             state
                 .row_actions
                 .get(&id)
@@ -1600,6 +1719,42 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnChe
             && state.app.handle(Event::Toggled {
                 action: &action,
                 checked,
+            })
+        {
+            state.render(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Dispatches a slider value back into the Rust tree.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSliderChanged<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    node_id: jlong,
+    value: jfloat,
+) {
+    run(&mut unenv, "nativeOnSliderChanged", |env| {
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        let Some(state) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+
+        let id = NodeId(node_id as u64);
+        let action = state
+            .runtime
+            .slider_action(id)
+            .or_else(|| state.row_actions.get(&id).and_then(|row| row.value.clone()));
+        if let Some(action) = action
+            && state.app.handle(Event::ValueChanged {
+                action: &action,
+                value,
             })
         {
             state.render(env)?;

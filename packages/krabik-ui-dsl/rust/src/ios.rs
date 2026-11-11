@@ -26,10 +26,10 @@ use objc2_ui_kit::{
     NSIndexPathUIKitAdditions, NSLineBreakMode, NSObjectUIAccessibility, NSTextAlignment, UIAction,
     UIButton, UIButtonType, UICollectionView, UICollectionViewCell, UICollectionViewDataSource,
     UICollectionViewDelegate, UICollectionViewDelegateFlowLayout, UICollectionViewFlowLayout,
-    UICollectionViewLayout, UIColor, UIControl, UIControlEvents, UIControlState, UIEdgeInsets,
-    UIFont, UIImage, UIImageView, UIKeyboardType, UILabel, UIReturnKeyType, UIScrollView,
-    UIScrollViewDelegate, UISwitch, UITextBorderStyle, UITextField, UITextInputTraits, UIView,
-    UIViewContentMode,
+    UICollectionViewLayout, UIColor, UIControl, UIControlContentHorizontalAlignment,
+    UIControlEvents, UIControlState, UIEdgeInsets, UIFont, UIImage, UIImageView, UIKeyboardType,
+    UILabel, UIProgressView, UIReturnKeyType, UIScrollView, UIScrollViewDelegate, UISlider,
+    UISwitch, UITextBorderStyle, UITextField, UITextInputTraits, UIView, UIViewContentMode,
 };
 
 use crate::app::{App, Event};
@@ -40,8 +40,9 @@ use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Axis, ButtonProps, EdgeInsets, Element, FontWeight, GradientDirection, ImageProps, ImageScale,
-    ImageSource, ImeAction, KeyboardType, TextAlign, TextFieldProps, TextProps,
+    Axis, ButtonProps, CheckProps, EdgeInsets, Element, FontWeight, GradientDirection, ImageProps,
+    ImageScale, ImageSource, ImeAction, KeyboardType, ProgressProps, SliderProps, TextAlign,
+    TextFieldProps, TextProps,
 };
 
 /// Measures text with an off-screen `UILabel`.
@@ -373,6 +374,12 @@ enum Content {
     Field(Retained<UITextField>),
     Button(Retained<UIButton>),
     Switch(Retained<UISwitch>),
+    Check {
+        button: Retained<UIButton>,
+        radio: bool,
+    },
+    Slider(Retained<UISlider>),
+    Progress(Retained<UIProgressView>),
     Image(Retained<UIImageView>),
     Host(Retained<UIView>),
     Scroll {
@@ -461,6 +468,7 @@ struct RowAction {
     submit: Option<Cow<'static, str>>,
     focus: Option<Cow<'static, str>>,
     toggle: Option<Cow<'static, str>>,
+    value: Option<Cow<'static, str>>,
 }
 
 /// One recycled row currently bound to a collection-view cell.
@@ -642,6 +650,47 @@ impl IosState {
                 wire_switch(&switch, self.handle, node.id, mtm);
                 let view = cast_view(switch.clone());
                 ViewHandle::new(view, Content::Switch(switch), node)
+            }
+            NodeKind::Checkbox(props) => {
+                let button = UIButton::buttonWithType(UIButtonType::Custom, mtm);
+                update_check(&button, props, false);
+                wire_check(&button, self.handle, node.id, mtm);
+                let view = cast_view(button.clone());
+                ViewHandle::new(
+                    view,
+                    Content::Check {
+                        button,
+                        radio: false,
+                    },
+                    node,
+                )
+            }
+            NodeKind::RadioButton(props) => {
+                let button = UIButton::buttonWithType(UIButtonType::Custom, mtm);
+                update_check(&button, props, true);
+                wire_check(&button, self.handle, node.id, mtm);
+                let view = cast_view(button.clone());
+                ViewHandle::new(
+                    view,
+                    Content::Check {
+                        button,
+                        radio: true,
+                    },
+                    node,
+                )
+            }
+            NodeKind::Slider(props) => {
+                let slider = UISlider::new(mtm);
+                update_slider(&slider, props);
+                wire_slider(&slider, self.handle, node.id, mtm);
+                let view = cast_view(slider.clone());
+                ViewHandle::new(view, Content::Slider(slider), node)
+            }
+            NodeKind::Progress(props) => {
+                let progress = UIProgressView::new(mtm);
+                update_progress(&progress, props);
+                let view = cast_view(progress.clone());
+                ViewHandle::new(view, Content::Progress(progress), node)
             }
             NodeKind::Image(props) => {
                 let image = UIImageView::new(mtm);
@@ -1049,6 +1098,18 @@ impl IosState {
                     action.toggle = Some(props.action.clone());
                     any = true;
                 }
+                NodeKind::Checkbox(props) if !props.action.is_empty() => {
+                    action.toggle = Some(props.action.clone());
+                    any = true;
+                }
+                NodeKind::RadioButton(props) if !props.action.is_empty() => {
+                    action.toggle = Some(props.action.clone());
+                    any = true;
+                }
+                NodeKind::Slider(props) if !props.action.is_empty() => {
+                    action.value = Some(props.action.clone());
+                    any = true;
+                }
                 NodeKind::TextField(props) => {
                     if !props.action.is_empty() {
                         action.text = Some(props.action.clone());
@@ -1118,6 +1179,16 @@ fn update_content(content: &Content, node: &RenderNode) {
         (Content::Field(field), NodeKind::TextField(props)) => update_field(field, props),
         (Content::Button(button), NodeKind::Button(props)) => update_button(button, props),
         (Content::Switch(switch), NodeKind::Switch(props)) => switch.setOn(props.checked),
+        (Content::Check { button, radio }, NodeKind::Checkbox(props)) => {
+            update_check(button, props, *radio);
+        }
+        (Content::Check { button, radio }, NodeKind::RadioButton(props)) => {
+            update_check(button, props, *radio);
+        }
+        (Content::Slider(slider), NodeKind::Slider(props)) => update_slider(slider, props),
+        (Content::Progress(progress), NodeKind::Progress(props)) => {
+            update_progress(progress, props);
+        }
         // Images are updated by `IosState::load_image`, which starts async
         // downloads and therefore needs the state itself.
         _ => {}
@@ -1156,6 +1227,54 @@ fn update_button(button: &UIButton, props: &ButtonProps) {
         // SAFETY: the font is retained by the label for as long as it is set.
         unsafe { label.setFont(Some(&font)) };
     }
+}
+
+fn update_check(button: &UIButton, props: &CheckProps, radio: bool) {
+    // The leading space separates the symbol from the label; the builder sets
+    // the clean accessibility label.
+    let title = NSString::from_str(&format!(" {}", props.label));
+    button.setTitle_forState(Some(&title), UIControlState::Normal);
+    let text_color = color(props.color);
+    button.setTitleColor_forState(Some(&text_color), UIControlState::Normal);
+    button.setTitleColor_forState(Some(&text_color), UIControlState::Selected);
+    if let Some(label) = button.titleLabel() {
+        let font = system_font(props.size, props.weight);
+        // SAFETY: the font is retained by the label for as long as it is set.
+        unsafe { label.setFont(Some(&font)) };
+    }
+
+    let (unchecked, checked) = if radio {
+        ("circle", "smallcircle.filled.circle")
+    } else {
+        ("square", "checkmark.square.fill")
+    };
+    let symbol = if props.checked { checked } else { unchecked };
+    if let Some(image) = UIImage::systemImageNamed(&NSString::from_str(symbol)) {
+        button.setImage_forState(Some(&image), UIControlState::Normal);
+    }
+    button.setImage_forState(None, UIControlState::Selected);
+    button.setSelected(props.checked);
+    button.setContentHorizontalAlignment(UIControlContentHorizontalAlignment::Left);
+    // SAFETY: the color is retained by the view for as long as it is set.
+    unsafe { button.setTintColor(Some(&text_color)) };
+}
+
+fn update_slider(slider: &UISlider, props: &SliderProps) {
+    let max = props.max.max(props.min + 0.001);
+    slider.setMinimumValue(props.min);
+    slider.setMaximumValue(max);
+    let value = props.value.clamp(props.min, max);
+    if (slider.value() - value).abs() > f32::EPSILON {
+        slider.setValue(value);
+    }
+    let tint = color(props.color);
+    slider.setMinimumTrackTintColor(Some(&tint));
+}
+
+fn update_progress(progress: &UIProgressView, props: &ProgressProps) {
+    progress.setProgress(props.value.clamp(0.0, 1.0));
+    let tint = color(props.color);
+    progress.setProgressTintColor(Some(&tint));
 }
 
 fn update_field(field: &UITextField, props: &TextFieldProps) {
@@ -1423,6 +1542,40 @@ fn wire_switch(switch: &UISwitch, handle: u64, id: NodeId, mtm: MainThreadMarker
     );
 }
 
+fn wire_check(button: &UIButton, handle: u64, id: NodeId, mtm: MainThreadMarker) {
+    add_action(
+        button,
+        UIControlEvents::TouchUpInside,
+        "krabik.check",
+        mtm,
+        move |action| {
+            let checked = action
+                .sender()
+                .and_then(|sender| sender.downcast::<UIButton>().ok())
+                .map(|button| !button.isSelected())
+                .unwrap_or(false);
+            schedule(move || dispatch_checked(handle, id, checked));
+        },
+    );
+}
+
+fn wire_slider(slider: &UISlider, handle: u64, id: NodeId, mtm: MainThreadMarker) {
+    add_action(
+        slider,
+        UIControlEvents::ValueChanged,
+        "krabik.slider",
+        mtm,
+        move |action| {
+            let value = action
+                .sender()
+                .and_then(|sender| sender.downcast::<UISlider>().ok())
+                .map(|slider| slider.value())
+                .unwrap_or(0.0);
+            schedule(move || dispatch_value(handle, id, f64::from(value)));
+        },
+    );
+}
+
 fn wire_field(field: &UITextField, handle: u64, id: NodeId, mtm: MainThreadMarker) {
     add_action(
         field,
@@ -1629,7 +1782,7 @@ fn dispatch_focus(handle: u64, id: NodeId, focused: bool) {
 fn dispatch_checked(handle: u64, id: NodeId, checked: bool) {
     guard("checked", || {
         with_state(handle, |state| {
-            let action = state.runtime.switch_action(id).or_else(|| {
+            let action = state.runtime.toggle_action(id).or_else(|| {
                 state
                     .row_actions
                     .get(&id)
@@ -1639,6 +1792,25 @@ fn dispatch_checked(handle: u64, id: NodeId, checked: bool) {
                 && state.app.handle(Event::Toggled {
                     action: &action,
                     checked,
+                })
+            {
+                state.render();
+            }
+        });
+    });
+}
+
+fn dispatch_value(handle: u64, id: NodeId, value: f64) {
+    guard("slider", || {
+        with_state(handle, |state| {
+            let action = state
+                .runtime
+                .slider_action(id)
+                .or_else(|| state.row_actions.get(&id).and_then(|row| row.value.clone()));
+            if let Some(action) = action
+                && state.app.handle(Event::ValueChanged {
+                    action: &action,
+                    value: value as f32,
                 })
             {
                 state.render();
@@ -1849,4 +2021,14 @@ pub unsafe extern "C" fn krabik_ios_on_focus_changed(handle: u64, node_id: u64, 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_on_checked_changed(handle: u64, node_id: u64, checked: bool) {
     dispatch_checked(handle, NodeId(node_id), checked);
+}
+
+/// Dispatches a slider value back into the Rust tree.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_slider_changed(handle: u64, node_id: u64, value: f64) {
+    dispatch_value(handle, NodeId(node_id), value);
 }
