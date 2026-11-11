@@ -311,6 +311,8 @@ struct AndroidState {
     row_action_ids: HashMap<(NodeId, usize), Vec<NodeId>>,
     /// The rows currently bound to recycled-list holders, by (list, holder).
     row_states: HashMap<(NodeId, i64), RowState>,
+    /// The item each row node belongs to, for routing focus back to its row.
+    row_nodes: HashMap<NodeId, (NodeId, usize)>,
     density: f32,
     viewport: Size,
 }
@@ -335,6 +337,7 @@ impl AndroidState {
             row_actions: HashMap::new(),
             row_action_ids: HashMap::new(),
             row_states: HashMap::new(),
+            row_nodes: HashMap::new(),
             density,
             viewport: Size::ZERO,
         })
@@ -550,7 +553,9 @@ impl AndroidState {
             .copied()
             .collect();
         for key in detached {
-            self.row_states.remove(&key);
+            if let Some(state) = self.row_states.remove(&key) {
+                self.unregister_row_nodes(&state.tree);
+            }
         }
     }
 
@@ -686,6 +691,15 @@ impl AndroidState {
         let previous = self.row_states.remove(&(list, holder));
         let (old_tree, old_layout, mut views) = if let Some(mut state) = previous {
             self.clear_row_actions(list, state.index);
+            if state.index != index
+                && let Some(focus) = self.runtime.row_focus()
+                && tree::find(&state.tree, focus.field).is_some()
+            {
+                // The holder is about to show another item; keep the logical
+                // focus so it can be restored when the row comes back.
+                self.runtime.park_row_focus(focus.field);
+            }
+            self.unregister_row_nodes(&state.tree);
             let views = std::mem::take(&mut state.views);
             (state.tree, state.layout, views)
         } else {
@@ -706,6 +720,7 @@ impl AndroidState {
         }
 
         self.record_row_actions(list, index, &tree);
+        self.register_row_nodes(list, index, &tree);
         let height = layout
             .frames
             .get(&root)
@@ -727,7 +742,27 @@ impl AndroidState {
     /// Releases the widgets and actions of the row a holder currently shows.
     fn unbind_row(&mut self, list: NodeId, holder: i64) {
         if let Some(state) = self.row_states.remove(&(list, holder)) {
+            if let Some(focus) = self.runtime.row_focus()
+                && tree::find(&state.tree, focus.field).is_some()
+            {
+                self.runtime.park_row_focus(focus.field);
+            }
+            self.unregister_row_nodes(&state.tree);
             self.clear_row_actions(list, state.index);
+        }
+    }
+
+    /// Maps every node of a bound row back to its item.
+    fn register_row_nodes(&mut self, list: NodeId, index: usize, tree: &UiNode) {
+        for node in tree::preorder(tree) {
+            self.row_nodes.insert(node.id, (list, index));
+        }
+    }
+
+    /// Forgets the nodes of a row that is no longer bound.
+    fn unregister_row_nodes(&mut self, tree: &UiNode) {
+        for node in tree::preorder(tree) {
+            self.row_nodes.remove(&node.id);
         }
     }
 
@@ -1416,6 +1451,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFoc
     handle: jlong,
     node_id: jlong,
     focused: jboolean,
+    attached: jboolean,
 ) {
     run(&mut unenv, "nativeOnFocusChanged", |env| {
         let Some(mut states) = lock_states_for_event() else {
@@ -1425,8 +1461,35 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFoc
             return Ok(());
         };
 
-        let focus_changed = state.runtime.set_focus(NodeId(node_id as u64), focused);
         let id = NodeId(node_id as u64);
+        let row = state.row_nodes.get(&id).copied();
+        let is_row = row.is_some();
+        let focus_changed = if focused {
+            match row {
+                Some((list, index)) => state.runtime.set_row_focus(list, index, id, true),
+                None => state.runtime.set_focus(id, true),
+            }
+        } else if let Some((list, index)) = row {
+            if attached {
+                state.runtime.set_row_focus(list, index, id, false)
+            } else {
+                // The field is losing focus because its row is being torn
+                // down, not because the user moved on.
+                state.runtime.park_row_focus(id);
+                false
+            }
+        } else if state
+            .runtime
+            .row_focus()
+            .is_some_and(|focus| focus.field == id)
+        {
+            // The row was unbound before the deferred blur arrived.
+            state.runtime.park_row_focus(id);
+            false
+        } else {
+            state.runtime.set_focus(id, false)
+        };
+
         let handled = state
             .runtime
             .text_field_focus_action(id)
@@ -1437,8 +1500,71 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFoc
                     focused,
                 })
             });
-        if focus_changed || handled {
+        // Row focus is bookkeeping only; the visible widgets did not change, so
+        // a render here would needlessly rebind the recycler and can feed back
+        // into focus handling.
+        if (!is_row && focus_changed) || handled {
             state.render(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Restores focus to the field a recycled row kept logically focused.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeRestoreRowFocus<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    node_id: jlong,
+    holder_id: jlong,
+) {
+    run(&mut unenv, "nativeRestoreRowFocus", |env| {
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        let Some(state) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+        let list = NodeId(node_id as u64);
+
+        let focused = {
+            let Some(row) = state.row_states.get(&(list, holder_id)) else {
+                return Ok(());
+            };
+            let Some(focus) = state.runtime.row_focus() else {
+                return Ok(());
+            };
+            if focus.list != list || focus.index != row.index {
+                return Ok(());
+            }
+            let Some(handle) = row.views.get(&focus.field) else {
+                return Ok(());
+            };
+
+            let ids = jni_handles(env)?;
+            let already_focused = ids.is_focused.call(env, handle.view.as_obj(), &[])?.z()?;
+            let focused = already_focused
+                || ids
+                    .request_focus
+                    .call(env, handle.view.as_obj(), &[])?
+                    .z()?;
+            if focused && !already_focused {
+                ids.ensure_keyboard_shown.call_void(
+                    env,
+                    state.root.as_obj(),
+                    &[JValue::Object(handle.view.as_obj())],
+                )?;
+            }
+            (focused, focus)
+        };
+
+        if focused.0 {
+            state
+                .runtime
+                .set_row_focus(list, focused.1.index, focused.1.field, true);
         }
         Ok(())
     });

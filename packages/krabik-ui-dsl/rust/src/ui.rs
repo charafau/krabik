@@ -350,8 +350,7 @@ pub enum ListMode {
     /// Window the content inside a native scroll container (default).
     #[default]
     Windowed,
-    /// Let a native recycler own scrolling and view recycling. Requires
-    /// `.item_height(..)` and currently supports Android only.
+    /// Let a native recycler own scrolling and view recycling.
     Recycled,
 }
 
@@ -367,6 +366,8 @@ pub(crate) struct ListProps {
     pub(crate) item_height: Option<f32>,
     pub(crate) estimated_height: f32,
     pub(crate) buffer: usize,
+    /// The item revision, when the application supplies one.
+    pub(crate) revision: Option<u64>,
     pub(crate) keys: Arc<dyn Fn(usize) -> String + Send + Sync>,
     pub(crate) rows: Arc<dyn Fn(usize) -> Element + Send + Sync>,
 }
@@ -378,6 +379,7 @@ impl fmt::Debug for ListProps {
             .field("item_count", &self.item_count)
             .field("item_height", &self.item_height)
             .field("buffer", &self.buffer)
+            .field("revision", &self.revision)
             .finish_non_exhaustive()
     }
 }
@@ -390,6 +392,7 @@ impl PartialEq for ListProps {
             && self.item_count == other.item_count
             && self.item_height == other.item_height
             && self.buffer == other.buffer
+            && self.revision == other.revision
             && Arc::ptr_eq(&self.keys, &other.keys)
     }
 }
@@ -1185,6 +1188,7 @@ pub struct List<T> {
     item_height: Option<f32>,
     estimated_height: f32,
     buffer: usize,
+    revision: Option<u64>,
     key: Option<KeyBuilder<T>>,
     row: Option<RowBuilder<T>>,
 }
@@ -1200,6 +1204,7 @@ impl<T: Send + Sync + 'static> List<T> {
             item_height: None,
             estimated_height: 56.0,
             buffer: 3,
+            revision: None,
             key: None,
             row: None,
         }
@@ -1223,7 +1228,9 @@ impl<T: Send + Sync + 'static> List<T> {
     ///
     /// Recycled rows are rebuilt by diffing the previous tree of their holder,
     /// so they may contain any widget. A new render revision rebinds the
-    /// attached rows, which is how application state changes reach a row.
+    /// attached rows, which is how application state changes reach a row. A
+    /// focused field keeps its logical focus across recycling and regains it
+    /// when its row is bound again.
     pub fn recycled(mut self) -> Self {
         self.mode = ListMode::Recycled;
         self
@@ -1238,6 +1245,22 @@ impl<T: Send + Sync + 'static> List<T> {
     /// Materializes this many extra rows above and below the viewport.
     pub fn buffer(mut self, rows: usize) -> Self {
         self.buffer = rows;
+        self
+    }
+
+    /// Declares a revision of the item sequence.
+    ///
+    /// Change the value whenever the items, their order, or the strings their
+    /// keys derive from change. The runtime caches row heights and prefix sums
+    /// per revision, so an unchanged revision makes a rebuild cost only the
+    /// visible rows instead of re-keying the whole list. It must also change
+    /// when a different list takes over the same position in the tree (for
+    /// example after a screen swap).
+    ///
+    /// Without it the list stays correct but is fully re-keyed on every build,
+    /// which caps it at hundreds of rows.
+    pub fn revision(mut self, revision: u64) -> Self {
+        self.revision = Some(revision);
         self
     }
 
@@ -1277,6 +1300,7 @@ impl<T: Send + Sync + 'static> From<List<T>> for Element {
             item_height: list.item_height,
             estimated_height: list.estimated_height,
             buffer: list.buffer,
+            revision: list.revision,
             keys,
             rows,
         }));

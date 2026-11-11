@@ -43,6 +43,7 @@ use super::{
 
 const VOID: JavaType = JavaType::Primitive(Primitive::Void);
 const INT: JavaType = JavaType::Primitive(Primitive::Int);
+const BOOLEAN: JavaType = JavaType::Primitive(Primitive::Boolean);
 const OBJECT: JavaType = JavaType::Object;
 
 /// A resolved instance-method handle.
@@ -225,6 +226,8 @@ pub(super) struct Jni {
     pub(super) set_minimum_width: Method,
     pub(super) set_minimum_height: Method,
     pub(super) set_on_click_listener: Method,
+    pub(super) request_focus: Method,
+    pub(super) is_focused: Method,
     pub(super) measure: Method,
     pub(super) measured_width: Method,
     pub(super) measured_height: Method,
@@ -259,6 +262,7 @@ pub(super) struct Jni {
     pub(super) apply_layouts: Method,
     pub(super) register_view: Method,
     pub(super) unregister_view: Method,
+    pub(super) ensure_keyboard_shown: Method,
 
     // Statics and their fields.
     pub(super) make_measure_spec: StaticMethod,
@@ -333,6 +337,8 @@ impl Jni {
                 "(Landroid/view/View$OnClickListener;)V",
                 VOID
             ),
+            request_focus: method!(env, &view, "requestFocus", "()Z", BOOLEAN),
+            is_focused: method!(env, &view, "isFocused", "()Z", BOOLEAN),
             measure: method!(env, &view, "measure", "(II)V", VOID),
             measured_width: method!(env, &view, "getMeasuredWidth", "()I", INT),
             measured_height: method!(env, &view, "getMeasuredHeight", "()I", INT),
@@ -422,6 +428,13 @@ impl Jni {
                 VOID
             ),
             unregister_view: method!(env, &rust_root_view, "unregisterView", "(J)V", VOID),
+            ensure_keyboard_shown: method!(
+                env,
+                &rust_root_view,
+                "ensureKeyboardShown",
+                "(Landroid/view/View;)V",
+                VOID
+            ),
 
             make_measure_spec: static_method!(env, &measure_spec, "makeMeasureSpec", "(II)I", INT),
             long_value_of: static_method!(env, &long, "valueOf", "(J)Ljava/lang/Long;", OBJECT),

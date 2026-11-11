@@ -183,6 +183,33 @@ final class GalleryUITests: XCTestCase {
         capture("14-list-recycled-variable")
         back()
 
+        // Focus survives recycling: the field returns focused with its text.
+        if !app.buttons["List (recycled, form)"].isHittable {
+            app.swipeUp()
+        }
+        open("List (recycled, form)")
+        let note = app.textFields.firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 5))
+        note.tap()
+        note.typeText("hello")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+
+        // A revision-only rebind keeps the field focused.
+        app.buttons["Refresh"].tap()
+        XCTAssertTrue(app.textFields["hello"].waitForExistence(timeout: 5))
+
+        // Scrolling the row out and back restores the focus and the text.
+        for _ in 0..<6 {
+            app.swipeUp()
+        }
+        for _ in 0..<6 {
+            app.swipeDown()
+        }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["hello"].exists)
+        capture("15-list-recycled-form")
+        back()
+
         XCTAssertTrue(app.staticTexts["Native UI DSL"].waitForExistence(timeout: 5))
     }
 
