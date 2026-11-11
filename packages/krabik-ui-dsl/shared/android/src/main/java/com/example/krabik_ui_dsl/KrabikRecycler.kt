@@ -27,6 +27,9 @@ object KrabikRecyclers {
     ): ViewGroup {
         val recycler = RecyclerView(context)
         recycler.layoutManager = LinearLayoutManager(context)
+        // Animations detach and rebind holders on every range change, which
+        // clears the row state and makes focus and actions flicker.
+        recycler.itemAnimator = null
         val adapter = RowAdapter(context, root, nodeId, count, itemHeightPx)
         recycler.adapter = adapter
         adapter.recycler = recycler
@@ -90,11 +93,6 @@ private class RowAdapter(
     override fun onViewRecycled(holder: Holder) {
         super.onViewRecycled(holder)
         root.unbindRow(nodeId, holder.id)
-    }
-
-    override fun onFailedToRecycleView(holder: Holder): Boolean {
-        root.unbindRow(nodeId, holder.id)
-        return false
     }
 
     override fun getItemCount(): Int = count
