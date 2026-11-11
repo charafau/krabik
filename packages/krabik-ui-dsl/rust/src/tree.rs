@@ -158,6 +158,9 @@ pub struct BuildInfo {
     /// Lists whose scroll position must be forgotten because the items they
     /// show changed.
     pub reset_scroll: Vec<NodeId>,
+    /// The item index that holds the focused node, per list. The next build
+    /// keeps that row materialized even if it would otherwise leave the window.
+    pub focused_rows: HashMap<NodeId, usize>,
 }
 
 /// Converts a declarative element into the internal tree.
@@ -187,12 +190,28 @@ pub fn build_with_measurements(
     viewport: Size,
     measurements: &mut HashMap<NodeId, ListMeasurements>,
 ) -> (UiNode, BuildInfo) {
+    let empty = HashMap::new();
+    build_with_focus(element, offsets, viewport, measurements, &empty, None)
+}
+
+/// Converts a declarative element into the internal tree, keeping the row that
+/// holds `focused` materialized.
+pub fn build_with_focus(
+    element: &Element,
+    offsets: &HashMap<NodeId, f32>,
+    viewport: Size,
+    measurements: &mut HashMap<NodeId, ListMeasurements>,
+    pins: &HashMap<NodeId, usize>,
+    focused: Option<NodeId>,
+) -> (UiNode, BuildInfo) {
     let mut info = BuildInfo::default();
     let mut root = UiNode::empty();
     let mut context = BuildContext {
         offsets,
         viewport,
         measurements,
+        pins,
+        focused,
         info: &mut info,
     };
     root.children
@@ -205,6 +224,8 @@ struct BuildContext<'a> {
     offsets: &'a HashMap<NodeId, f32>,
     viewport: Size,
     measurements: &'a mut HashMap<NodeId, ListMeasurements>,
+    pins: &'a HashMap<NodeId, usize>,
+    focused: Option<NodeId>,
     info: &'a mut BuildInfo,
 }
 
@@ -212,7 +233,12 @@ struct BuildContext<'a> {
 ///
 /// The range includes `buffer` rows on each side so small scrolls do not
 /// immediately cross a boundary.
-pub fn fixed_window(extent: ListExtent, viewport: f32, offset: f32) -> (usize, usize) {
+pub fn fixed_window(
+    extent: ListExtent,
+    viewport: f32,
+    offset: f32,
+    pin: Option<usize>,
+) -> (usize, usize) {
     let height = extent.item_height.unwrap_or(0.0);
     if extent.count == 0 || height <= 0.0 {
         return (0, 0);
@@ -223,7 +249,19 @@ pub fn fixed_window(extent: ListExtent, viewport: f32, offset: f32) -> (usize, u
     let visible = ((viewport / height).ceil() as usize).max(1);
     let start = first.saturating_sub(extent.buffer).min(extent.count);
     let end = (first + visible + extent.buffer).min(extent.count);
-    (start, end)
+    with_pin(start, end, pin, extent.count)
+}
+
+/// Extends a window so it contains the pinned row.
+///
+/// Keeping the range contiguous also materializes any rows between the window
+/// and the pinned row. During a normal scroll that distance is small; a
+/// programmatic jump while a field is focused can materialize more.
+fn with_pin(start: usize, end: usize, pin: Option<usize>, count: usize) -> (usize, usize) {
+    match pin {
+        Some(pin) if pin < count => (start.min(pin), end.max(pin + 1)),
+        _ => (start, end),
+    }
 }
 
 /// The half-open range of items a variable-height list materializes.
@@ -232,6 +270,7 @@ pub fn variable_window(
     viewport: f32,
     offset: f32,
     buffer: usize,
+    pin: Option<usize>,
 ) -> (usize, usize) {
     let count = prefix.len().saturating_sub(1);
     if count == 0 {
@@ -254,7 +293,7 @@ pub fn variable_window(
     let visible_end = prefix.partition_point(|start| *start < limit).min(count);
     let start = first.saturating_sub(buffer);
     let end = visible_end.saturating_add(buffer).max(start + 1).min(count);
-    (start, end)
+    with_pin(start, end, pin, count)
 }
 
 fn root_style() -> Style {
@@ -368,6 +407,7 @@ fn build_fixed_rows(
         },
         cx.viewport.height,
         offset,
+        cx.pins.get(&id).copied(),
     );
 
     let column_id = node_id(id, 0, None, ElementKind::Column.tag());
@@ -390,7 +430,9 @@ fn build_fixed_rows(
         row.children.push((props.rows)(index));
 
         let position = children.len();
-        children.push(build_node(&row, column_id, position, cx));
+        let node = build_node(&row, column_id, position, cx);
+        record_focus(cx, id, index, &node);
+        children.push(node);
     }
 
     if end < props.item_count {
@@ -465,7 +507,13 @@ fn build_variable_rows(
     } else {
         cx.offsets.get(&id).copied().unwrap_or(0.0)
     };
-    let (start, end) = variable_window(&prefix, cx.viewport.height, offset, props.buffer);
+    let (start, end) = variable_window(
+        &prefix,
+        cx.viewport.height,
+        offset,
+        props.buffer,
+        cx.pins.get(&id).copied(),
+    );
     measurement.window = (start, end);
 
     let column_id = node_id(id, 0, None, ElementKind::Column.tag());
@@ -485,6 +533,7 @@ fn build_variable_rows(
 
         let position = children.len();
         let node = build_node(&row, column_id, position, cx);
+        record_focus(cx, id, index, &node);
         rows.push((node.id, hash_string(&key)));
         children.push(node);
     }
@@ -500,6 +549,27 @@ fn build_variable_rows(
 
     cx.measurements.insert(id, measurement);
     (content_column(column_id, children), rows)
+}
+
+/// Remembers which item holds the focused node, so the next build can pin it.
+fn record_focus(cx: &mut BuildContext, list: NodeId, index: usize, row: &UiNode) {
+    let Some(focused) = cx.focused else {
+        return;
+    };
+    if node_contains(row, focused) {
+        cx.info.focused_rows.insert(list, index);
+    }
+}
+
+fn node_contains(root: &UiNode, target: NodeId) -> bool {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.id == target {
+            return true;
+        }
+        stack.extend(&node.children);
+    }
+    false
 }
 
 fn content_column(id: NodeId, children: Vec<UiNode>) -> UiNode {
@@ -669,11 +739,15 @@ mod tests {
     fn variable_window_follows_prefix_offsets() {
         let prefix = [0.0, 50.0, 100.0, 200.0, 250.0];
 
-        assert_eq!(variable_window(&prefix, 100.0, 0.0, 0), (0, 2));
-        assert_eq!(variable_window(&prefix, 100.0, 60.0, 0), (1, 3));
-        assert_eq!(variable_window(&prefix, 100.0, 60.0, 1), (0, 4));
-        assert_eq!(variable_window(&prefix, 100.0, 1_000.0, 0), (2, 4));
-        assert_eq!(variable_window(&[], 100.0, 0.0, 0), (0, 0));
+        assert_eq!(variable_window(&prefix, 100.0, 0.0, 0, None), (0, 2));
+        assert_eq!(variable_window(&prefix, 100.0, 60.0, 0, None), (1, 3));
+        assert_eq!(variable_window(&prefix, 100.0, 60.0, 1, None), (0, 4));
+        assert_eq!(variable_window(&prefix, 100.0, 1_000.0, 0, None), (2, 4));
+        assert_eq!(variable_window(&[], 100.0, 0.0, 0, None), (0, 0));
+        // A pinned row outside the window extends it, keeping the range whole.
+        assert_eq!(variable_window(&prefix, 100.0, 60.0, 0, Some(0)), (0, 3));
+        assert_eq!(variable_window(&prefix, 100.0, 0.0, 0, Some(3)), (0, 4));
+        assert_eq!(variable_window(&prefix, 100.0, 0.0, 0, Some(9)), (0, 2));
     }
 
     #[test]

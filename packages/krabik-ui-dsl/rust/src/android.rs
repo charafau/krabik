@@ -1105,14 +1105,17 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFoc
             return Ok(());
         };
 
-        if let Some(action) = state
+        let focus_changed = state.runtime.set_focus(NodeId(node_id as u64), focused);
+        let handled = state
             .runtime
             .text_field_focus_action(NodeId(node_id as u64))
-            && state.app.handle(Event::FocusChanged {
-                action: &action,
-                focused,
-            })
-        {
+            .is_some_and(|action| {
+                state.app.handle(Event::FocusChanged {
+                    action: &action,
+                    focused,
+                })
+            });
+        if focus_changed || handled {
             state.render(env)?;
         }
         Ok(())
