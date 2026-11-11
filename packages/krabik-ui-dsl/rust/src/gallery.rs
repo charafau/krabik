@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use crate::app::{App, Event};
 use crate::ui::{
-    Align, Button, Column, CornerRadii, EdgeInsets, Element, Gradient, Image, ImageScale,
-    ImageSource, ImeAction, Justify, KeyboardType, List, Row, ScrollView, Spacer, Switch, Text,
-    TextAlign, TextField,
+    Align, Button, Checkbox, Column, CornerRadii, EdgeInsets, Element, Gradient, Image, ImageScale,
+    ImageSource, ImeAction, Justify, KeyboardType, List, ProgressIndicator, RadioButton, Row,
+    ScrollView, Slider, Spacer, Switch, Text, TextAlign, TextField,
 };
 
 pub const COLOR_MUTED: u32 = 0xFF66_6666;
@@ -44,7 +44,7 @@ pub enum Demo {
 }
 
 /// The state of the gallery demo application.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GalleryApp {
     pub demo: Demo,
     pub count: i64,
@@ -54,6 +54,12 @@ pub struct GalleryApp {
     pub bio_focused: bool,
     pub submitted: bool,
     pub notifications: bool,
+    /// Checkbox state in the controls demo.
+    pub wifi: bool,
+    /// Selected radio button in the controls demo.
+    pub size_choice: usize,
+    /// Slider value in the controls demo.
+    pub volume: f32,
     /// The thousand rows of the virtualized list demo, shared across rebuilds.
     pub list_items: Arc<Vec<String>>,
     /// Rows of mixed height for the measured-list demo.
@@ -81,6 +87,9 @@ impl Default for GalleryApp {
             bio_focused: false,
             submitted: false,
             notifications: false,
+            wifi: true,
+            size_choice: 1,
+            volume: 40.0,
             list_items: Arc::new((1..=1000).map(|index| format!("Row {index}")).collect()),
             recycled_taps: 0,
             recycled_bumps: 0,
@@ -687,32 +696,74 @@ impl GalleryApp {
         } else {
             "Notifications are off."
         };
+        let size = ["Small", "Medium", "Large"]
+            .get(self.size_choice)
+            .copied()
+            .unwrap_or("Medium");
 
-        Column::new()
-            .padding(24)
-            .spacing(14)
+        ScrollView::new()
             .width_percent(1.0)
             .height_percent(1.0)
-            .align_items(Align::Start)
-            .child(back_button())
-            .child(Text::new("Controls").size(26).bold())
-            .child(caption(
-                "Switches report their checked state to Rust as typed events.",
-            ))
             .child(
-                Row::new()
+                Column::new()
+                    .padding(24)
+                    .spacing(14)
                     .width_percent(1.0)
-                    .spacing(12)
-                    .align_items(Align::Center)
-                    .child(Text::new("Notifications").size(18))
-                    .child(Spacer::new())
+                    .align_items(Align::Start)
+                    .child(back_button())
+                    .child(Text::new("Controls").size(26).bold())
+                    .child(caption(
+                        "Switches, checks, radio buttons and sliders report typed events.",
+                    ))
                     .child(
-                        Switch::new(self.notifications)
-                            .action("controls:notifications")
-                            .accessibility_label("Notifications"),
+                        Row::new()
+                            .width_percent(1.0)
+                            .spacing(12)
+                            .align_items(Align::Center)
+                            .child(Text::new("Notifications").size(18))
+                            .child(Spacer::new())
+                            .child(
+                                Switch::new(self.notifications)
+                                    .action("controls:notifications")
+                                    .accessibility_label("Notifications"),
+                            ),
+                    )
+                    .child(caption(state))
+                    .child(
+                        Checkbox::new("Wi-Fi", self.wifi)
+                            .action("controls:wifi")
+                            .accessibility_label("Wi-Fi"),
+                    )
+                    .child(caption(if self.wifi {
+                        "Wi-Fi is on."
+                    } else {
+                        "Wi-Fi is off."
+                    }))
+                    .child(Text::new(format!("Size: {size}")).size(18))
+                    .child(
+                        RadioButton::new("Small", self.size_choice == 0).action("controls:size:0"),
+                    )
+                    .child(
+                        RadioButton::new("Medium", self.size_choice == 1).action("controls:size:1"),
+                    )
+                    .child(
+                        RadioButton::new("Large", self.size_choice == 2).action("controls:size:2"),
+                    )
+                    .child(Text::new(format!("Volume: {:.0}", self.volume)).size(18))
+                    .child(
+                        Slider::new(self.volume)
+                            .min(0.0)
+                            .max(100.0)
+                            .action("controls:volume")
+                            .width_percent(1.0),
+                    )
+                    .child(Text::new("Progress").size(18))
+                    .child(
+                        ProgressIndicator::new(self.volume / 100.0)
+                            .color(COLOR_TEAL)
+                            .width_percent(1.0),
                     ),
             )
-            .child(caption(state))
             .into()
     }
 }
@@ -826,6 +877,25 @@ impl App for GalleryApp {
                 action: "controls:notifications",
                 checked,
             } => self.notifications = checked,
+            Event::Toggled {
+                action: "controls:wifi",
+                checked,
+            } => self.wifi = checked,
+            Event::Toggled { action, checked } => {
+                let Some(index) = action
+                    .strip_prefix("controls:size:")
+                    .and_then(|index| index.parse::<usize>().ok())
+                else {
+                    return false;
+                };
+                if checked {
+                    self.size_choice = index;
+                }
+            }
+            Event::ValueChanged {
+                action: "controls:volume",
+                value,
+            } => self.volume = value,
             Event::Click { action } => match action {
                 "back" => self.demo = Demo::Gallery,
                 "open:counter" => {
@@ -915,6 +985,32 @@ mod tests {
 
     fn click(action: &'static str) -> Event<'static> {
         Event::Click { action }
+    }
+
+    #[test]
+    fn controls_dispatch_typed_events() {
+        let mut app = GalleryApp::new();
+        assert!(app.wifi);
+        assert_eq!(app.size_choice, 1);
+        assert_eq!(app.volume, 40.0);
+
+        assert!(app.handle(Event::Toggled {
+            action: "controls:wifi",
+            checked: false,
+        }));
+        assert!(!app.wifi);
+
+        assert!(app.handle(Event::Toggled {
+            action: "controls:size:2",
+            checked: true,
+        }));
+        assert_eq!(app.size_choice, 2);
+
+        assert!(app.handle(Event::ValueChanged {
+            action: "controls:volume",
+            value: 75.0,
+        }));
+        assert_eq!(app.volume, 75.0);
     }
 
     #[test]

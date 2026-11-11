@@ -35,10 +35,11 @@ use jni::strings::JNIStr;
 use jni::{Env, jni_sig, jni_str};
 
 use super::{
-    BUTTON_CLASS, FRAME_LAYOUT_CLASS, FRAME_PARAMS_CLASS, IMAGE_VIEW_CLASS, KRABIK_IMAGES_CLASS,
-    KRABIK_RECYCLERS_CLASS, KRABIK_STYLE_CLASS, KRABIK_VIEWS_CLASS, LAYOUT_PARAMS_CLASS,
-    LONG_CLASS, MEASURE_SPEC_CLASS, RUST_ROOT_VIEW_CLASS, SWITCH_CLASS, TEXT_INPUT_CLASS,
-    TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
+    BUTTON_CLASS, CHECKBOX_CLASS, FRAME_LAYOUT_CLASS, FRAME_PARAMS_CLASS, IMAGE_VIEW_CLASS,
+    KRABIK_IMAGES_CLASS, KRABIK_RECYCLERS_CLASS, KRABIK_STYLE_CLASS, KRABIK_VIEWS_CLASS,
+    LAYOUT_PARAMS_CLASS, LONG_CLASS, MEASURE_SPEC_CLASS, PROGRESS_BAR_CLASS, RADIO_CLASS,
+    RUST_ROOT_VIEW_CLASS, SEEK_BAR_CLASS, SWITCH_CLASS, TEXT_INPUT_CLASS, TEXT_UTILS_CLASS,
+    TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
 };
 
 const VOID: JavaType = JavaType::Primitive(Primitive::Void);
@@ -204,6 +205,11 @@ pub(super) struct Jni {
     pub(super) frame_layout: Global<JClass<'static>>,
     pub(super) text_input: Global<JClass<'static>>,
     pub(super) switch: Global<JClass<'static>>,
+    pub(super) checkbox: Global<JClass<'static>>,
+    pub(super) radio_button: Global<JClass<'static>>,
+    pub(super) seek_bar: Global<JClass<'static>>,
+    /// Only keeps `ProgressBar` loaded for the cached factory signature.
+    pub(super) _progress_bar: Global<JClass<'static>>,
     pub(super) layout_params: Global<JClass<'static>>,
     pub(super) frame_params: Global<JClass<'static>>,
     pub(super) typeface: Global<JClass<'static>>,
@@ -255,6 +261,10 @@ pub(super) struct Jni {
     pub(super) set_text_silently: Method,
     pub(super) configure_input: Method,
     pub(super) set_checked_silently: Method,
+    pub(super) checkbox_set_checked_silently: Method,
+    pub(super) radio_set_checked_silently: Method,
+    pub(super) configure_seek_bar: Method,
+    pub(super) seek_set_value_silently: Method,
 
     // The Rust root view batches one node's frame into a single call.
     pub(super) apply_frame: Method,
@@ -271,6 +281,8 @@ pub(super) struct Jni {
     pub(super) load_image: StaticMethod,
     pub(super) create_recycler: StaticMethod,
     pub(super) update_recycler: StaticMethod,
+    pub(super) create_progress: StaticMethod,
+    pub(super) update_progress: StaticMethod,
     pub(super) apply_style: StaticMethod,
     pub(super) typeface_default: StaticField,
     pub(super) typeface_default_bold: StaticField,
@@ -284,6 +296,9 @@ pub(super) struct Jni {
     pub(super) frame_layout_ctor: Ctor,
     pub(super) text_input_ctor: Ctor,
     pub(super) switch_ctor: Ctor,
+    pub(super) checkbox_ctor: Ctor,
+    pub(super) radio_ctor: Ctor,
+    pub(super) seek_bar_ctor: Ctor,
     pub(super) layout_params_ctor: Ctor,
     pub(super) frame_params_ctor: Ctor,
 }
@@ -298,6 +313,10 @@ impl Jni {
         let frame_layout = class(env, FRAME_LAYOUT_CLASS)?;
         let text_input = class(env, TEXT_INPUT_CLASS)?;
         let switch = class(env, SWITCH_CLASS)?;
+        let checkbox = class(env, CHECKBOX_CLASS)?;
+        let radio_button = class(env, RADIO_CLASS)?;
+        let seek_bar = class(env, SEEK_BAR_CLASS)?;
+        let progress_bar = class(env, PROGRESS_BAR_CLASS)?;
         let layout_params = class(env, LAYOUT_PARAMS_CLASS)?;
         let frame_params = class(env, FRAME_PARAMS_CLASS)?;
         let typeface = class(env, TYPEFACE_CLASS)?;
@@ -411,6 +430,22 @@ impl Jni {
             ),
             configure_input: method!(env, &text_input, "configure", "(ZZII)V", VOID),
             set_checked_silently: method!(env, &switch, "setCheckedSilently", "(Z)V", VOID),
+            checkbox_set_checked_silently: method!(
+                env,
+                &checkbox,
+                "setCheckedSilently",
+                "(Z)V",
+                VOID
+            ),
+            radio_set_checked_silently: method!(
+                env,
+                &radio_button,
+                "setCheckedSilently",
+                "(Z)V",
+                VOID
+            ),
+            configure_seek_bar: method!(env, &seek_bar, "configure", "(FFI)V", VOID),
+            seek_set_value_silently: method!(env, &seek_bar, "setValueSilently", "(F)V", VOID),
 
             apply_frame: method!(
                 env,
@@ -466,6 +501,20 @@ impl Jni {
                 "(Landroid/view/ViewGroup;IIJ)V",
                 VOID
             ),
+            create_progress: static_method!(
+                env,
+                &krabik_views,
+                "createProgress",
+                "(Landroid/content/Context;)Landroid/widget/ProgressBar;",
+                OBJECT
+            ),
+            update_progress: static_method!(
+                env,
+                &krabik_views,
+                "updateProgress",
+                "(Landroid/widget/ProgressBar;FI)V",
+                VOID
+            ),
             apply_style: static_method!(
                 env,
                 &krabik_style,
@@ -510,6 +559,21 @@ impl Jni {
                 &switch,
                 "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
             ),
+            checkbox_ctor: ctor!(
+                env,
+                &checkbox,
+                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
+            ),
+            radio_ctor: ctor!(
+                env,
+                &radio_button,
+                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
+            ),
+            seek_bar_ctor: ctor!(
+                env,
+                &seek_bar,
+                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
+            ),
             layout_params_ctor: ctor!(env, &layout_params, "(II)V"),
             frame_params_ctor: ctor!(env, &frame_params, "(II)V"),
 
@@ -521,6 +585,10 @@ impl Jni {
             frame_layout,
             text_input,
             switch,
+            checkbox,
+            radio_button,
+            seek_bar,
+            _progress_bar: progress_bar,
             layout_params,
             frame_params,
             typeface,

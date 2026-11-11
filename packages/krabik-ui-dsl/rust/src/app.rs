@@ -14,7 +14,7 @@ use crate::ui::Element;
 /// Actions are borrowed for the duration of the [`App::handle`] call. They may
 /// be built dynamically by the application, such as
 /// `format!("note:delete:{index}")` for a row in a list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event<'a> {
     /// A button was pressed.
     Click {
@@ -40,12 +40,19 @@ pub enum Event<'a> {
         /// Whether the input is now focused.
         focused: bool,
     },
-    /// A switch was toggled.
+    /// A switch, checkbox or radio button was toggled.
     Toggled {
-        /// The action configured on the switch.
+        /// The action configured on the control.
         action: &'a str,
-        /// Whether the switch is now on.
+        /// Whether the control is now on.
         checked: bool,
+    },
+    /// A slider value changed.
+    ValueChanged {
+        /// The action configured on the slider.
+        action: &'a str,
+        /// The new value.
+        value: f32,
     },
 }
 
@@ -57,7 +64,8 @@ impl Event<'_> {
             | Self::TextChanged { action, .. }
             | Self::Submitted { action }
             | Self::FocusChanged { action, .. }
-            | Self::Toggled { action, .. } => action,
+            | Self::Toggled { action, .. }
+            | Self::ValueChanged { action, .. } => action,
         }
     }
 }

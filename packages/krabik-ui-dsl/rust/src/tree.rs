@@ -10,8 +10,8 @@ use std::collections::HashMap;
 
 use crate::geometry::Size;
 use crate::ui::{
-    Axis, ButtonProps, Element, ElementKind, ImageProps, Length, ListMode, ListProps, ScrollProps,
-    Style, SwitchProps, TextFieldProps, TextProps,
+    Axis, ButtonProps, CheckProps, Element, ElementKind, ImageProps, Length, ListMode, ListProps,
+    ProgressProps, ScrollProps, SliderProps, Style, SwitchProps, TextFieldProps, TextProps,
 };
 
 /// The identifier of the synthetic root node.
@@ -40,6 +40,14 @@ pub enum NodeKind {
     TextField(TextFieldProps),
     /// A native on/off switch.
     Switch(SwitchProps),
+    /// A native checkbox with a label.
+    Checkbox(CheckProps),
+    /// A native radio button with a label.
+    RadioButton(CheckProps),
+    /// A native slider.
+    Slider(SliderProps),
+    /// A native determinate progress indicator.
+    Progress(ProgressProps),
     /// A native image.
     Image(ImageProps),
     /// A native scroll container.
@@ -57,6 +65,10 @@ impl NodeKind {
                 | Self::Button(_)
                 | Self::TextField(_)
                 | Self::Switch(_)
+                | Self::Checkbox(_)
+                | Self::RadioButton(_)
+                | Self::Slider(_)
+                | Self::Progress(_)
                 | Self::Image(_)
                 | Self::Scroll(_)
                 | Self::Recycler(_)
@@ -415,6 +427,10 @@ fn build_node(element: &Element, parent: NodeId, index: usize, cx: &mut BuildCon
         ElementKind::Button(props) => NodeKind::Button(props.clone()),
         ElementKind::TextField(props) => NodeKind::TextField(props.clone()),
         ElementKind::Switch(props) => NodeKind::Switch(props.clone()),
+        ElementKind::Checkbox(props) => NodeKind::Checkbox(props.clone()),
+        ElementKind::RadioButton(props) => NodeKind::RadioButton(props.clone()),
+        ElementKind::Slider(props) => NodeKind::Slider(props.clone()),
+        ElementKind::Progress(props) => NodeKind::Progress(props.clone()),
         ElementKind::Image(props) => NodeKind::Image(props.clone()),
         ElementKind::Scroll(props) => NodeKind::Scroll(*props),
         ElementKind::List(_) => unreachable!("lists are expanded before the node kind match"),

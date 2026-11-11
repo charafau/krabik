@@ -394,11 +394,27 @@ impl Runtime {
         }
     }
 
-    /// Returns the action of the switch with the given identifier, if any.
-    pub fn switch_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
+    /// Returns the action of a switch, checkbox or radio button.
+    pub fn toggle_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
             NodeKind::Switch(props) if !props.action.is_empty() => Some(props.action.clone()),
+            NodeKind::Checkbox(props) if !props.action.is_empty() => Some(props.action.clone()),
+            NodeKind::RadioButton(props) if !props.action.is_empty() => Some(props.action.clone()),
+            _ => None,
+        }
+    }
+
+    /// Returns the action of the switch with the given identifier, if any.
+    pub fn switch_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
+        self.toggle_action(id)
+    }
+
+    /// Returns the action of the slider with the given identifier, if any.
+    pub fn slider_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
+        let node = tree::find(&self.tree, id)?;
+        match &node.kind {
+            NodeKind::Slider(props) if !props.action.is_empty() => Some(props.action.clone()),
             _ => None,
         }
     }
