@@ -175,6 +175,13 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
         }
     }
 
+    /** Asks Rust to build one recycled-list row into [host], at [width] pixels. */
+    fun bindRow(nodeId: Long, index: Int, host: ViewGroup, width: Int) {
+        if (handle != 0L) {
+            nativeBindRow(handle, nodeId, index, host, width)
+        }
+    }
+
     /** Forwards the scroll offset, in pixels, of a native scroll container. */
     fun onScrolled(nodeId: Long, offset: Int) {
         if (handle != 0L) {
@@ -208,6 +215,14 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     private external fun nativeOnCheckedChanged(handle: Long, nodeId: Long, checked: Boolean)
 
     private external fun nativeOnScroll(handle: Long, nodeId: Long, offset: Float)
+
+    private external fun nativeBindRow(
+        handle: Long,
+        nodeId: Long,
+        index: Int,
+        host: ViewGroup,
+        width: Int,
+    )
 
     private external fun nativeDestroy(handle: Long)
 }

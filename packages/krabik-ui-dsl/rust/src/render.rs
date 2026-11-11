@@ -191,7 +191,10 @@ pub fn diff_layout(
 }
 
 /// Expresses every renderable node's absolute frame relative to its native parent.
-fn relative_frames(root: &UiNode, frames: &HashMap<NodeId, Rect>) -> HashMap<NodeId, Rect> {
+pub(crate) fn relative_frames(
+    root: &UiNode,
+    frames: &HashMap<NodeId, Rect>,
+) -> HashMap<NodeId, Rect> {
     let mut relative = HashMap::new();
     collect_relative_frames(root, frames, (0.0, 0.0), &mut relative);
     relative

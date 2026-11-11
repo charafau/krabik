@@ -14,7 +14,7 @@ use crate::render::{self, Op, Renderer};
 use crate::tree::{
     self, BuildInfo, ListExtent, ListMeasurements, NodeId, NodeKind, ROOT_ID, UiNode,
 };
-use crate::ui::Element;
+use crate::ui::{Element, ListProps};
 
 /// The result of rebuilding the UI: the used size and the operations to apply.
 #[derive(Clone, Debug, Default)]
@@ -47,6 +47,8 @@ pub struct Runtime {
     focused: Option<NodeId>,
     /// For each list, the item index that holds the focused node.
     focused_rows: HashMap<NodeId, usize>,
+    /// Item sources of recycled lists, used to build a row on demand.
+    row_sources: HashMap<NodeId, ListProps>,
     /// The viewport of the last update, needed to window lists on scroll.
     viewport: Size,
 }
@@ -63,6 +65,7 @@ impl Runtime {
             measurements: HashMap::new(),
             focused: None,
             focused_rows: HashMap::new(),
+            row_sources: HashMap::new(),
             viewport: Size::ZERO,
         }
     }
@@ -106,6 +109,7 @@ impl Runtime {
         }
 
         self.lists = info.lists;
+        self.row_sources = info.recycled;
         self.focused_rows = if focus_lost {
             HashMap::new()
         } else {
@@ -227,6 +231,25 @@ impl Runtime {
         let before = tree::fixed_window(extent, self.viewport.height, previous, pin);
         let after = tree::fixed_window(extent, self.viewport.height, offset, pin);
         before != after
+    }
+
+    /// The item source of a recycled list, for building rows on demand.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub(crate) fn row_source(&self, id: NodeId) -> Option<&ListProps> {
+        self.row_sources.get(&id)
+    }
+
+    /// Builds and lays out one recycled row with its own root id.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub(crate) fn layout_subtree(
+        &self,
+        element: &Element,
+        root: NodeId,
+        viewport: Size,
+    ) -> (UiNode, LayoutResult) {
+        let (tree, _) = tree::build_at(element, root);
+        let layout = layout::compute(&tree, viewport, self.measurer.as_ref());
+        (tree, layout)
     }
 
     /// The scroll offset recorded for a node, if any.

@@ -107,6 +107,13 @@ needs no repositioning when the window slides.
   window, so scrolling does not tear down a focused field. Clearing focus, or
   losing the node, releases the row. The pinned range stays contiguous, so a
   programmatic jump while a field is focused materializes the rows in between.
+- `List::recycled()` (Android) swaps the windowed scroll container for a native
+  `RecyclerView`: the adapter asks Rust to build a row into the holder it is
+  about to show (`nativeBindRow`), and a side map keeps the row's button,
+  switch and text actions working even though the row is not part of the main
+  tree. Rows must have a fixed height; the renderer re-creates a holder's
+  content on bind rather than diffing it. iOS falls back to the windowed
+  implementation.
 - Android reports offsets from `KrabikScrollView` (coalesced to once per frame,
   pixels converted to points in `nativeOnScroll`).
 - iOS reports offsets from a `UIScrollViewDelegate` implemented in Rust; the
@@ -119,8 +126,9 @@ rebuild throttling) and an Espresso test that scrolls the demo and asserts the
 materialized row count stays bounded.
 
 **Remaining on this track:** the prefix sums are recomputed per build (fine for
-hundreds of rows, not for tens of thousands), and native view recycling
-(RecyclerView/UICollectionView) is only worth adding if a profile asks for it.
+hundreds of rows, not for tens of thousands); recycled lists need per-holder
+diffing instead of re-creating content on bind, variable-height rows, and an
+iOS `UICollectionView` counterpart.
 
 ### 3. Expand Native Widget Set ✅
 
