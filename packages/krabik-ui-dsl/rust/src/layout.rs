@@ -157,6 +157,18 @@ fn taffy_style(node: &UiNode, scroll_child: bool) -> TaffyStyle {
             width: dimension(node.style.width),
             height: dimension(node.style.height),
         },
+        // Taffy's automatic minimum size uses the content's min-content size.
+        // For text that is the full unwrapped line, which would stop a label
+        // from shrinking next to a sibling (for example in a list row). A text
+        // node may shrink to the space its parent leaves and wrap instead.
+        min_size: TaffySize {
+            width: if matches!(node.kind, NodeKind::Text(_)) {
+                LengthPercentageAuto::length(0.0)
+            } else {
+                LengthPercentageAuto::auto()
+            },
+            height: LengthPercentageAuto::auto(),
+        },
         aspect_ratio: node.style.aspect_ratio,
         padding: TaffyRect {
             left: length_percentage(node.style.padding.left),
@@ -754,6 +766,28 @@ mod tests {
         assert_eq!(
             frames[&tree.children[0].children[0].id],
             Rect::new(0.0, 0.0, 80.0, 40.0)
+        );
+    }
+
+    #[test]
+    fn a_long_label_shrinks_beside_a_button() {
+        let element: Element = Row::new()
+            .width(300)
+            .child(Text::new("wrapping text ".repeat(20)).grow(1.0))
+            .child(Button::new("Tap"))
+            .into();
+
+        let tree = tree::build(&element);
+        let layout = compute(&tree, Size::new(300.0, 600.0), &ApproximateMeasure);
+        let row = &tree.children[0];
+        let text = layout.frames[&row.children[0].id];
+        let button = layout.frames[&row.children[1].id];
+
+        assert!(text.width < 300.0, "text kept its natural width: {text:?}");
+        assert!(text.height > 20.0, "text did not wrap: {text:?}");
+        assert!(
+            button.x + button.width <= 300.5,
+            "button was pushed outside the row: {button:?}"
         );
     }
 }
