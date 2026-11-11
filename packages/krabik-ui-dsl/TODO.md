@@ -103,6 +103,10 @@ needs no repositioning when the window slides.
 - A list whose item keys change while keeping its node id (for example after a
   screen swap at the same tree position) discards its cached heights and scroll
   offset instead of applying them to the new items.
+- The runtime tracks native focus and pins the focused node's row into the
+  window, so scrolling does not tear down a focused field. Clearing focus, or
+  losing the node, releases the row. The pinned range stays contiguous, so a
+  programmatic jump while a field is focused materializes the rows in between.
 - Android reports offsets from `KrabikScrollView` (coalesced to once per frame,
   pixels converted to points in `nativeOnScroll`).
 - iOS reports offsets from a `UIScrollViewDelegate` implemented in Rust; the
@@ -114,11 +118,9 @@ Covered by Rust tests (window maths, spacer geometry, row-id stability,
 rebuild throttling) and an Espresso test that scrolls the demo and asserts the
 materialized row count stays bounded.
 
-**Remaining on this track:** scrolling a focused field out of the window loses
-its native state (pinning the focused row is the next polish), the prefix sums
-are recomputed per build (fine for hundreds of rows, not for tens of thousands),
-and native view recycling (RecyclerView/UICollectionView) is only worth adding
-if a profile asks for it.
+**Remaining on this track:** the prefix sums are recomputed per build (fine for
+hundreds of rows, not for tens of thousands), and native view recycling
+(RecyclerView/UICollectionView) is only worth adding if a profile asks for it.
 
 ### 3. Expand Native Widget Set ✅
 
