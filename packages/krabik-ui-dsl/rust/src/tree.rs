@@ -10,8 +10,8 @@ use std::collections::HashMap;
 
 use crate::geometry::Size;
 use crate::ui::{
-    Axis, ButtonProps, Element, ElementKind, ImageProps, Length, ListProps, ScrollProps, Style,
-    SwitchProps, TextFieldProps, TextProps,
+    Axis, ButtonProps, Element, ElementKind, ImageProps, Length, ListMode, ListProps, ScrollProps,
+    Style, SwitchProps, TextFieldProps, TextProps,
 };
 
 /// The identifier of the synthetic root node.
@@ -44,6 +44,8 @@ pub enum NodeKind {
     Image(ImageProps),
     /// A native scroll container.
     Scroll(ScrollProps),
+    /// A native recycler that materializes rows on demand.
+    Recycler(RecyclerProps),
 }
 
 impl NodeKind {
@@ -57,6 +59,7 @@ impl NodeKind {
                 | Self::Switch(_)
                 | Self::Image(_)
                 | Self::Scroll(_)
+                | Self::Recycler(_)
         )
     }
 
@@ -67,6 +70,15 @@ impl NodeKind {
             Self::Root | Self::Column | Self::Row | Self::Scroll(_)
         )
     }
+}
+
+/// The configuration of a native recycler.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RecyclerProps {
+    /// The number of items the recycler reports.
+    pub item_count: usize,
+    /// The fixed height of one row, in logical points.
+    pub item_height: f32,
 }
 
 /// A node of the internal UI tree.
@@ -158,6 +170,8 @@ pub struct BuildInfo {
     /// Lists whose scroll position must be forgotten because the items they
     /// show changed.
     pub reset_scroll: Vec<NodeId>,
+    /// Item sources of recycled lists, kept so rows can be built on demand.
+    pub(crate) recycled: HashMap<NodeId, ListProps>,
     /// The item index that holds the focused node, per list. The next build
     /// keeps that row materialized even if it would otherwise leave the window.
     pub focused_rows: HashMap<NodeId, usize>,
@@ -170,6 +184,40 @@ pub struct BuildInfo {
 pub fn build(element: &Element) -> UiNode {
     let offsets = HashMap::new();
     build_with(element, &offsets, Size::ZERO).0
+}
+
+/// Converts one element into a subtree rooted at `root`.
+///
+/// Recycler rows use their own root id so their node identifiers cannot collide
+/// with identifiers in the main tree, while a rebind of the same item keeps the
+/// same ids.
+pub fn build_at(element: &Element, root: NodeId) -> (UiNode, BuildInfo) {
+    let offsets = HashMap::new();
+    let mut measurements = HashMap::new();
+    let mut info = BuildInfo::default();
+    let mut tree_root = UiNode {
+        id: root,
+        kind: NodeKind::Root,
+        // The recycler tells the row how wide it is; fill that width and let
+        // the content decide the height.
+        style: Style {
+            width: Length::Percent(1.0),
+            ..Style::default()
+        },
+        children: Vec::new(),
+    };
+    let mut context = BuildContext {
+        offsets: &offsets,
+        viewport: Size::ZERO,
+        measurements: &mut measurements,
+        pins: &HashMap::new(),
+        focused: None,
+        info: &mut info,
+    };
+    tree_root
+        .children
+        .push(build_node(element, root, 0, &mut context));
+    (tree_root, info)
 }
 
 /// Converts a declarative element into the internal tree with scroll state.
@@ -365,6 +413,22 @@ fn build_children(element: &Element, parent: NodeId, cx: &mut BuildContext) -> V
 /// as native views. Rows sit at their absolute content position, which means a
 /// native scroll needs no repositioning when the window changes.
 fn build_list(element: &Element, id: NodeId, props: &ListProps, cx: &mut BuildContext) -> UiNode {
+    if props.mode == ListMode::Recycled
+        && let Some(height) = props.item_height
+        && cfg!(target_os = "android")
+    {
+        cx.info.recycled.insert(id, props.clone());
+        return UiNode {
+            id,
+            kind: NodeKind::Recycler(RecyclerProps {
+                item_count: props.item_count,
+                item_height: height,
+            }),
+            style: element.style.clone(),
+            children: Vec::new(),
+        };
+    }
+
     let extent = ListExtent {
         count: props.item_count,
         item_height: props.item_height,

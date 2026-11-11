@@ -36,9 +36,9 @@ use jni::{Env, jni_sig, jni_str};
 
 use super::{
     BUTTON_CLASS, FRAME_LAYOUT_CLASS, FRAME_PARAMS_CLASS, IMAGE_VIEW_CLASS, KRABIK_IMAGES_CLASS,
-    KRABIK_STYLE_CLASS, KRABIK_VIEWS_CLASS, LAYOUT_PARAMS_CLASS, LONG_CLASS, MEASURE_SPEC_CLASS,
-    RUST_ROOT_VIEW_CLASS, SWITCH_CLASS, TEXT_INPUT_CLASS, TEXT_UTILS_CLASS, TEXT_VIEW_CLASS,
-    TYPEFACE_CLASS, VIEW_CLASS, checked,
+    KRABIK_RECYCLERS_CLASS, KRABIK_STYLE_CLASS, KRABIK_VIEWS_CLASS, LAYOUT_PARAMS_CLASS,
+    LONG_CLASS, MEASURE_SPEC_CLASS, RUST_ROOT_VIEW_CLASS, SWITCH_CLASS, TEXT_INPUT_CLASS,
+    TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
 };
 
 const VOID: JavaType = JavaType::Primitive(Primitive::Void);
@@ -212,6 +212,7 @@ pub(super) struct Jni {
     pub(super) krabik_style: Global<JClass<'static>>,
     pub(super) krabik_views: Global<JClass<'static>>,
     pub(super) krabik_images: Global<JClass<'static>>,
+    pub(super) krabik_recyclers: Global<JClass<'static>>,
     /// Only keeps `RustRootView` loaded for the cached `applyFrame` ID.
     pub(super) _rust_root_view: Global<JClass<'static>>,
 
@@ -232,6 +233,7 @@ pub(super) struct Jni {
     pub(super) add_view: Method,
     pub(super) remove_view: Method,
     pub(super) get_child_at: Method,
+    pub(super) remove_all_views: Method,
 
     // `android.widget.TextView`, shared by text, buttons and inputs.
     pub(super) set_text: Method,
@@ -263,6 +265,8 @@ pub(super) struct Jni {
     pub(super) long_value_of: StaticMethod,
     pub(super) create_scroll: StaticMethod,
     pub(super) load_image: StaticMethod,
+    pub(super) create_recycler: StaticMethod,
+    pub(super) update_recycler: StaticMethod,
     pub(super) apply_style: StaticMethod,
     pub(super) typeface_default: StaticField,
     pub(super) typeface_default_bold: StaticField,
@@ -299,6 +303,7 @@ impl Jni {
         let krabik_style = class(env, KRABIK_STYLE_CLASS)?;
         let krabik_views = class(env, KRABIK_VIEWS_CLASS)?;
         let krabik_images = class(env, KRABIK_IMAGES_CLASS)?;
+        let krabik_recyclers = class(env, KRABIK_RECYCLERS_CLASS)?;
         let rust_root_view = class(env, RUST_ROOT_VIEW_CLASS)?;
 
         Ok(Self {
@@ -347,6 +352,7 @@ impl Jni {
                 "(I)Landroid/view/View;",
                 OBJECT
             ),
+            remove_all_views: method!(env, &view_group, "removeAllViews", "()V", VOID),
 
             set_text: method!(
                 env,
@@ -433,6 +439,20 @@ impl Jni {
                 "(Landroid/widget/ImageView;Ljava/lang/String;ZZ)V",
                 VOID
             ),
+            create_recycler: static_method!(
+                env,
+                &krabik_recyclers,
+                "create",
+                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;JII)Landroid/view/ViewGroup;",
+                OBJECT
+            ),
+            update_recycler: static_method!(
+                env,
+                &krabik_recyclers,
+                "update",
+                "(Landroid/view/ViewGroup;II)V",
+                VOID
+            ),
             apply_style: static_method!(
                 env,
                 &krabik_style,
@@ -497,6 +517,7 @@ impl Jni {
             krabik_style,
             krabik_views,
             krabik_images,
+            krabik_recyclers,
             _rust_root_view: rust_root_view,
         })
     }

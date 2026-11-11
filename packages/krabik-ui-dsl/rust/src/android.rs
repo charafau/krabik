@@ -4,6 +4,7 @@
 //! forwards clicks back. Every widget, every property update, and every frame
 //! change is performed here on native `TextView`/`Button` instances.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -20,9 +21,9 @@ use crate::app::{App, Event};
 use crate::frame_batch::FrameBatch;
 use crate::geometry::{Constraints, Rect, Size};
 use crate::measure::Measure;
-use crate::render::{Op, RenderNode};
+use crate::render::{Op, RenderNode, relative_frames};
 use crate::runtime::Runtime;
-use crate::tree::{NodeId, NodeKind};
+use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
     Axis, EdgeInsets, FontWeight, GradientDirection, ImageProps, ImageScale, ImageSource,
     ImeAction, KeyboardType, SwitchProps, TextAlign, TextFieldProps, TextProps,
@@ -51,6 +52,7 @@ const TEXT_INPUT_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikText
 const SWITCH_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSwitch");
 const KRABIK_IMAGES_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikImages");
 const KRABIK_VIEWS_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikViews");
+const KRABIK_RECYCLERS_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRecyclers");
 
 const MEASURE_UNSPECIFIED: jint = 0;
 const MEASURE_AT_MOST: jint = -2_147_483_648;
@@ -270,6 +272,16 @@ struct ViewHandle {
     frame: Option<Rect>,
 }
 
+/// The actions of one recycled row, keyed by the node ids it created.
+#[derive(Clone, Default)]
+struct RowAction {
+    click: Option<Cow<'static, str>>,
+    text: Option<Cow<'static, str>>,
+    submit: Option<Cow<'static, str>>,
+    focus: Option<Cow<'static, str>>,
+    toggle: Option<Cow<'static, str>>,
+}
+
 /// The state of one `RustRootView`.
 struct AndroidState {
     runtime: Runtime,
@@ -277,6 +289,10 @@ struct AndroidState {
     root: Global<JObject<'static>>,
     context: Global<JObject<'static>>,
     views: HashMap<NodeId, ViewHandle>,
+    /// Actions of the rows currently bound in recycled lists.
+    row_actions: HashMap<NodeId, RowAction>,
+    /// The node ids a (list, row) binding created, for clearing on rebind.
+    row_action_ids: HashMap<(NodeId, usize), Vec<NodeId>>,
     density: f32,
     viewport: Size,
 }
@@ -298,6 +314,8 @@ impl AndroidState {
             root: env.new_global_ref(root)?,
             context: context_ref,
             views: HashMap::new(),
+            row_actions: HashMap::new(),
+            row_action_ids: HashMap::new(),
             density,
             viewport: Size::ZERO,
         })
@@ -337,7 +355,7 @@ impl AndroidState {
     fn apply(&mut self, env: &mut Env<'_>, op: Op) -> JniResult<()> {
         match op {
             Op::Create(node) => {
-                let view = self.create_view(env, &node)?;
+                let view = self.create_view(env, &node, true)?;
                 if view.is_null() {
                     return Ok(());
                 }
@@ -443,6 +461,7 @@ impl AndroidState {
         &self,
         env: &mut Env<'local>,
         node: &RenderNode,
+        register: bool,
     ) -> JniResult<JObject<'local>> {
         let view = if let NodeKind::Scroll(props) = &node.kind {
             create_scroll(
@@ -484,6 +503,14 @@ impl AndroidState {
                         .construct(env, &ids.frame_layout, &context)?
                 }
                 NodeKind::Spacer => ids.view_ctor.construct(env, &ids.view, &context)?,
+                NodeKind::Recycler(props) => create_recycler(
+                    env,
+                    self.context.as_obj(),
+                    self.root.as_obj(),
+                    node.id,
+                    props,
+                    self.density,
+                )?,
                 _ => return Ok(JObject::null()),
             }
         };
@@ -509,14 +536,148 @@ impl AndroidState {
         apply_style(env, &view, node)?;
         apply_accessibility(env, &view, node)?;
         set_tag(env, &view, node.id.0 as jlong)?;
-        jni_handles(env)?.register_view.call_void(
-            env,
-            self.root.as_obj(),
-            &[JValue::Long(node.id.0 as jlong), JValue::Object(&view)],
-        )?;
+        if register {
+            jni_handles(env)?.register_view.call_void(
+                env,
+                self.root.as_obj(),
+                &[JValue::Long(node.id.0 as jlong), JValue::Object(&view)],
+            )?;
+        }
 
         Ok(view)
     }
+
+    /// Builds one recycled-list row into a holder host.
+    fn bind_row(
+        &mut self,
+        env: &mut Env<'_>,
+        list: NodeId,
+        index: usize,
+        host: &JObject<'_>,
+        width_px: jint,
+    ) -> JniResult<()> {
+        let element = {
+            let Some(source) = self.runtime.row_source(list) else {
+                return Ok(());
+            };
+            if index >= source.item_count {
+                return Ok(());
+            }
+            (source.rows)(index)
+        };
+
+        let root = row_root(list, index);
+        let width = width_px.max(1) as f32 / self.density;
+        let (tree, layout) =
+            self.runtime
+                .layout_subtree(&element, root, Size::new(width, 100_000.0));
+
+        jni_handles(env)?
+            .remove_all_views
+            .call_void(env, host, &[])?;
+        if let Some(previous) = self.row_action_ids.remove(&(list, index)) {
+            for id in previous {
+                self.row_actions.remove(&id);
+            }
+        }
+
+        let frames = relative_frames(&tree, &layout.frames);
+        for child in &tree.children {
+            self.mount_row(env, child, host, &frames)?;
+        }
+        self.record_row_actions(list, index, &tree);
+        Ok(())
+    }
+
+    /// Creates a row's views under `host`, mirroring the main apply loop.
+    fn mount_row(
+        &self,
+        env: &mut Env<'_>,
+        node: &UiNode,
+        host: &JObject<'_>,
+        frames: &HashMap<NodeId, Rect>,
+    ) -> JniResult<()> {
+        if node.is_renderable() {
+            let render = RenderNode {
+                id: node.id,
+                parent: None,
+                kind: node.kind.clone(),
+                style: node.style.clone(),
+            };
+            let view = self.create_view(env, &render, false)?;
+            if !view.is_null() {
+                jni_handles(env)?
+                    .add_view
+                    .call_void(env, host, &[JValue::Object(&view)])?;
+                if let Some(frame) = frames.get(&node.id) {
+                    apply_frame(env, self.root.as_obj(), &view, *frame, self.density)?;
+                }
+
+                if matches!(node.kind, NodeKind::Scroll(_)) {
+                    let inner = jni_handles(env)?
+                        .get_child_at
+                        .call(env, &view, &[JValue::Int(0)])?
+                        .l()?;
+                    for child in &node.children {
+                        self.mount_row(env, child, &inner, frames)?;
+                    }
+                } else {
+                    for child in &node.children {
+                        self.mount_row(env, child, &view, frames)?;
+                    }
+                }
+                return Ok(());
+            }
+        }
+
+        for child in &node.children {
+            self.mount_row(env, child, host, frames)?;
+        }
+        Ok(())
+    }
+
+    fn record_row_actions(&mut self, list: NodeId, index: usize, tree: &UiNode) {
+        let mut ids = Vec::new();
+        for node in tree::preorder(tree) {
+            let mut action = RowAction::default();
+            let mut any = false;
+            match &node.kind {
+                NodeKind::Button(props) if !props.action.is_empty() => {
+                    action.click = Some(props.action.clone());
+                    any = true;
+                }
+                NodeKind::Switch(props) if !props.action.is_empty() => {
+                    action.toggle = Some(props.action.clone());
+                    any = true;
+                }
+                NodeKind::TextField(props) => {
+                    if !props.action.is_empty() {
+                        action.text = Some(props.action.clone());
+                        any = true;
+                    }
+                    if !props.submit_action.is_empty() {
+                        action.submit = Some(props.submit_action.clone());
+                        any = true;
+                    }
+                    if !props.focus_action.is_empty() {
+                        action.focus = Some(props.focus_action.clone());
+                        any = true;
+                    }
+                }
+                _ => {}
+            }
+            if any {
+                self.row_actions.insert(node.id, action);
+                ids.push(node.id);
+            }
+        }
+        self.row_action_ids.insert((list, index), ids);
+    }
+}
+
+fn row_root(list: NodeId, index: usize) -> NodeId {
+    let mixed = list.0.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (index as u64);
+    NodeId(mixed | 1)
 }
 
 fn create_scroll<'local>(
@@ -539,13 +700,59 @@ fn create_scroll<'local>(
         .l()
 }
 
+fn create_recycler<'local>(
+    env: &mut Env<'local>,
+    context: &JObject<'_>,
+    root: &JObject<'_>,
+    node_id: NodeId,
+    props: &RecyclerProps,
+    density: f32,
+) -> JniResult<JObject<'local>> {
+    let ids = jni_handles(env)?;
+    let height = (props.item_height * density).round().max(1.0) as jint;
+    ids.create_recycler
+        .call(
+            env,
+            &ids.krabik_recyclers,
+            &[
+                JValue::Object(context),
+                JValue::Object(root),
+                JValue::Long(node_id.0 as jlong),
+                JValue::Int(props.item_count.min(i32::MAX as usize) as jint),
+                JValue::Int(height),
+            ],
+        )?
+        .l()
+}
+
+fn update_recycler(
+    env: &mut Env<'_>,
+    view: &JObject<'_>,
+    props: &RecyclerProps,
+    density: f32,
+) -> JniResult<()> {
+    let ids = jni_handles(env)?;
+    let height = (props.item_height * density).round().max(1.0) as jint;
+    ids.update_recycler.call_void(
+        env,
+        &ids.krabik_recyclers,
+        &[
+            JValue::Object(view),
+            JValue::Int(props.item_count.min(i32::MAX as usize) as jint),
+            JValue::Int(height),
+        ],
+    )
+}
+
 fn update_view(
     env: &mut Env<'_>,
     view: &JObject<'_>,
     node: &RenderNode,
     density: f32,
 ) -> JniResult<()> {
-    if let NodeKind::TextField(props) = &node.kind {
+    if let NodeKind::Recycler(props) = &node.kind {
+        update_recycler(env, view, props, density)?;
+    } else if let NodeKind::TextField(props) = &node.kind {
         update_text_field(env, view, props)?;
     } else if let NodeKind::Switch(props) = &node.kind {
         update_switch(env, view, props)?;
@@ -1018,7 +1225,12 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnCli
             return Ok(());
         };
 
-        if let Some(action) = state.runtime.click(NodeId(node_id as u64))
+        let id = NodeId(node_id as u64);
+        let action = state
+            .runtime
+            .click(id)
+            .or_else(|| state.row_actions.get(&id).and_then(|row| row.click.clone()));
+        if let Some(action) = action
             && state.app.handle(Event::Click { action: &action })
         {
             state.render(env)?;
@@ -1047,7 +1259,12 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnTex
             return Ok(());
         };
 
-        if let Some(action) = state.runtime.text_field_action(NodeId(node_id as u64))
+        let id = NodeId(node_id as u64);
+        let action = state
+            .runtime
+            .text_field_action(id)
+            .or_else(|| state.row_actions.get(&id).and_then(|row| row.text.clone()));
+        if let Some(action) = action
             && state.app.handle(Event::TextChanged {
                 action: &action,
                 value: &value,
@@ -1075,9 +1292,14 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSub
             return Ok(());
         };
 
-        if let Some(action) = state
-            .runtime
-            .text_field_submit_action(NodeId(node_id as u64))
+        let id = NodeId(node_id as u64);
+        let action = state.runtime.text_field_submit_action(id).or_else(|| {
+            state
+                .row_actions
+                .get(&id)
+                .and_then(|row| row.submit.clone())
+        });
+        if let Some(action) = action
             && state.app.handle(Event::Submitted { action: &action })
         {
             state.render(env)?;
@@ -1106,9 +1328,11 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFoc
         };
 
         let focus_changed = state.runtime.set_focus(NodeId(node_id as u64), focused);
+        let id = NodeId(node_id as u64);
         let handled = state
             .runtime
-            .text_field_focus_action(NodeId(node_id as u64))
+            .text_field_focus_action(id)
+            .or_else(|| state.row_actions.get(&id).and_then(|row| row.focus.clone()))
             .is_some_and(|action| {
                 state.app.handle(Event::FocusChanged {
                     action: &action,
@@ -1141,7 +1365,14 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnChe
             return Ok(());
         };
 
-        if let Some(action) = state.runtime.switch_action(NodeId(node_id as u64))
+        let id = NodeId(node_id as u64);
+        let action = state.runtime.switch_action(id).or_else(|| {
+            state
+                .row_actions
+                .get(&id)
+                .and_then(|row| row.toggle.clone())
+        });
+        if let Some(action) = action
             && state.app.handle(Event::Toggled {
                 action: &action,
                 checked,
@@ -1179,6 +1410,32 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnScr
             state.render(env)?;
         }
         Ok(())
+    });
+}
+
+/// Builds one recycled-list row into the holder view the adapter provides.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeBindRow<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    node_id: jlong,
+    index: jint,
+    host: JObject<'caller>,
+    width_px: jint,
+) {
+    run(&mut unenv, "nativeBindRow", |env| {
+        let mut states = states().lock().expect("android states");
+        let Some(state) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+        state.bind_row(
+            env,
+            NodeId(node_id as u64),
+            index.max(0) as usize,
+            &host,
+            width_px,
+        )
     });
 }
 
