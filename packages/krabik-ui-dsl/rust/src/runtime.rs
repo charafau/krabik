@@ -43,6 +43,10 @@ pub struct Runtime {
     lists: HashMap<NodeId, ListExtent>,
     /// Measured heights and prefix sums for variable-height lists.
     measurements: HashMap<NodeId, ListMeasurements>,
+    /// The node that currently has native focus, if any.
+    focused: Option<NodeId>,
+    /// For each list, the item index that holds the focused node.
+    focused_rows: HashMap<NodeId, usize>,
     /// The viewport of the last update, needed to window lists on scroll.
     viewport: Size,
 }
@@ -57,6 +61,8 @@ impl Runtime {
             scroll_offsets: HashMap::new(),
             lists: HashMap::new(),
             measurements: HashMap::new(),
+            focused: None,
+            focused_rows: HashMap::new(),
             viewport: Size::ZERO,
         }
     }
@@ -71,11 +77,13 @@ impl Runtime {
         // height oscillates with the window cannot spin forever.
         let mut iteration = 0;
         let (next, info, layout) = loop {
-            let (next, info) = tree::build_with_measurements(
+            let (next, info) = tree::build_with_focus(
                 element,
                 &self.scroll_offsets,
                 viewport,
                 &mut self.measurements,
+                &self.focused_rows,
+                self.focused,
             );
             for id in &info.reset_scroll {
                 self.scroll_offsets.remove(id);
@@ -87,7 +95,22 @@ impl Runtime {
                 break (next, info, layout);
             }
         };
+        // A focused node that disappeared (for example a screen swap) cannot
+        // be pinned anymore.
+        let focus_lost = self
+            .focused
+            .is_some_and(|id| tree::find(&next, id).is_none());
+        if focus_lost {
+            self.focused = None;
+            self.focused_rows.clear();
+        }
+
         self.lists = info.lists;
+        self.focused_rows = if focus_lost {
+            HashMap::new()
+        } else {
+            info.focused_rows
+        };
 
         let mut ops = render::diff(&self.tree, &next);
         ops.extend(render::diff_layout(
@@ -136,6 +159,28 @@ impl Runtime {
         changed
     }
 
+    /// Records the focus of a native input.
+    ///
+    /// The runtime keeps the row that holds the focused node materialized, so
+    /// scrolling does not tear the field down and lose its focus and text.
+    /// Returns whether the focused node changed.
+    pub fn set_focus(&mut self, id: NodeId, focused: bool) -> bool {
+        if focused {
+            if self.focused == Some(id) {
+                return false;
+            }
+            self.focused = Some(id);
+            self.focused_rows.clear();
+            true
+        } else if self.focused == Some(id) {
+            self.focused = None;
+            self.focused_rows.clear();
+            true
+        } else {
+            false
+        }
+    }
+
     /// Records the scroll offset of a list and reports whether its window
     /// changed and the UI has to be rebuilt.
     ///
@@ -157,12 +202,14 @@ impl Runtime {
                 return false;
             }
 
+            let pin = self.focused_rows.get(&id).copied();
             let before = measurement.window;
             let after = tree::variable_window(
                 &measurement.prefix,
                 self.viewport.height,
                 offset,
                 extent.buffer,
+                pin,
             );
             return before != after;
         };
@@ -176,8 +223,9 @@ impl Runtime {
             return false;
         }
 
-        let before = tree::fixed_window(extent, self.viewport.height, previous);
-        let after = tree::fixed_window(extent, self.viewport.height, offset);
+        let pin = self.focused_rows.get(&id).copied();
+        let before = tree::fixed_window(extent, self.viewport.height, previous, pin);
+        let after = tree::fixed_window(extent, self.viewport.height, offset, pin);
         before != after
     }
 
@@ -578,6 +626,42 @@ mod tests {
         runtime.update(&element, Size::new(120.0, 200.0));
         let scrolled = &runtime.tree().children[0].children[0].children;
         assert!(matches!(scrolled[0].kind, NodeKind::Spacer));
+    }
+
+    #[test]
+    fn a_focused_row_stays_materialized_while_scrolling() {
+        let element: Element = List::new(Arc::new(
+            (0..100)
+                .map(|index| format!("Row {index}"))
+                .collect::<Vec<_>>(),
+        ))
+        .item_height(50.0)
+        .buffer(3)
+        .key(|item| item.clone())
+        .row(|item| Text::new(item.clone()).into())
+        .into();
+
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&element, Size::new(300.0, 200.0));
+        let list_id = runtime.tree().children[0].id;
+        let row = &runtime.tree().children[0].children[0].children[2];
+        let focused = row.children[0].id;
+
+        assert!(runtime.set_focus(focused, true));
+        runtime.update(&element, Size::new(300.0, 200.0));
+        assert_eq!(runtime.focused_rows[&list_id], 2);
+
+        // Far past the focused row: the window still has to include it.
+        assert!(runtime.scroll(list_id, 900.0));
+        runtime.update(&element, Size::new(300.0, 200.0));
+        assert!(tree::find(runtime.tree(), focused).is_some());
+        assert_eq!(runtime.focused_rows[&list_id], 2);
+
+        // Releasing focus lets the row leave the window again.
+        assert!(runtime.set_focus(focused, false));
+        runtime.update(&element, Size::new(300.0, 200.0));
+        assert!(runtime.focused_rows.is_empty());
+        assert!(tree::find(runtime.tree(), focused).is_none());
     }
 
     #[test]

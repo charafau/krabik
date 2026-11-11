@@ -1014,12 +1014,17 @@ fn dispatch_submitted(handle: u64, id: NodeId) {
 fn dispatch_focus(handle: u64, id: NodeId, focused: bool) {
     guard("focus", || {
         with_state(handle, |state| {
-            if let Some(action) = state.runtime.text_field_focus_action(id)
-                && state.app.handle(Event::FocusChanged {
-                    action: &action,
-                    focused,
-                })
-            {
+            let focus_changed = state.runtime.set_focus(id, focused);
+            let handled = state
+                .runtime
+                .text_field_focus_action(id)
+                .is_some_and(|action| {
+                    state.app.handle(Event::FocusChanged {
+                        action: &action,
+                        focused,
+                    })
+                });
+            if focus_changed || handled {
                 state.render();
             }
         });
