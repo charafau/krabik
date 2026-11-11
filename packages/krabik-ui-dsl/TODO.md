@@ -32,7 +32,7 @@ forwards its viewport and owns no UI logic.
 | **M0 — build spike** | `build.rs` skips the Kotlin JNI generator on iOS; the staticlib builds for `aarch64-apple-ios-sim --features ios` and the app renders in the simulator. |
 | **M1 — Rust FFI skeleton** | [`ios.rs`](rust/src/ios.rs) behind `#[cfg(target_os = "ios")]`: handle-keyed `Mutex<HashMap<u64, IosState>>` with `create / render / destroy` and typed event entry points mirroring Android. |
 | **M2 — measurement** | `IosMeasure` measures `NSString` text with `UIFont` attributes, including size/weight/max-lines. |
-| **M3 — UIKit widgets** | `UILabel`, `UIButton`, `UISwitch`, `UITextField`, `UIImageView`, `UIScrollView`, plus gradients (`CAGradientLayer`), borders, radii, opacity, elevation, and accessibility labels. |
+| **M3 — UIKit widgets** | `UILabel`, `UIButton`, `UISwitch`, `UITextField`, `UIImageView`, `UIScrollView`, `UICollectionView` (recycled lists), plus gradients (`CAGradientLayer`), borders, radii, opacity, elevation, and accessibility labels. |
 | **M4 — root view + parity** | [`RustRootView.swift`](ios/Sources/RustRootView.swift) replaces the placeholder; a UI test drives all ten gallery demos (counter, layouts, typography, alignment, scroll, form, media, styling, controls) and passes on the simulator. |
 | **M5 — CI** | The `ios` job in [`ci.yml`](../../../.github/workflows/ci.yml) lints and builds the `aarch64-apple-ios-sim` static library. Like the Android job, it was validated locally only so far. |
 
@@ -51,6 +51,12 @@ Implementation notes:
 - Remote URL images download through `NSURLSession`: one download per URL, an
   in-memory cache with in-flight de-duplication, decoded off the main thread
   and applied on the main queue only while the view still expects that URL.
+- Recycled lists are a `UICollectionView` whose data source and flow-layout
+  delegate are Rust classes. Variable row heights come from the runtime's
+  measurement pass; count/height changes schedule a `reloadData` and
+  revision-only changes diff the visible cells in place. Both run on the next
+  main-queue turn, outside the render lock, because UIKit may query the data
+  source synchronously.
 
 ### 2b. Standalone example app ✅
 
@@ -90,9 +96,9 @@ expands during tree build into a native scroll container whose content is
 `[top spacer, visible rows, bottom spacer]`. Only the rows around the viewport
 become elements and native views; the spacers give the scroll extent the full
 list height, so rows keep their absolute content position and native scrolling
-needs no repositioning when the window slides. `List::recycled()` (Android)
-uses a native `RecyclerView` instead of this materialization; the rest of the
-section describes the windowed path.
+needs no repositioning when the window slides. `List::recycled()` uses a native
+recycler (`RecyclerView` on Android, `UICollectionView` on iOS) instead of this
+materialization; the rest of the section describes the windowed path.
 
 - Rows are keyed, so their node identifiers stay stable across window changes.
 - The runtime owns the scroll offset per list and rebuilds only when the
@@ -109,37 +115,50 @@ section describes the windowed path.
   window, so scrolling does not tear down a focused field. Clearing focus, or
   losing the node, releases the row. The pinned range stays contiguous, so a
   programmatic jump while a field is focused materializes the rows in between.
-- `List::recycled()` (Android) swaps the windowed scroll container for a native
-  `RecyclerView`: the adapter asks Rust to build a row into the holder it is
-  about to show (`nativeBindRow`), and a side map keeps the row's button,
-  switch and text actions working even though the row is not part of the main
-  tree. Rows must have a fixed height; the renderer re-creates a holder's
-  content on bind rather than diffing it. iOS falls back to the windowed
-  implementation.
+- `List::recycled()` swaps the windowed scroll container for a native recycler:
+  the adapter asks Rust to build a row into the holder/cell it is about to show
+  (`nativeBindRow` on Android, the collection-view data source on iOS), and a
+  side map keeps the row's button, switch and text actions working even though
+  the row is not part of the main tree. The holder's previous tree is cached and
+  diffed on rebind, so a state change updates widgets in place instead of
+  recreating the row. Rows may have a fixed height (`.item_height(..)`) or any
+  height; without one, Rust measures the row and the holder wraps it.
+- An app render bumps a revision stamped into every recycled list; the adapter
+  rebinds its attached rows, which is how application state changes reach a row
+  the recycler already owns. Unchanged widgets are not touched, so focus and
+  text survive the rebind. iOS diffs the visible cells in place for a
+  revision-only change and only reloads when the count or the height mode
+  changes.
+- Android's `onViewRecycled` and iOS's `didEndDisplayingCell` report the
+  holder/cell back to Rust, which drops the cached row tree and its actions; a
+  count change uses ranged insert/remove notifications on Android, and a rebind
+  of the visible range is a single `notifyItemRangeChanged`.
+- Both recyclers apply their reloads outside the render lock: `reloadData` and
+  its data-source callbacks can run synchronously, and those callbacks acquire
+  the same state lock that produced the update.
 - Android reports offsets from `KrabikScrollView` (coalesced to once per frame,
   pixels converted to points in `nativeOnScroll`).
 - iOS reports offsets from a `UIScrollViewDelegate` implemented in Rust; the
   latest value is coalesced into one main-queue update, matching the other
   deferred events.
 - Gallery demos: 1000 fixed rows (44-point, four-row buffer), 300
-  variable-height rows, and a 1000-row `RecyclerView` with a per-row button.
+  variable-height rows, a 1000-row recycled list with a per-row button and
+  bump/shrink controls, and a 300-row variable-height recycled list.
 
 Covered by Rust tests (window maths, spacer geometry, row-id stability,
-rebuild throttling, variable-height convergence, focus pinning) and Espresso
-tests that scroll the windowed demo and assert the materialized row count stays
-bounded, plus the recycled demo (bounded attached rows, late-row scrolling,
-row action dispatch).
+rebuild throttling, variable-height convergence, focus pinning, row-root
+identity, revision stamping) and instrumented tests that scroll the windowed
+demo and assert the materialized row count stays bounded, plus the recycled
+demos (bounded attached rows, late-row scrolling, row action dispatch, state
+changes reaching visible rows, shrinking the list, variable-height holders) on
+both Android and iOS.
 
 **Remaining on this track:**
 
-- Recycled lists (Android prototype): diff a holder's content on bind instead
-  of re-creating it; support variable heights; drop stale row-action entries
-  for indices that are no longer attached; use ranged adapter notifications
-  instead of `notifyDataSetChanged` on count changes.
-- iOS has no `UICollectionView` counterpart yet; `recycled()` falls back to the
-  windowed implementation there.
 - The prefix sums are recomputed per build, which is fine for hundreds of rows
   but not for tens of thousands.
+- A recycled row that scrolls out while it holds a focused field loses focus;
+  the focused-row pinning only applies to windowed lists.
 
 ### 3. Expand Native Widget Set ✅
 
