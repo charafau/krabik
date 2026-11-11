@@ -32,6 +32,22 @@ impl Update {
     }
 }
 
+/// The row that currently holds focus inside a recycled list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RowFocus {
+    /// The recycled list that owns the row.
+    pub list: NodeId,
+    /// The item index the focused row shows.
+    pub index: usize,
+    /// The field node inside the row that has focus.
+    pub field: NodeId,
+    /// Whether the row was torn down while the field held focus.
+    ///
+    /// A blur in this state is a consequence of recycling, not a user action,
+    /// so the runtime keeps the focus to restore it when the row comes back.
+    pub parked: bool,
+}
+
 /// Owns the UI tree and coordinates layout and reconciliation.
 pub struct Runtime {
     tree: UiNode,
@@ -47,6 +63,8 @@ pub struct Runtime {
     focused: Option<NodeId>,
     /// For each list, the item index that holds the focused node.
     focused_rows: HashMap<NodeId, usize>,
+    /// Focus inside a recycled list, kept across the row's recycling.
+    row_focus: Option<RowFocus>,
     /// Item sources of recycled lists, used to build a row on demand.
     row_sources: HashMap<NodeId, ListProps>,
     /// The viewport of the last update, needed to window lists on scroll.
@@ -68,6 +86,7 @@ impl Runtime {
             measurements: HashMap::new(),
             focused: None,
             focused_rows: HashMap::new(),
+            row_focus: None,
             row_sources: HashMap::new(),
             viewport: Size::ZERO,
             revision: 0,
@@ -119,6 +138,17 @@ impl Runtime {
             self.focused_rows.clear();
         }
 
+        if let Some(focus) = self.row_focus {
+            // A screen switch or a shorter list invalidates the logical focus.
+            let present = info
+                .recycled
+                .get(&focus.list)
+                .is_some_and(|props| focus.index < props.item_count);
+            if !present {
+                self.row_focus = None;
+            }
+        }
+
         self.lists = info.lists;
         self.row_sources = info.recycled;
         self.focused_rows = if focus_lost {
@@ -158,14 +188,28 @@ impl Runtime {
                 continue;
             };
 
-            for (row_id, key_hash) in rows {
+            for (row_id, key_hash, index) in rows {
                 let Some(frame) = layout.frames.get(row_id) else {
                     continue;
                 };
                 let height = frame.height.max(0.0);
-                let previous = measurement.heights.get(key_hash).copied().unwrap_or(-1.0);
+                let previous = measurement
+                    .heights
+                    .get(key_hash)
+                    .copied()
+                    .unwrap_or(measurement.estimate);
                 if (previous - height).abs() > 0.5 {
                     measurement.heights.insert(*key_hash, height);
+                    // Patch the cached prefix in place: every following item
+                    // shifts by the height delta. A full rebuild would be
+                    // O(n) per measured row.
+                    let start = index.saturating_add(1);
+                    if let Some(suffix) = measurement.prefix.get_mut(start..) {
+                        let delta = height - previous;
+                        for value in suffix {
+                            *value += delta;
+                        }
+                    }
                     changed = true;
                 }
             }
@@ -186,6 +230,8 @@ impl Runtime {
             }
             self.focused = Some(id);
             self.focused_rows.clear();
+            // A main-tree input takes focus away from a recycled row.
+            self.row_focus = None;
             true
         } else if self.focused == Some(id) {
             self.focused = None;
@@ -194,6 +240,59 @@ impl Runtime {
         } else {
             false
         }
+    }
+
+    /// Records focus of a field inside a recycled row.
+    ///
+    /// Recycled rows are not part of the main tree, so their focus is tracked
+    /// separately and survives the row being recycled. A blur while the row is
+    /// parked is not treated as a user action.
+    pub fn set_row_focus(
+        &mut self,
+        list: NodeId,
+        index: usize,
+        field: NodeId,
+        focused: bool,
+    ) -> bool {
+        if focused {
+            let next = RowFocus {
+                list,
+                index,
+                field,
+                parked: false,
+            };
+            let changed = self.row_focus != Some(next);
+            self.row_focus = Some(next);
+            self.focused = None;
+            self.focused_rows.clear();
+            changed
+        } else if self.row_focus.is_some_and(|focus| focus.field == field) {
+            if self.row_focus.is_some_and(|focus| focus.parked) {
+                false
+            } else {
+                self.row_focus = None;
+                true
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Marks the focused row as torn down before its field loses focus.
+    pub fn park_row_focus(&mut self, field: NodeId) -> bool {
+        if let Some(focus) = &mut self.row_focus
+            && focus.field == field
+            && !focus.parked
+        {
+            focus.parked = true;
+            return true;
+        }
+        false
+    }
+
+    /// The row focus, for a renderer that is about to rebind a row.
+    pub fn row_focus(&self) -> Option<RowFocus> {
+        self.row_focus
     }
 
     /// Records the scroll offset of a list and reports whether its window
@@ -705,6 +804,32 @@ mod tests {
     }
 
     #[test]
+    fn row_focus_survives_recycling_until_the_user_blurs() {
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&screen("Hello"), viewport());
+
+        let list = NodeId(7);
+        let field = NodeId(70);
+        assert!(runtime.set_row_focus(list, 3, field, true));
+        assert_eq!(runtime.row_focus().unwrap().index, 3);
+
+        // A blur that follows the row being torn down is ignored.
+        assert!(runtime.park_row_focus(field));
+        assert!(!runtime.set_row_focus(list, 3, field, false));
+        assert!(runtime.row_focus().is_some());
+
+        // A real blur while the row is mounted clears the logical focus.
+        assert!(runtime.set_row_focus(list, 3, field, true));
+        assert!(runtime.set_row_focus(list, 3, field, false));
+        assert!(runtime.row_focus().is_none());
+
+        // A main-tree input takes over the focus.
+        runtime.set_row_focus(list, 3, field, true);
+        runtime.set_focus(NodeId(1), true);
+        assert!(runtime.row_focus().is_none());
+    }
+
+    #[test]
     fn a_different_list_on_the_same_node_resets_the_scroll() {
         let element = |prefix: &str| -> Element {
             List::new(Arc::new(
@@ -739,5 +864,50 @@ mod tests {
         runtime.update(&screen("Hello"), viewport());
 
         assert!(!runtime.scroll(NodeId(999), 100.0));
+    }
+
+    #[test]
+    fn a_measured_height_patches_the_cached_prefix() {
+        let count = 100;
+        let element: Element = List::new(Arc::new((0..count).collect::<Vec<usize>>()))
+            .revision(1)
+            .buffer(0)
+            .key(|index| format!("Row {index}"))
+            .row(|index| Text::new(format!("Row {index}")).into())
+            .into();
+
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&element, Size::new(300.0, 2_000.0));
+        let id = runtime.tree().children[0].id;
+
+        let index = 5;
+        let key_hash = tree::hash_string(&format!("Row {index}"));
+        let measurement = &runtime.measurements[&id];
+        let previous = measurement
+            .heights
+            .get(&key_hash)
+            .copied()
+            .unwrap_or(measurement.estimate);
+        let before = measurement.prefix.clone();
+
+        let row_id = NodeId(999_999);
+        let info = BuildInfo {
+            rows: HashMap::from([(id, vec![(row_id, key_hash, index)])]),
+            ..BuildInfo::default()
+        };
+        let mut layout = LayoutResult::default();
+        layout.frames.insert(
+            row_id,
+            crate::geometry::Rect::new(0.0, 0.0, 300.0, previous + 10.0),
+        );
+
+        assert!(runtime.record_heights(&info, &layout));
+
+        let measurement = &runtime.measurements[&id];
+        assert_eq!(measurement.heights[&key_hash], previous + 10.0);
+        assert_eq!(measurement.prefix[index], before[index]);
+        for (item, previous) in before.iter().enumerate().take(count + 1).skip(index + 1) {
+            assert_eq!(measurement.prefix[item], previous + 10.0);
+        }
     }
 }

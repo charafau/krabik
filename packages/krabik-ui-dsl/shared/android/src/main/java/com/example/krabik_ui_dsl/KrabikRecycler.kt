@@ -82,6 +82,11 @@ private class RowAdapter(
         applyHeight(holder.host, rowHeight(measured))
     }
 
+    override fun onViewAttachedToWindow(holder: Holder) {
+        super.onViewAttachedToWindow(holder)
+        root.restoreRowFocus(nodeId, holder.id)
+    }
+
     override fun onViewRecycled(holder: Holder) {
         super.onViewRecycled(holder)
         root.unbindRow(nodeId, holder.id)

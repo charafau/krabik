@@ -165,6 +165,8 @@ pub struct ListMeasurements {
     /// A hash of the item keys, used to notice that a different list now owns
     /// this node id (for example after switching screens).
     pub signature: u64,
+    /// The application-supplied item revision, when there is one.
+    pub revision: Option<u64>,
 }
 
 impl Default for ListMeasurements {
@@ -176,6 +178,7 @@ impl Default for ListMeasurements {
             prefix: Vec::new(),
             window: (0, 0),
             signature: 0,
+            revision: None,
         }
     }
 }
@@ -185,9 +188,9 @@ impl Default for ListMeasurements {
 pub struct BuildInfo {
     /// The extent of every list, keyed by its scroll node id.
     pub lists: HashMap<NodeId, ListExtent>,
-    /// Materialized rows per list, with the key hash needed to store their
-    /// measured height after layout.
-    pub rows: HashMap<NodeId, Vec<(NodeId, u64)>>,
+    /// Materialized rows per list, with the key hash and item index needed to
+    /// store and patch their measured height after layout.
+    pub rows: HashMap<NodeId, Vec<(NodeId, u64, usize)>>,
     /// Lists whose scroll position must be forgotten because the items they
     /// show changed.
     pub reset_scroll: Vec<NodeId>,
@@ -500,7 +503,7 @@ fn build_fixed_rows(
     props: &ListProps,
     height: f32,
     cx: &mut BuildContext,
-) -> (UiNode, Vec<(NodeId, u64)>) {
+) -> (UiNode, Vec<(NodeId, u64, usize)>) {
     let offset = cx.offsets.get(&id).copied().unwrap_or(0.0);
     let (start, end) = fixed_window(
         ListExtent {
@@ -554,56 +557,104 @@ fn build_fixed_rows(
 ///
 /// Unmeasured rows use the running estimate; measured rows are read back after
 /// layout by the runtime, which rebuilds until the window stabilizes.
+///
+/// With an application revision the build reuses the key hashes, measured
+/// heights and prefix sums when nothing changed, so only the visible rows cost
+/// anything. Without one it hashes every key to notice a different list, which
+/// is correct but O(n) per build.
 fn build_variable_rows(
     id: NodeId,
     props: &ListProps,
     cx: &mut BuildContext,
-) -> (UiNode, Vec<(NodeId, u64)>) {
+) -> (UiNode, Vec<(NodeId, u64, usize)>) {
     let mut measurement = cx.measurements.remove(&id).unwrap_or_default();
+
     // The estimate is configuration, not state: keeping it stable means the
     // total content height only changes when a row is actually measured, so a
     // scroll clamp cannot feed back into another window change.
+    let estimate_changed = (measurement.estimate - props.estimated_height).abs() > f32::EPSILON;
     measurement.estimate = props.estimated_height;
-    if (measurement.width - cx.viewport.width).abs() > 0.5 {
+
+    let width_changed = (measurement.width - cx.viewport.width).abs() > 0.5;
+    if width_changed {
         // Heights depend on the available width; measurements from a different
         // width are not comparable.
         measurement.heights.clear();
+        measurement.prefix.clear();
         measurement.width = cx.viewport.width;
     }
 
-    let keys: Vec<String> = (0..props.item_count)
-        .map(|index| (props.keys)(index))
-        .collect();
+    let prefix_cached = measurement.prefix.len() == props.item_count + 1;
+    let mut keys: Option<Vec<String>> = None;
+    let mut reset_scroll = false;
 
-    let mut signature = 0xcbf2_9ce4_8422_2325_u64;
-    for key in &keys {
-        signature ^= hash_string(key);
-        signature = signature.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    signature ^= props.item_count as u64;
-    if measurement.signature != signature {
-        // The node id survived a screen change, but the list it renders is a
-        // different one: cached heights and the scroll position belong to the
-        // previous list.
-        measurement.heights.clear();
-        measurement.window = (0, 0);
-        measurement.signature = signature;
+    let reusable = if let Some(revision) = props.revision {
+        let same_revision = measurement.revision == Some(revision);
+        if !same_revision || !prefix_cached || width_changed {
+            // The node id survived, but the list it renders changed: cached
+            // heights and the scroll position belong to the previous items.
+            if !same_revision {
+                measurement.heights.clear();
+                measurement.prefix.clear();
+                measurement.window = (0, 0);
+                reset_scroll = true;
+            }
+            measurement.revision = Some(revision);
+        }
+        same_revision && prefix_cached && !width_changed && !estimate_changed
+    } else {
+        // No revision supplied: hash every key to detect a different list.
+        let all_keys: Vec<String> = (0..props.item_count)
+            .map(|index| (props.keys)(index))
+            .collect();
+
+        let mut signature = 0xcbf2_9ce4_8422_2325_u64;
+        for key in &all_keys {
+            signature ^= hash_string(key);
+            signature = signature.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        signature ^= props.item_count as u64;
+        if measurement.signature != signature {
+            measurement.heights.clear();
+            measurement.prefix.clear();
+            measurement.window = (0, 0);
+            measurement.signature = signature;
+            reset_scroll = true;
+        }
+        keys = Some(all_keys);
+        measurement.signature == signature
+            && measurement.prefix.len() == props.item_count + 1
+            && !width_changed
+            && !estimate_changed
+    };
+
+    if reset_scroll {
         cx.info.reset_scroll.push(id);
     }
 
-    let mut prefix = Vec::with_capacity(props.item_count + 1);
-    prefix.push(0.0);
-    let mut total = 0.0;
-    for key in &keys {
-        let hash = hash_string(key);
-        total += measurement
-            .heights
-            .get(&hash)
-            .copied()
-            .unwrap_or(measurement.estimate);
-        prefix.push(total);
+    if !reusable {
+        let all_keys = keys.get_or_insert_with(|| {
+            (0..props.item_count)
+                .map(|index| (props.keys)(index))
+                .collect()
+        });
+        let mut prefix = Vec::with_capacity(props.item_count + 1);
+        prefix.push(0.0);
+        let mut total = 0.0;
+        for key in all_keys.iter() {
+            let hash = hash_string(key);
+            total += measurement
+                .heights
+                .get(&hash)
+                .copied()
+                .unwrap_or(measurement.estimate);
+            prefix.push(total);
+        }
+        measurement.prefix = prefix;
     }
-    measurement.prefix = prefix.clone();
+
+    let prefix = std::mem::take(&mut measurement.prefix);
+    let total = prefix.last().copied().unwrap_or(0.0);
 
     let offset = if cx.info.reset_scroll.contains(&id) {
         0.0
@@ -627,8 +678,11 @@ fn build_variable_rows(
         children.push(build_spacer(column_id, children.len(), prefix[start], cx));
     }
 
-    for (index, key) in keys.iter().enumerate().take(end).skip(start) {
-        let key = key.clone();
+    for index in start..end {
+        let key = match &keys {
+            Some(keys) => keys[index].clone(),
+            None => (props.keys)(index),
+        };
         let mut row = Element::container(ElementKind::Column);
         row.style.width = Length::Percent(1.0);
         row.key = Some(Cow::Owned(key.clone()));
@@ -637,7 +691,7 @@ fn build_variable_rows(
         let position = children.len();
         let node = build_node(&row, column_id, position, cx);
         record_focus(cx, id, index, &node);
-        rows.push((node.id, hash_string(&key)));
+        rows.push((node.id, hash_string(&key), index));
         children.push(node);
     }
 
@@ -650,6 +704,7 @@ fn build_variable_rows(
         ));
     }
 
+    measurement.prefix = prefix;
     cx.measurements.insert(id, measurement);
     (content_column(column_id, children), rows)
 }
@@ -717,7 +772,7 @@ fn node_id(parent: NodeId, index: usize, key: Option<&str>, tag: u64) -> NodeId 
     NodeId(hash)
 }
 
-fn hash_string(value: &str) -> u64 {
+pub(crate) fn hash_string(value: &str) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in value.bytes() {
         hash ^= u64::from(byte);
@@ -881,6 +936,91 @@ mod tests {
         assert!(rows.len() >= 4, "window too small: {}", rows.len());
         // The column holds the rows plus the trailing spacer.
         assert_eq!(tree.children[0].children[0].children.len(), rows.len() + 1);
+    }
+
+    #[test]
+    fn an_items_revision_reuses_the_prefix_and_only_keys_the_window() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let count = 10_000;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let element = |revision: u64| -> Element {
+            let calls = Arc::clone(&calls);
+            crate::ui::List::new(Arc::new((0..count).collect::<Vec<usize>>()))
+                .revision(revision)
+                .buffer(2)
+                .key(move |index| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    format!("Row {index}")
+                })
+                .row(|index| crate::ui::Text::new(format!("Row {index}")).into())
+                .into()
+        };
+
+        let viewport = Size::new(300.0, 200.0);
+        let mut measurements = HashMap::new();
+        let (tree, _) =
+            build_with_measurements(&element(1), &HashMap::new(), viewport, &mut measurements);
+        let list_id = tree.children[0].id;
+        assert_eq!(calls.load(Ordering::Relaxed), count);
+        let prefix_ptr = measurements[&list_id].prefix.as_ptr();
+
+        let (_, info) =
+            build_with_measurements(&element(1), &HashMap::new(), viewport, &mut measurements);
+        let visible = info.rows[&list_id].len();
+        assert_eq!(
+            calls.load(Ordering::Relaxed) - count,
+            visible,
+            "a stable revision must only key the materialized rows"
+        );
+        assert_eq!(
+            measurements[&list_id].prefix.as_ptr(),
+            prefix_ptr,
+            "the cached prefix must be reused without reallocating"
+        );
+
+        let before = calls.load(Ordering::Relaxed);
+        build_with_measurements(&element(2), &HashMap::new(), viewport, &mut measurements);
+        assert_eq!(
+            calls.load(Ordering::Relaxed) - before,
+            count,
+            "a new revision must re-key every item"
+        );
+    }
+
+    #[test]
+    fn a_new_width_rekeys_a_revisioned_list() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let count = 1_000;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let element = {
+            let calls = Arc::clone(&calls);
+            crate::ui::List::new(Arc::new((0..count).collect::<Vec<usize>>()))
+                .revision(1)
+                .key(move |index| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    format!("Row {index}")
+                })
+                .row(|index| crate::ui::Text::new(format!("Row {index}")).into())
+                .into()
+        };
+
+        let mut measurements = HashMap::new();
+        build_with_measurements(
+            &element,
+            &HashMap::new(),
+            Size::new(300.0, 200.0),
+            &mut measurements,
+        );
+        let before = calls.load(Ordering::Relaxed);
+        build_with_measurements(
+            &element,
+            &HashMap::new(),
+            Size::new(200.0, 200.0),
+            &mut measurements,
+        );
+        assert_eq!(calls.load(Ordering::Relaxed) - before, count);
     }
 
     #[test]

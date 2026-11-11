@@ -491,6 +491,8 @@ struct IosState {
     row_action_ids: HashMap<(NodeId, usize), Vec<NodeId>>,
     /// The rows currently bound to collection-view cells, by cell identity.
     row_states: HashMap<usize, IosRowState>,
+    /// The item each row node belongs to, for routing focus back to its row.
+    row_nodes: HashMap<NodeId, (NodeId, usize)>,
     viewport: Size,
 }
 
@@ -511,6 +513,7 @@ impl IosState {
             row_actions: HashMap::new(),
             row_action_ids: HashMap::new(),
             row_states: HashMap::new(),
+            row_nodes: HashMap::new(),
             viewport: Size::ZERO,
         }
     }
@@ -878,8 +881,20 @@ impl IosState {
         let key = cell as *const UICollectionViewCell as usize;
 
         let previous = self.row_states.remove(&key);
+        let rebinding = previous
+            .as_ref()
+            .is_some_and(|state| state.list == list && state.index == index);
         let (old_tree, old_layout, mut views) = if let Some(state) = previous {
             self.clear_row_actions(state.list, state.index);
+            if !rebinding
+                && let Some(focus) = self.runtime.row_focus()
+                && tree::find(&state.tree, focus.field).is_some()
+            {
+                // The cell is about to show another item; keep the logical
+                // focus for when the row comes back.
+                self.runtime.park_row_focus(focus.field);
+            }
+            self.unregister_row_nodes(&state.tree);
             (state.tree, state.layout, state.views)
         } else {
             // The cell was recycled behind our back; start from an empty tree.
@@ -894,6 +909,7 @@ impl IosState {
         }
 
         self.record_row_actions(list, index, &tree);
+        self.register_row_nodes(list, index, &tree);
         self.row_states.insert(
             key,
             IosRowState {
@@ -904,12 +920,77 @@ impl IosState {
                 views,
             },
         );
+
+        if !rebinding
+            && let Some(focus) = self.runtime.row_focus()
+            && focus.list == list
+            && focus.index == index
+        {
+            self.try_focus_field(focus);
+        }
     }
 
     /// Releases the widgets and actions of the row a cell currently shows.
     fn unbind_row(&mut self, key: usize) {
         if let Some(state) = self.row_states.remove(&key) {
+            if let Some(focus) = self.runtime.row_focus()
+                && tree::find(&state.tree, focus.field).is_some()
+            {
+                self.runtime.park_row_focus(focus.field);
+            }
+            self.unregister_row_nodes(&state.tree);
             self.clear_row_actions(state.list, state.index);
+        }
+    }
+
+    /// Maps every node of a bound row back to its item.
+    fn register_row_nodes(&mut self, list: NodeId, index: usize, tree: &UiNode) {
+        for node in tree::preorder(tree) {
+            self.row_nodes.insert(node.id, (list, index));
+        }
+    }
+
+    /// Forgets the nodes of a row that is no longer bound.
+    fn unregister_row_nodes(&mut self, tree: &UiNode) {
+        for node in tree::preorder(tree) {
+            self.row_nodes.remove(&node.id);
+        }
+    }
+
+    /// Whether a row field is still in a window, and so still really focused.
+    fn field_attached(&self, id: NodeId) -> bool {
+        self.row_states.values().any(|row| {
+            row.views
+                .get(&id)
+                .is_some_and(|handle| match &handle.content {
+                    Content::Field(field) => field.window().is_some(),
+                    _ => handle.view.window().is_some(),
+                })
+        })
+    }
+
+    /// Makes a row field the first responder, if it can be.
+    fn focus_field(&self, id: NodeId) -> bool {
+        for row in self.row_states.values() {
+            if let Some(handle) = row.views.get(&id)
+                && let Content::Field(field) = &handle.content
+            {
+                return field.becomeFirstResponder();
+            }
+        }
+        false
+    }
+
+    /// Restores the logical focus of a row that was just (re)bound.
+    fn try_focus_field(&mut self, focus: crate::runtime::RowFocus) {
+        if self.focus_field(focus.field) {
+            self.runtime
+                .set_row_focus(focus.list, focus.index, focus.field, true);
+        } else {
+            // The cell is not in the window yet; try again next turn.
+            let handle = self.handle;
+            let field = focus.field;
+            schedule(move || focus_row_async(handle, field));
         }
     }
 
@@ -939,7 +1020,9 @@ impl IosState {
             .map(|(key, _)| *key)
             .collect();
         for key in detached {
-            self.row_states.remove(&key);
+            if let Some(state) = self.row_states.remove(&key) {
+                self.unregister_row_nodes(&state.tree);
+            }
         }
     }
 
@@ -1393,6 +1476,24 @@ fn schedule(work: impl FnOnce() + Send + 'static) {
 /// UIKit may ask the data source for cells synchronously during `reloadData`;
 /// those callbacks acquire the state lock themselves, so the reload must run
 /// after the lock that produced it has been released.
+fn focus_row_async(handle: u64, field: NodeId) {
+    guard("focus", || {
+        with_state(handle, |state| {
+            let Some(focus) = state.runtime.row_focus() else {
+                return;
+            };
+            if focus.field != field {
+                return;
+            }
+            if state.focus_field(field) {
+                state
+                    .runtime
+                    .set_row_focus(focus.list, focus.index, field, true);
+            }
+        });
+    });
+}
+
 fn reload_recycler(handle: u64, id: NodeId) {
     guard("reload", || {
         let collection = with_state(handle, |state| state.collection_for(id)).flatten();
@@ -1483,7 +1584,31 @@ fn dispatch_submitted(handle: u64, id: NodeId) {
 fn dispatch_focus(handle: u64, id: NodeId, focused: bool) {
     guard("focus", || {
         with_state(handle, |state| {
-            let focus_changed = state.runtime.set_focus(id, focused);
+            let row = state.row_nodes.get(&id).copied();
+            let focus_changed = if focused {
+                match row {
+                    Some((list, index)) => state.runtime.set_row_focus(list, index, id, true),
+                    None => state.runtime.set_focus(id, true),
+                }
+            } else if let Some((list, index)) = row {
+                if state.field_attached(id) {
+                    state.runtime.set_row_focus(list, index, id, false)
+                } else {
+                    // The cell left the hierarchy; keep the logical focus so
+                    // it can be restored when the row comes back.
+                    state.runtime.park_row_focus(id);
+                    false
+                }
+            } else if state
+                .runtime
+                .row_focus()
+                .is_some_and(|focus| focus.field == id)
+            {
+                state.runtime.park_row_focus(id);
+                false
+            } else {
+                state.runtime.set_focus(id, false)
+            };
             let handled = state
                 .runtime
                 .text_field_focus_action(id)

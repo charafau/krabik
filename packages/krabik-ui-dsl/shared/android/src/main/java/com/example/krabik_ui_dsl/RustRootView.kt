@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.LongSparseArray
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import java.lang.ref.WeakReference
 
@@ -162,10 +163,24 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     }
 
     /** Forwards a focus change of a native input back to Rust. */
-    fun onFocusChanged(nodeId: Long, focused: Boolean) {
+    fun onFocusChanged(nodeId: Long, focused: Boolean, attached: Boolean) {
         if (handle != 0L) {
-            nativeOnFocusChanged(handle, nodeId, focused)
+            nativeOnFocusChanged(handle, nodeId, focused, attached)
         }
+    }
+
+    /** Restores focus after a recycled row with a logical focus is reattached. */
+    fun restoreRowFocus(nodeId: Long, holderId: Long) {
+        if (handle != 0L) {
+            nativeRestoreRowFocus(handle, nodeId, holderId)
+        }
+    }
+
+    /** Reopens the keyboard for a field that regained focus programmatically. */
+    fun ensureKeyboardShown(view: View) {
+        val manager = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        // Never ask for the IME while RecyclerView is laying out.
+        view.post { manager.showSoftInput(view, 0) }
     }
 
     /** Forwards a toggle of a native switch back to Rust. */
@@ -218,7 +233,14 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
 
     private external fun nativeOnSubmitted(handle: Long, nodeId: Long)
 
-    private external fun nativeOnFocusChanged(handle: Long, nodeId: Long, focused: Boolean)
+    private external fun nativeOnFocusChanged(
+        handle: Long,
+        nodeId: Long,
+        focused: Boolean,
+        attached: Boolean,
+    )
+
+    private external fun nativeRestoreRowFocus(handle: Long, nodeId: Long, holderId: Long)
 
     private external fun nativeOnCheckedChanged(handle: Long, nodeId: Long, checked: Boolean)
 

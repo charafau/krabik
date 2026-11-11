@@ -3,6 +3,7 @@ package com.example.krabik_ui_dsl
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ActivityScenario
@@ -10,11 +11,17 @@ import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.action.ViewActions.swipeUp
+import androidx.test.espresso.action.ViewActions.typeText
 import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.ViewMatchers.hasFocus
+import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.isRoot
+import androidx.test.espresso.matcher.ViewMatchers.withHint
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.hamcrest.Matchers.allOf
+import org.hamcrest.Matchers.not
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -121,6 +128,44 @@ class RecyclerListTest {
             }
 
             onView(withText("Taps: 1")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun aFocusedFieldSurvivesRecycling() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            onView(isRoot()).perform(swipeUp())
+            onView(isRoot()).perform(swipeUp())
+            onView(withText("List (recycled, form)")).perform(click())
+
+            onView(withHint("Note 1")).perform(click())
+            Thread.sleep(500)
+            // Focusing the field may scroll the list a little; act on whichever
+            // field actually took focus.
+            val field = onView(allOf(isAssignableFrom(EditText::class.java), hasFocus()))
+            field.perform(typeText("hello"))
+            Thread.sleep(500)
+            onView(allOf(withText("hello"), hasFocus())).check(matches(isDisplayed()))
+
+            // A revision-only rebind of the visible rows keeps the field.
+            onView(withText("Refresh")).perform(click())
+            onView(allOf(withText("hello"), hasFocus())).check(matches(isDisplayed()))
+
+            // Scrolling the row out and back rebinds it and restores focus.
+            scenario.onActivity { findRecycler(it.window.decorView)?.scrollToPosition(120) }
+            Thread.sleep(1_000)
+            scenario.onActivity { findRecycler(it.window.decorView)?.scrollToPosition(0) }
+            Thread.sleep(1_000)
+            onView(allOf(withText("hello"), hasFocus())).check(matches(isDisplayed()))
+
+            // A real blur while the row is mounted is not restored later.
+            scenario.onActivity { it.currentFocus?.clearFocus() }
+            Thread.sleep(500)
+            scenario.onActivity { findRecycler(it.window.decorView)?.scrollToPosition(120) }
+            Thread.sleep(800)
+            scenario.onActivity { findRecycler(it.window.decorView)?.scrollToPosition(0) }
+            Thread.sleep(800)
+            onView(withText("hello")).check(matches(not(hasFocus())))
         }
     }
 
