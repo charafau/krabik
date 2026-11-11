@@ -111,6 +111,12 @@ materialization; the rest of the section describes the windowed path.
 - A list whose item keys change while keeping its node id (for example after a
   screen swap at the same tree position) discards its cached heights and scroll
   offset instead of applying them to the new items.
+- `List::revision(u64)` lets the runtime skip the per-build key pass. When the
+  revision, item count, width and estimate match, it reuses the cached prefix
+  sums and calls the key builder only for the materialized rows. Measured
+  heights patch the cached prefix in place, so the convergence passes stay
+  O(window). Without a revision the list stays correct but is fully re-keyed on
+  every build, which caps it at hundreds of rows.
 - The runtime tracks native focus and pins the focused node's row into the
   window, so scrolling does not tear down a focused field. Clearing focus, or
   losing the node, releases the row. The pinned range stays contiguous, so a
@@ -133,6 +139,11 @@ materialization; the rest of the section describes the windowed path.
   holder/cell back to Rust, which drops the cached row tree and its actions; a
   count change uses ranged insert/remove notifications on Android, and a rebind
   of the visible range is a single `notifyItemRangeChanged`.
+- Focus inside a recycled row is tracked by item, not by view. A blur caused by
+  the row leaving the hierarchy parks that focus instead of clearing it; when
+  the row is bound again the field regains focus (and the keyboard). A real
+  user blur clears it. Android defers focus reports out of RecyclerView layout
+  so a focus change cannot notify the adapter mid-layout.
 - Both recyclers apply their reloads outside the render lock: `reloadData` and
   its data-source callbacks can run synchronously, and those callbacks acquire
   the same state lock that produced the update.
@@ -143,22 +154,21 @@ materialization; the rest of the section describes the windowed path.
   deferred events.
 - Gallery demos: 1000 fixed rows (44-point, four-row buffer), 300
   variable-height rows, a 1000-row recycled list with a per-row button and
-  bump/shrink controls, and a 300-row variable-height recycled list.
+  bump/shrink controls, a 300-row variable-height recycled list, and a
+  200-row recycled form whose focused field survives a rebind and a round trip
+  through the recycler.
 
 Covered by Rust tests (window maths, spacer geometry, row-id stability,
 rebuild throttling, variable-height convergence, focus pinning, row-root
-identity, revision stamping) and instrumented tests that scroll the windowed
-demo and assert the materialized row count stays bounded, plus the recycled
-demos (bounded attached rows, late-row scrolling, row action dispatch, state
-changes reaching visible rows, shrinking the list, variable-height holders) on
-both Android and iOS.
+identity, revision stamping, revision cache reuse and prefix patching) and
+instrumented tests that scroll the windowed demo and assert the materialized
+row count stays bounded, plus the recycled demos (bounded attached rows,
+late-row scrolling, row action dispatch, state changes reaching visible rows,
+shrinking the list, variable-height holders, focus retention and real-blur
+clearing) on both Android and iOS.
 
-**Remaining on this track:**
-
-- The prefix sums are recomputed per build, which is fine for hundreds of rows
-  but not for tens of thousands.
-- A recycled row that scrolls out while it holds a focused field loses focus;
-  the focused-row pinning only applies to windowed lists.
+A focused field drops the keyboard while its row is off-screen and regains it
+when the row returns; the runtime does not keep an off-screen cell attached.
 
 ### 3. Expand Native Widget Set ✅
 
