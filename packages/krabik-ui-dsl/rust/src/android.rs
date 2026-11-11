@@ -20,8 +20,9 @@ use jni::{Env, EnvUnowned, JValue, JavaVM, jni_sig, jni_str};
 use crate::app::{App, Event};
 use crate::frame_batch::FrameBatch;
 use crate::geometry::{Constraints, Rect, Size};
+use crate::layout::LayoutResult;
 use crate::measure::Measure;
-use crate::render::{Op, RenderNode, relative_frames};
+use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
@@ -282,6 +283,21 @@ struct RowAction {
     toggle: Option<Cow<'static, str>>,
 }
 
+/// One recycled row currently bound to a holder.
+///
+/// The cached tree and widgets let a rebind diff against what the holder
+/// already shows instead of tearing the row down and building it again.
+struct RowState {
+    /// The item index the holder shows.
+    index: usize,
+    /// The row subtree of the last bind, with its own root identifier.
+    tree: UiNode,
+    /// The layout the cached tree was built with.
+    layout: LayoutResult,
+    /// The row's widgets, keyed by their node ids.
+    views: HashMap<NodeId, ViewHandle>,
+}
+
 /// The state of one `RustRootView`.
 struct AndroidState {
     runtime: Runtime,
@@ -293,6 +309,8 @@ struct AndroidState {
     row_actions: HashMap<NodeId, RowAction>,
     /// The node ids a (list, row) binding created, for clearing on rebind.
     row_action_ids: HashMap<(NodeId, usize), Vec<NodeId>>,
+    /// The rows currently bound to recycled-list holders, by (list, holder).
+    row_states: HashMap<(NodeId, i64), RowState>,
     density: f32,
     viewport: Size,
 }
@@ -316,6 +334,7 @@ impl AndroidState {
             views: HashMap::new(),
             row_actions: HashMap::new(),
             row_action_ids: HashMap::new(),
+            row_states: HashMap::new(),
             density,
             viewport: Size::ZERO,
         })
@@ -324,47 +343,67 @@ impl AndroidState {
     fn render(&mut self, env: &mut Env<'_>) -> JniResult<()> {
         let element = self.app.view();
         let update = self.runtime.update(&element, self.viewport);
+
+        // The main views are taken out while the operations run so the same
+        // application routine can also update a recycled row's private view
+        // set without borrowing the state twice.
+        let mut views = std::mem::take(&mut self.views);
         let mut frames = FrameBatch::new();
+        let mut result = Ok(());
         for op in update.ops {
-            if let Op::Layout {
-                id,
-                frame,
-                content_size,
-            } = op
-            {
-                if let Some(handle) = self.views.get(&id) {
-                    frames.push(id, frame, self.density);
-                    if let Some(size) = content_size {
-                        apply_content_size(env, handle.children_host.as_obj(), size, self.density)?;
-                    }
-                }
-                if let Some(handle) = self.views.get_mut(&id) {
-                    handle.frame = Some(frame);
-                }
-                continue;
+            if let Err(error) = self.apply_op(
+                env,
+                op,
+                &mut views,
+                self.root.as_obj(),
+                true,
+                Some(&mut frames),
+            ) {
+                result = Err(error);
+                break;
             }
-            self.apply(env, op)?;
         }
+        self.views = views;
+        result?;
 
         if !frames.is_empty() {
             apply_layouts(env, self.root.as_obj(), &frames)?;
         }
+        self.prune_row_actions();
         Ok(())
     }
 
-    fn apply(&mut self, env: &mut Env<'_>, op: Op) -> JniResult<()> {
+    /// Applies one renderer operation to a set of views.
+    ///
+    /// The main tree and a recycled row share this code; they only differ in
+    /// the host that receives top-level views and in whether the views are
+    /// registered for batches of frames.
+    fn apply_op(
+        &self,
+        env: &mut Env<'_>,
+        op: Op,
+        views: &mut HashMap<NodeId, ViewHandle>,
+        root_host: &JObject<'_>,
+        register: bool,
+        mut frames: Option<&mut FrameBatch>,
+    ) -> JniResult<()> {
         match op {
             Op::Create(node) => {
-                let view = self.create_view(env, &node, true)?;
+                let view = self.create_view(env, &node, register)?;
                 if view.is_null() {
                     return Ok(());
                 }
 
-                let parent_host = self.parent_host(node.parent);
                 {
-                    let ids = jni_handles(env)?;
-                    ids.add_view
-                        .call_void(env, parent_host, &[JValue::Object(&view)])?;
+                    let parent_host = match node.parent.and_then(|id| views.get(&id)) {
+                        Some(handle) => handle.children_host.as_obj(),
+                        None => root_host,
+                    };
+                    jni_handles(env)?.add_view.call_void(
+                        env,
+                        parent_host,
+                        &[JValue::Object(&view)],
+                    )?;
                 }
 
                 let children_host = if matches!(node.kind, NodeKind::Scroll(_)) {
@@ -377,7 +416,7 @@ impl AndroidState {
                 } else {
                     jcall!(env, env.new_global_ref(&view))?
                 };
-                self.views.insert(
+                views.insert(
                     node.id,
                     ViewHandle {
                         view: jcall!(env, env.new_global_ref(&view))?,
@@ -388,72 +427,139 @@ impl AndroidState {
                 );
             }
             Op::Update(node) => {
-                if let Some(handle) = self.views.get(&node.id) {
+                if let Some(handle) = views.get(&node.id) {
                     update_view(env, handle.view.as_obj(), &node, self.density)?;
                 }
             }
             Op::Reparent { id, parent } => {
-                if !self.views.contains_key(&id) {
+                let Some(handle) = views.get(&id) else {
                     return Ok(());
-                }
+                };
 
-                let old_parent = self.views[&id].parent;
+                let old_parent = handle.parent;
                 if old_parent != parent {
-                    let old_host = self.parent_host(old_parent);
-                    let new_host = self.parent_host(parent);
-                    let view = self.views[&id].view.as_obj();
+                    let view = handle.view.as_obj();
+                    let old_host = match old_parent.and_then(|id| views.get(&id)) {
+                        Some(handle) => handle.children_host.as_obj(),
+                        None => root_host,
+                    };
+                    let new_host = match parent.and_then(|id| views.get(&id)) {
+                        Some(handle) => handle.children_host.as_obj(),
+                        None => root_host,
+                    };
 
-                    {
-                        let ids = jni_handles(env)?;
-                        ids.remove_view
-                            .call_void(env, old_host, &[JValue::Object(view)])?;
-                        ids.add_view
-                            .call_void(env, new_host, &[JValue::Object(view)])?;
-                    }
+                    let ids = jni_handles(env)?;
+                    ids.remove_view
+                        .call_void(env, old_host, &[JValue::Object(view)])?;
+                    ids.add_view
+                        .call_void(env, new_host, &[JValue::Object(view)])?;
                 }
 
-                let frame = self.views[&id].frame;
+                let frame = handle.frame;
                 if let Some(frame) = frame {
+                    // `applyFrame` is a method of the Rust root view; the host
+                    // only decides which group the widget is attached to.
                     apply_frame(
                         env,
                         self.root.as_obj(),
-                        self.views[&id].view.as_obj(),
+                        handle.view.as_obj(),
                         frame,
                         self.density,
                     )?;
                 }
-                if let Some(handle) = self.views.get_mut(&id) {
+                if let Some(handle) = views.get_mut(&id) {
                     handle.parent = parent;
                 }
             }
             Op::Remove { id } => {
-                if let Some(handle) = self.views.get(&id) {
-                    let host = self.parent_host(handle.parent);
+                if let Some(handle) = views.get(&id) {
+                    let host = match handle.parent.and_then(|id| views.get(&id)) {
+                        Some(parent) => parent.children_host.as_obj(),
+                        None => root_host,
+                    };
                     jni_handles(env)?.remove_view.call_void(
                         env,
                         host,
                         &[JValue::Object(handle.view.as_obj())],
                     )?;
-                    jni_handles(env)?.unregister_view.call_void(
-                        env,
-                        self.root.as_obj(),
-                        &[JValue::Long(id.0 as jlong)],
-                    )?;
+                    if register {
+                        jni_handles(env)?.unregister_view.call_void(
+                            env,
+                            self.root.as_obj(),
+                            &[JValue::Long(id.0 as jlong)],
+                        )?;
+                    }
                 }
-                self.views.remove(&id);
+                views.remove(&id);
             }
-            // `render` collects every layout operation into one batch, so this
-            // arm is only reachable if an operation is applied out of band.
-            Op::Layout { .. } => {}
+            Op::Layout {
+                id,
+                frame,
+                content_size,
+            } => {
+                if let Some(handle) = views.get(&id) {
+                    if let Some(batch) = frames.as_mut() {
+                        batch.push(id, frame, self.density);
+                    } else {
+                        apply_frame(
+                            env,
+                            self.root.as_obj(),
+                            handle.view.as_obj(),
+                            frame,
+                            self.density,
+                        )?;
+                    }
+                    if let Some(size) = content_size {
+                        apply_content_size(env, handle.children_host.as_obj(), size, self.density)?;
+                    }
+                }
+                if let Some(handle) = views.get_mut(&id) {
+                    handle.frame = Some(frame);
+                }
+            }
         }
         Ok(())
     }
 
-    /// The view that hosts the children of the given native parent.
-    fn parent_host(&self, parent: Option<NodeId>) -> &JObject<'static> {
-        match parent.and_then(|id| self.views.get(&id)) {
-            Some(handle) => handle.children_host.as_obj(),
-            None => self.root.as_obj(),
+    /// Forgets row actions of bindings whose index no longer exists.
+    fn prune_row_actions(&mut self) {
+        let stale: Vec<((NodeId, usize), Vec<NodeId>)> = self
+            .row_action_ids
+            .iter()
+            .filter(|((list, index), _)| {
+                self.runtime
+                    .recycled_item_count(*list)
+                    .is_none_or(|count| *index >= count)
+            })
+            .map(|(key, ids)| (*key, ids.clone()))
+            .collect();
+
+        for (key, ids) in stale {
+            self.row_action_ids.remove(&key);
+            for id in ids {
+                self.row_actions.remove(&id);
+            }
+        }
+
+        // A screen switch removes the recycler from the main tree; its cached
+        // holders must not keep their widgets alive.
+        let detached: Vec<(NodeId, i64)> = self
+            .row_states
+            .keys()
+            .filter(|(list, _)| self.runtime.recycled_item_count(*list).is_none())
+            .copied()
+            .collect();
+        for key in detached {
+            self.row_states.remove(&key);
+        }
+    }
+
+    /// Drops the actions and widgets recorded for one row binding.
+    fn clear_row_actions(&mut self, list: NodeId, index: usize) {
+        if let Some(ids) = self.row_action_ids.remove(&(list, index)) {
+            for id in ids {
+                self.row_actions.remove(&id);
+            }
         }
     }
 
@@ -548,92 +654,81 @@ impl AndroidState {
     }
 
     /// Builds one recycled-list row into a holder host.
+    ///
+    /// Returns the row height in pixels, which a variable-height recycler uses
+    /// to size the holder. A rebind of the same item diffs against the cached
+    /// tree instead of recreating every widget.
     fn bind_row(
         &mut self,
         env: &mut Env<'_>,
         list: NodeId,
         index: usize,
+        holder: i64,
         host: &JObject<'_>,
         width_px: jint,
-    ) -> JniResult<()> {
+    ) -> JniResult<jint> {
         let element = {
             let Some(source) = self.runtime.row_source(list) else {
-                return Ok(());
+                return Ok(0);
             };
             if index >= source.item_count {
-                return Ok(());
+                return Ok(0);
             }
             (source.rows)(index)
         };
 
-        let root = row_root(list, index);
+        let root = tree::row_root(list, index);
         let width = width_px.max(1) as f32 / self.density;
         let (tree, layout) =
             self.runtime
                 .layout_subtree(&element, root, Size::new(width, 100_000.0));
 
-        jni_handles(env)?
-            .remove_all_views
-            .call_void(env, host, &[])?;
-        if let Some(previous) = self.row_action_ids.remove(&(list, index)) {
-            for id in previous {
-                self.row_actions.remove(&id);
-            }
+        let previous = self.row_states.remove(&(list, holder));
+        let (old_tree, old_layout, mut views) = if let Some(mut state) = previous {
+            self.clear_row_actions(list, state.index);
+            let views = std::mem::take(&mut state.views);
+            (state.tree, state.layout, views)
+        } else {
+            // The holder was recycled without telling us, so its previous
+            // widgets are unknown. Diffing against an empty tree creates the
+            // whole row and its frames.
+            jni_handles(env)?
+                .remove_all_views
+                .call_void(env, host, &[])?;
+            (UiNode::empty(), LayoutResult::default(), HashMap::new())
+        };
+
+        let mut ops = render::diff(&old_tree, &tree);
+        ops.extend(render::diff_layout(&old_tree, &tree, &old_layout, &layout));
+
+        for op in ops {
+            self.apply_op(env, op, &mut views, host, false, None)?;
         }
 
-        let frames = relative_frames(&tree, &layout.frames);
-        for child in &tree.children {
-            self.mount_row(env, child, host, &frames)?;
-        }
         self.record_row_actions(list, index, &tree);
-        Ok(())
+        let height = layout
+            .frames
+            .get(&root)
+            .map_or(0.0, |frame| frame.height)
+            .max(0.0);
+        self.row_states.insert(
+            (list, holder),
+            RowState {
+                index,
+                tree,
+                layout,
+                views,
+            },
+        );
+
+        Ok((height * self.density).round().max(1.0) as jint)
     }
 
-    /// Creates a row's views under `host`, mirroring the main apply loop.
-    fn mount_row(
-        &self,
-        env: &mut Env<'_>,
-        node: &UiNode,
-        host: &JObject<'_>,
-        frames: &HashMap<NodeId, Rect>,
-    ) -> JniResult<()> {
-        if node.is_renderable() {
-            let render = RenderNode {
-                id: node.id,
-                parent: None,
-                kind: node.kind.clone(),
-                style: node.style.clone(),
-            };
-            let view = self.create_view(env, &render, false)?;
-            if !view.is_null() {
-                jni_handles(env)?
-                    .add_view
-                    .call_void(env, host, &[JValue::Object(&view)])?;
-                if let Some(frame) = frames.get(&node.id) {
-                    apply_frame(env, self.root.as_obj(), &view, *frame, self.density)?;
-                }
-
-                if matches!(node.kind, NodeKind::Scroll(_)) {
-                    let inner = jni_handles(env)?
-                        .get_child_at
-                        .call(env, &view, &[JValue::Int(0)])?
-                        .l()?;
-                    for child in &node.children {
-                        self.mount_row(env, child, &inner, frames)?;
-                    }
-                } else {
-                    for child in &node.children {
-                        self.mount_row(env, child, &view, frames)?;
-                    }
-                }
-                return Ok(());
-            }
+    /// Releases the widgets and actions of the row a holder currently shows.
+    fn unbind_row(&mut self, list: NodeId, holder: i64) {
+        if let Some(state) = self.row_states.remove(&(list, holder)) {
+            self.clear_row_actions(list, state.index);
         }
-
-        for child in &node.children {
-            self.mount_row(env, child, host, frames)?;
-        }
-        Ok(())
     }
 
     fn record_row_actions(&mut self, list: NodeId, index: usize, tree: &UiNode) {
@@ -675,11 +770,6 @@ impl AndroidState {
     }
 }
 
-fn row_root(list: NodeId, index: usize) -> NodeId {
-    let mixed = list.0.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (index as u64);
-    NodeId(mixed | 1)
-}
-
 fn create_scroll<'local>(
     env: &mut Env<'local>,
     context: &JObject<'_>,
@@ -709,7 +799,7 @@ fn create_recycler<'local>(
     density: f32,
 ) -> JniResult<JObject<'local>> {
     let ids = jni_handles(env)?;
-    let height = (props.item_height * density).round().max(1.0) as jint;
+    let height = row_height_px(props, density);
     ids.create_recycler
         .call(
             env,
@@ -732,7 +822,7 @@ fn update_recycler(
     density: f32,
 ) -> JniResult<()> {
     let ids = jni_handles(env)?;
-    let height = (props.item_height * density).round().max(1.0) as jint;
+    let height = row_height_px(props, density);
     ids.update_recycler.call_void(
         env,
         &ids.krabik_recyclers,
@@ -740,8 +830,16 @@ fn update_recycler(
             JValue::Object(view),
             JValue::Int(props.item_count.min(i32::MAX as usize) as jint),
             JValue::Int(height),
+            JValue::Long(props.revision as jlong),
         ],
     )
+}
+
+/// The fixed row height in pixels, or `0` to let the recycler wrap content.
+fn row_height_px(props: &RecyclerProps, density: f32) -> jint {
+    props
+        .item_height
+        .map_or(0, |height| (height * density).round().max(1.0) as jint)
 }
 
 fn update_view(
@@ -1414,6 +1512,9 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnScr
 }
 
 /// Builds one recycled-list row into the holder view the adapter provides.
+///
+/// Returns the row height in pixels, so a variable-height list can size the
+/// holder to its content.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeBindRow<'caller>(
     mut unenv: EnvUnowned<'caller>,
@@ -1421,21 +1522,47 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeBindR
     handle: jlong,
     node_id: jlong,
     index: jint,
+    holder_id: jlong,
     host: JObject<'caller>,
     width_px: jint,
-) {
+) -> jint {
     run(&mut unenv, "nativeBindRow", |env| {
         let mut states = states().lock().expect("android states");
         let Some(state) = states.get_mut(&handle) else {
-            return Ok(());
+            return Ok(0);
         };
         state.bind_row(
             env,
             NodeId(node_id as u64),
             index.max(0) as usize,
+            holder_id,
             &host,
             width_px,
         )
+    })
+}
+
+/// Releases the row a recycled-list holder currently shows.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeUnbindRow<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    node_id: jlong,
+    holder_id: jlong,
+) {
+    run(&mut unenv, "nativeUnbindRow", |_env| {
+        // RecyclerView can recycle a holder while a render holds the state
+        // lock. Dropping the cleanup is safe: the next bind of that holder
+        // rebuilds the row from scratch and overwrites the stale entry.
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        let Some(state) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+        state.unbind_row(NodeId(node_id as u64), holder_id);
+        Ok(())
     });
 }
 
