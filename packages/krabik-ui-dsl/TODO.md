@@ -89,6 +89,37 @@ render holds it. All event dispatch and `nativeRender` run on the main thread,
 so contention can only mean a widget listener fired synchronously during a
 render and re-entered the entry point; blocking there would deadlock the UI.
 
+### 2c. Todo example apps ✅
+
+Two standalone todo apps sit beside the checklist example and show how a real
+application is built on the DSL:
+
+- [`example-todo/`](example-todo/) (`krabik-ui-dsl-todo`) is the widget
+  showcase: a recycled list of checkbox rows with per-row delete, radio-button
+  filters (`All` / `Active` / `Done`), a priority slider, a progress indicator,
+  a sort switch, a text field with add/submit, and clear-completed.
+- [`example-todo-minimal/`](example-todo-minimal/)
+  (`krabik-ui-dsl-todo-minimal`) keeps only the core loop: add, toggle, delete
+  and clear completed, all in a recycled list.
+
+Each app has its own `rust/` crate, Xcode project and Gradle project, so it can
+be built and installed independently of the others:
+
+| App | Android application id | iOS bundle id | Native library |
+|---|---|---|---|
+| Showcase | `com.example.krabik_ui_dsl_todo` | `com.example.krabik-ui-dsl-todo` | `krabik_ui_dsl_todo` |
+| Minimal | `com.example.krabik_ui_dsl_todo_minimal` | `com.example.krabik-ui-dsl-todo-minimal` | `krabik_ui_dsl_todo_minimal` |
+
+Both crates export a C install function (`krabik_ui_dsl_todo_install`,
+`krabik_ui_dsl_todo_minimal_install`) and a JNI install entry point
+(`TodoBridge.install`, `MinimalTodoBridge.install`). Rust unit tests cover the
+state transitions; XCUITest and Espresso suites drive the same add/complete/
+filter/slider/clear flow through the native widgets.
+
+The recycled list disables `RecyclerView.ItemAnimator`: every render revision
+calls `notifyItemRangeChanged`, and the default animator rebinds holders often
+enough to clear the per-row action map and flicker focused fields.
+
 ### 3b. Virtualized lists ✅
 
 [`List`](rust/src/ui.rs) (`List::new(items).item_height(..).buffer(..).key(..).row(..)`)

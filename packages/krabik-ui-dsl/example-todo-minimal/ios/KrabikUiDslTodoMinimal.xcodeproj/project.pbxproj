@@ -1,0 +1,416 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0E90DAF9C57CD8B5C86547B1 /* RustRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444004253EA0BF4FBF44EF9B /* RustRootView.swift */; };
+		4B9E654A478DBCA4698C46F5 /* KrabikUiDslTodoMinimalApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63C7D13156EB4DB0A208E270 /* KrabikUiDslTodoMinimalApp.swift */; };
+		B24FA8D600866687D17572CF /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11A97929DE2CE71019280A1 /* ContentView.swift */; };
+		D59D74C400B6C473B7E9C72B /* MinimalTodoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4427D965CC1AE6F0BCA07BD /* MinimalTodoUITests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		8D59A784A0BA0B8E8AA01613 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 02EDCBAC1E1EA732452D47B8 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B1029149669975DA36AE914F;
+			remoteInfo = KrabikUiDslTodoMinimal;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		08698D11AB6F203028FE9F3D /* KrabikUiDslTodoMinimal.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KrabikUiDslTodoMinimal.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		444004253EA0BF4FBF44EF9B /* RustRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustRootView.swift; sourceTree = "<group>"; };
+		63C7D13156EB4DB0A208E270 /* KrabikUiDslTodoMinimalApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikUiDslTodoMinimalApp.swift; sourceTree = "<group>"; };
+		A2F617D0CF9089D59689B7FA /* KrabikUiDslTodoMinimalUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = KrabikUiDslTodoMinimalUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C2AFF1E57A323D1ED50FB776 /* KrabikIOS.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = KrabikIOS.h; sourceTree = "<group>"; };
+		F11A97929DE2CE71019280A1 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		F4427D965CC1AE6F0BCA07BD /* MinimalTodoUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinimalTodoUITests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1DE076000594E5F885AE0872 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				08698D11AB6F203028FE9F3D /* KrabikUiDslTodoMinimal.app */,
+				A2F617D0CF9089D59689B7FA /* KrabikUiDslTodoMinimalUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		7826FA595B4312DD6D55C728 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				F4427D965CC1AE6F0BCA07BD /* MinimalTodoUITests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		9EC8CC48A4DDE9BB2AD59151 = {
+			isa = PBXGroup;
+			children = (
+				D6FE85D8FD5B79D6BFFCF20D /* Sources */,
+				7826FA595B4312DD6D55C728 /* UITests */,
+				1DE076000594E5F885AE0872 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D6FE85D8FD5B79D6BFFCF20D /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				F11A97929DE2CE71019280A1 /* ContentView.swift */,
+				C2AFF1E57A323D1ED50FB776 /* KrabikIOS.h */,
+				63C7D13156EB4DB0A208E270 /* KrabikUiDslTodoMinimalApp.swift */,
+				444004253EA0BF4FBF44EF9B /* RustRootView.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9EA5FFF1748F734A30DF8B9D /* KrabikUiDslTodoMinimalUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E21D7C5D0A5B9B3AB2D0BE8B /* Build configuration list for PBXNativeTarget "KrabikUiDslTodoMinimalUITests" */;
+			buildPhases = (
+				074D8831CE9B9474F7E54264 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EBCD0A55096C5D536EC1F789 /* PBXTargetDependency */,
+			);
+			name = KrabikUiDslTodoMinimalUITests;
+			packageProductDependencies = (
+			);
+			productName = KrabikUiDslTodoMinimalUITests;
+			productReference = A2F617D0CF9089D59689B7FA /* KrabikUiDslTodoMinimalUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		B1029149669975DA36AE914F /* KrabikUiDslTodoMinimal */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 396F01CC54621D629A9C5A66 /* Build configuration list for PBXNativeTarget "KrabikUiDslTodoMinimal" */;
+			buildPhases = (
+				26CFB055E498031C7344125F /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = KrabikUiDslTodoMinimal;
+			packageProductDependencies = (
+			);
+			productName = KrabikUiDslTodoMinimal;
+			productReference = 08698D11AB6F203028FE9F3D /* KrabikUiDslTodoMinimal.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		02EDCBAC1E1EA732452D47B8 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					9EA5FFF1748F734A30DF8B9D = {
+						TestTargetID = B1029149669975DA36AE914F;
+					};
+				};
+			};
+			buildConfigurationList = C0E032ADDBA89D85D5791A39 /* Build configuration list for PBXProject "KrabikUiDslTodoMinimal" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 9EC8CC48A4DDE9BB2AD59151;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1DE076000594E5F885AE0872 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B1029149669975DA36AE914F /* KrabikUiDslTodoMinimal */,
+				9EA5FFF1748F734A30DF8B9D /* KrabikUiDslTodoMinimalUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		074D8831CE9B9474F7E54264 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D59D74C400B6C473B7E9C72B /* MinimalTodoUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		26CFB055E498031C7344125F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B24FA8D600866687D17572CF /* ContentView.swift in Sources */,
+				4B9E654A478DBCA4698C46F5 /* KrabikUiDslTodoMinimalApp.swift in Sources */,
+				0E90DAF9C57CD8B5C86547B1 /* RustRootView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		EBCD0A55096C5D536EC1F789 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B1029149669975DA36AE914F /* KrabikUiDslTodoMinimal */;
+			targetProxy = 8D59A784A0BA0B8E8AA01613 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		14B4EEEF5376CD01DA21E30E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.krabik-ui-dsl-todo-minimal-uitests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = KrabikUiDslTodoMinimal;
+			};
+			name = Debug;
+		};
+		434EBBD625D268D2E993046B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				RUST_TARGET = "aarch64-apple-ios-sim";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		54D9620A1E009EC4DD8D2D5D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/../rust/target/$(RUST_TARGET)/$(CONFIGURATION:lower)",
+				);
+				OTHER_LDFLAGS = (
+					"-lkrabik_ui_dsl_todo_minimal",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.krabik-ui-dsl-todo-minimal";
+				PRODUCT_NAME = KrabikUiDslTodoMinimal;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = Sources/KrabikIOS.h;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		56F3FADCF0F51C8F184A16A5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/../rust/target/$(RUST_TARGET)/$(CONFIGURATION:lower)",
+				);
+				OTHER_LDFLAGS = (
+					"-lkrabik_ui_dsl_todo_minimal",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.krabik-ui-dsl-todo-minimal";
+				PRODUCT_NAME = KrabikUiDslTodoMinimal;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = Sources/KrabikIOS.h;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B558A11B74FD835BF7540135 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.krabik-ui-dsl-todo-minimal-uitests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = KrabikUiDslTodoMinimal;
+			};
+			name = Release;
+		};
+		F6CC42E30E1926B4805FD0F4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				RUST_TARGET = "aarch64-apple-ios-sim";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		396F01CC54621D629A9C5A66 /* Build configuration list for PBXNativeTarget "KrabikUiDslTodoMinimal" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				56F3FADCF0F51C8F184A16A5 /* Debug */,
+				54D9620A1E009EC4DD8D2D5D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C0E032ADDBA89D85D5791A39 /* Build configuration list for PBXProject "KrabikUiDslTodoMinimal" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F6CC42E30E1926B4805FD0F4 /* Debug */,
+				434EBBD625D268D2E993046B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E21D7C5D0A5B9B3AB2D0BE8B /* Build configuration list for PBXNativeTarget "KrabikUiDslTodoMinimalUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				14B4EEEF5376CD01DA21E30E /* Debug */,
+				B558A11B74FD835BF7540135 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 02EDCBAC1E1EA732452D47B8 /* Project object */;
+}
