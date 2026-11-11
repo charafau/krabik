@@ -176,9 +176,17 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     }
 
     /** Asks Rust to build one recycled-list row into [host], at [width] pixels. */
-    fun bindRow(nodeId: Long, index: Int, host: ViewGroup, width: Int) {
+    fun bindRow(nodeId: Long, index: Int, holderId: Long, host: ViewGroup, width: Int): Int =
         if (handle != 0L) {
-            nativeBindRow(handle, nodeId, index, host, width)
+            nativeBindRow(handle, nodeId, index, holderId, host, width)
+        } else {
+            0
+        }
+
+    /** Tells Rust that [holderId] no longer shows a row. */
+    fun unbindRow(nodeId: Long, holderId: Long) {
+        if (handle != 0L) {
+            nativeUnbindRow(handle, nodeId, holderId)
         }
     }
 
@@ -220,9 +228,12 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
         handle: Long,
         nodeId: Long,
         index: Int,
+        holderId: Long,
         host: ViewGroup,
         width: Int,
-    )
+    ): Int
+
+    private external fun nativeUnbindRow(handle: Long, nodeId: Long, holderId: Long)
 
     private external fun nativeDestroy(handle: Long)
 }

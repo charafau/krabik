@@ -4,6 +4,7 @@
 //! the native widgets. Every widget, every property update, every frame change,
 //! and every event is handled here on native `UILabel`/`UIButton`/… instances.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr::NonNull;
@@ -14,28 +15,32 @@ use block2::RcBlock;
 use dispatch2::DispatchQueue;
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject, Sel};
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, Message};
+use objc2::{ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGColor;
 use objc2_foundation::{
-    NSArray, NSBundle, NSData, NSError, NSString, NSURL, NSURLResponse, NSURLSession,
+    NSArray, NSBundle, NSData, NSError, NSIndexPath, NSString, NSURL, NSURLResponse, NSURLSession,
 };
 use objc2_quartz_core::{CACornerMask, CAGradientLayer};
 use objc2_ui_kit::{
-    NSLineBreakMode, NSObjectUIAccessibility, NSTextAlignment, UIAction, UIButton, UIButtonType,
-    UIColor, UIControl, UIControlEvents, UIControlState, UIFont, UIImage, UIImageView,
-    UIKeyboardType, UILabel, UIReturnKeyType, UIScrollView, UIScrollViewDelegate, UISwitch,
-    UITextBorderStyle, UITextField, UITextInputTraits, UIView, UIViewContentMode,
+    NSIndexPathUIKitAdditions, NSLineBreakMode, NSObjectUIAccessibility, NSTextAlignment, UIAction,
+    UIButton, UIButtonType, UICollectionView, UICollectionViewCell, UICollectionViewDataSource,
+    UICollectionViewDelegate, UICollectionViewDelegateFlowLayout, UICollectionViewFlowLayout,
+    UICollectionViewLayout, UIColor, UIControl, UIControlEvents, UIControlState, UIEdgeInsets,
+    UIFont, UIImage, UIImageView, UIKeyboardType, UILabel, UIReturnKeyType, UIScrollView,
+    UIScrollViewDelegate, UISwitch, UITextBorderStyle, UITextField, UITextInputTraits, UIView,
+    UIViewContentMode,
 };
 
 use crate::app::{App, Event};
 use crate::geometry::{Constraints, Rect, Size};
+use crate::layout::LayoutResult;
 use crate::measure::Measure;
-use crate::render::{Op, RenderNode};
+use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
-use crate::tree::{NodeId, NodeKind};
+use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Axis, ButtonProps, EdgeInsets, FontWeight, GradientDirection, ImageProps, ImageScale,
+    Axis, ButtonProps, EdgeInsets, Element, FontWeight, GradientDirection, ImageProps, ImageScale,
     ImageSource, ImeAction, KeyboardType, TextAlign, TextFieldProps, TextProps,
 };
 
@@ -216,6 +221,147 @@ impl ScrollDelegate {
     }
 }
 
+/// The reuse identifier of a recycled-list row cell.
+const ROW_CELL_ID: &str = "KrabikRow";
+
+/// What a recycled-list data source remembers about its node.
+///
+/// Only the main thread touches the collection view, but the callbacks take
+/// `&self`, so the mutable parts are atomics.
+struct RecyclerIvars {
+    handle: u64,
+    id: NodeId,
+    count: AtomicU64,
+    /// Fixed row height in points encoded as `f64` bits; `0` means automatic.
+    item_height: AtomicU64,
+    revision: AtomicU64,
+}
+
+objc2::define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "KrabikRecyclerDataSource"]
+    #[ivars = RecyclerIvars]
+    struct RecyclerDataSource;
+
+    unsafe impl NSObjectProtocol for RecyclerDataSource {}
+
+    unsafe impl UIScrollViewDelegate for RecyclerDataSource {}
+
+    unsafe impl UICollectionViewDataSource for RecyclerDataSource {
+        #[unsafe(method(collectionView:numberOfItemsInSection:))]
+        fn number_of_items_in_section(
+            &self,
+            _collection_view: &UICollectionView,
+            _section: isize,
+        ) -> isize {
+            self.ivars()
+                .count
+                .load(Ordering::Relaxed)
+                .min(isize::MAX as u64) as isize
+        }
+
+        #[unsafe(method_id(collectionView:cellForItemAtIndexPath:))]
+        fn cell_for_item_at_index_path(
+            &self,
+            collection_view: &UICollectionView,
+            index_path: &NSIndexPath,
+        ) -> Retained<UICollectionViewCell> {
+            let identifier = NSString::from_str(ROW_CELL_ID);
+            let cell = collection_view
+                .dequeueReusableCellWithReuseIdentifier_forIndexPath(&identifier, index_path);
+            let ivars = self.ivars();
+            let index = index_path.item().max(0) as usize;
+            let width = collection_view.bounds().size.width;
+            let _ = with_state(ivars.handle, |state| {
+                state.bind_row(ivars.id, index, &cell, width);
+            });
+            cell
+        }
+    }
+
+    unsafe impl UICollectionViewDelegate for RecyclerDataSource {
+        #[unsafe(method(collectionView:didEndDisplayingCell:forItemAtIndexPath:))]
+        fn did_end_displaying_cell(
+            &self,
+            _collection_view: &UICollectionView,
+            cell: &UICollectionViewCell,
+            _index_path: &NSIndexPath,
+        ) {
+            let key = cell as *const UICollectionViewCell as usize;
+            let _ = with_state(self.ivars().handle, |state| state.unbind_row(key));
+        }
+    }
+
+    unsafe impl UICollectionViewDelegateFlowLayout for RecyclerDataSource {
+        #[unsafe(method(collectionView:layout:sizeForItemAtIndexPath:))]
+        fn size_for_item_at_index_path(
+            &self,
+            collection_view: &UICollectionView,
+            _collection_view_layout: &UICollectionViewLayout,
+            index_path: &NSIndexPath,
+        ) -> CGSize {
+            let ivars = self.ivars();
+            let width = collection_view.bounds().size.width.max(1.0);
+            let fixed = f64::from_bits(ivars.item_height.load(Ordering::Relaxed));
+            if fixed > 0.0 {
+                return CGSize::new(width, fixed);
+            }
+
+            let index = index_path.item().max(0) as usize;
+            let height = with_state(ivars.handle, |state| {
+                state.row_height(ivars.id, index, width as f32)
+            })
+            .unwrap_or(0.0);
+            CGSize::new(width, f64::from(height).max(1.0))
+        }
+    }
+);
+
+impl RecyclerDataSource {
+    fn new(
+        handle: u64,
+        id: NodeId,
+        props: &RecyclerProps,
+        mtm: MainThreadMarker,
+    ) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(RecyclerIvars {
+            handle,
+            id,
+            count: AtomicU64::new(props.item_count as u64),
+            item_height: AtomicU64::new(props.item_height.map_or(0.0, f64::from).to_bits()),
+            revision: AtomicU64::new(props.revision),
+        });
+        // SAFETY: `NSObject`'s initializer returns an initialized instance of
+        // this class with the ivars already set.
+        unsafe { objc2::msg_send![super(this), init] }
+    }
+
+    /// Applies new list properties, asking UIKit to rebind when anything moved.
+    fn update(&self, props: &RecyclerProps) {
+        let count = props.item_count as u64;
+        let height = props.item_height.map_or(0.0, f64::from).to_bits();
+        let ivars = self.ivars();
+        let count_changed = ivars.count.swap(count, Ordering::Relaxed) != count;
+        let height_changed = ivars.item_height.swap(height, Ordering::Relaxed) != height;
+        let revision_changed =
+            ivars.revision.swap(props.revision, Ordering::Relaxed) != props.revision;
+        if count_changed || height_changed {
+            // The layout needs new sizes and cells; reload after the lock that
+            // produced the update has been released.
+            let handle = ivars.handle;
+            let id = ivars.id;
+            schedule(move || reload_recycler(handle, id));
+        } else if revision_changed {
+            // Only the content changed: diff the visible cells in place so
+            // their widgets (and any focus) survive the update.
+            let handle = ivars.handle;
+            let id = ivars.id;
+            schedule(move || refresh_recycler(handle, id));
+        }
+    }
+}
+
 /// The typed content of a native view.
 ///
 /// Leaves that need internal padding keep a separate content view inside the
@@ -234,6 +380,11 @@ enum Content {
         host: Retained<UIView>,
         /// Keeps the delegate alive for as long as the scroll view exists.
         _delegate: Retained<ScrollDelegate>,
+    },
+    Recycler {
+        collection: Retained<UICollectionView>,
+        /// UIKit holds its data source weakly, so the handle owns it.
+        data_source: Retained<RecyclerDataSource>,
     },
 }
 
@@ -302,6 +453,28 @@ struct ImageLoader {
     expected: HashMap<NodeId, String>,
 }
 
+/// The actions of one recycled row, keyed by the node ids it created.
+#[derive(Clone, Default)]
+struct RowAction {
+    click: Option<Cow<'static, str>>,
+    text: Option<Cow<'static, str>>,
+    submit: Option<Cow<'static, str>>,
+    focus: Option<Cow<'static, str>>,
+    toggle: Option<Cow<'static, str>>,
+}
+
+/// One recycled row currently bound to a collection-view cell.
+///
+/// Cells are reused by UIKit, so the state is keyed by the cell's identity and
+/// diffed when that cell shows another item or new content.
+struct IosRowState {
+    list: NodeId,
+    index: usize,
+    tree: UiNode,
+    layout: LayoutResult,
+    views: HashMap<NodeId, ViewHandle>,
+}
+
 /// The state of one `RustRootView`.
 struct IosState {
     handle: u64,
@@ -312,6 +485,12 @@ struct IosState {
     root: Weak<UIView>,
     views: HashMap<NodeId, ViewHandle>,
     images: ImageLoader,
+    /// Actions of the rows currently bound in recycled lists.
+    row_actions: HashMap<NodeId, RowAction>,
+    /// The node ids a (list, row) binding created, for clearing on rebind.
+    row_action_ids: HashMap<(NodeId, usize), Vec<NodeId>>,
+    /// The rows currently bound to collection-view cells, by cell identity.
+    row_states: HashMap<usize, IosRowState>,
     viewport: Size,
 }
 
@@ -329,6 +508,9 @@ impl IosState {
             root: Weak::from_retained(root),
             views: HashMap::new(),
             images: ImageLoader::default(),
+            row_actions: HashMap::new(),
+            row_action_ids: HashMap::new(),
+            row_states: HashMap::new(),
             viewport: Size::ZERO,
         }
     }
@@ -336,12 +518,30 @@ impl IosState {
     fn render(&mut self) {
         let element = self.app.view();
         let update = self.runtime.update(&element, self.viewport);
+        let Some(root) = self.root.load() else {
+            return;
+        };
+
+        // The main views are taken out while the operations run so a recycled
+        // row can apply its own operations without borrowing the state twice.
+        let mut views = std::mem::take(&mut self.views);
         for op in update.ops {
-            self.apply(op);
+            self.apply_to(op, &mut views, &root);
         }
+        self.views = views;
+        self.prune_rows();
     }
 
-    fn apply(&mut self, op: Op) {
+    /// Applies one renderer operation to a set of views.
+    ///
+    /// The main tree and a recycled row share this code; they only differ in
+    /// the view that receives top-level widgets.
+    fn apply_to(
+        &mut self,
+        op: Op,
+        views: &mut HashMap<NodeId, ViewHandle>,
+        root_host: &Retained<UIView>,
+    ) {
         // SAFETY: the runtime renders on the main thread, and every entry point
         // checks that before locking the state.
         let mtm = unsafe { MainThreadMarker::new_unchecked() };
@@ -349,13 +549,12 @@ impl IosState {
         match op {
             Op::Create(node) => {
                 let handle = self.create_handle(&node, mtm);
-                if let Some(host) = self.parent_host(node.parent) {
-                    host.addSubview(&handle.view);
-                }
-                self.views.insert(node.id, handle);
+                let host = parent_host_in(views, root_host, node.parent);
+                host.addSubview(&handle.view);
+                views.insert(node.id, handle);
             }
             Op::Update(node) => {
-                if let Some(handle) = self.views.get_mut(&node.id) {
+                if let Some(handle) = views.get_mut(&node.id) {
                     update_content(&handle.content, &node);
                     apply_style(&handle.view, &node, &mut handle.gradient);
                     apply_accessibility(&handle.view, &node, mtm);
@@ -363,7 +562,7 @@ impl IosState {
                 // Image updates can start downloads, which needs the state
                 // itself, so they are handled separately from `update_content`.
                 if let NodeKind::Image(props) = &node.kind {
-                    let view = match self.views.get(&node.id) {
+                    let view = match views.get(&node.id) {
                         Some(handle) => match &handle.content {
                             Content::Image(image) => Some(image.clone()),
                             _ => None,
@@ -374,25 +573,30 @@ impl IosState {
                         self.load_image(node.id, &view, props);
                     }
                 }
+                if let NodeKind::Recycler(props) = &node.kind
+                    && let Some(handle) = views.get(&node.id)
+                    && let Content::Recycler { data_source, .. } = &handle.content
+                {
+                    data_source.update(props);
+                }
             }
             Op::Reparent { id, parent } => {
-                let Some(old_parent) = self.views.get(&id).map(|handle| handle.parent) else {
+                let Some(old_parent) = views.get(&id).map(|handle| handle.parent) else {
                     return;
                 };
                 if old_parent != parent {
-                    let view = self.views[&id].view.clone();
-                    if let Some(host) = self.parent_host(parent) {
-                        view.removeFromSuperview();
-                        host.addSubview(&view);
-                    }
-                    if let Some(handle) = self.views.get_mut(&id) {
+                    let view = views[&id].view.clone();
+                    let host = parent_host_in(views, root_host, parent);
+                    view.removeFromSuperview();
+                    host.addSubview(&view);
+                    if let Some(handle) = views.get_mut(&id) {
                         handle.parent = parent;
                     }
                 }
             }
             Op::Remove { id } => {
                 self.images.expected.remove(&id);
-                if let Some(handle) = self.views.remove(&id) {
+                if let Some(handle) = views.remove(&id) {
                     handle.view.removeFromSuperview();
                 }
             }
@@ -400,15 +604,7 @@ impl IosState {
                 id,
                 frame,
                 content_size,
-            } => self.apply_layout(id, frame, content_size),
-        }
-    }
-
-    /// The view that hosts the children of the given native parent.
-    fn parent_host(&self, parent: Option<NodeId>) -> Option<Retained<UIView>> {
-        match parent.and_then(|id| self.views.get(&id)) {
-            Some(handle) => Some(handle.children_host()),
-            None => self.root.load(),
+            } => IosState::apply_layout(views, id, frame, content_size),
         }
     }
 
@@ -475,6 +671,49 @@ impl IosState {
                     node,
                 )
             }
+            NodeKind::Recycler(props) => {
+                let layout = UICollectionViewFlowLayout::new(mtm);
+                layout.setMinimumLineSpacing(0.0);
+                layout.setMinimumInteritemSpacing(0.0);
+                layout.setSectionInset(UIEdgeInsets {
+                    top: 0.0,
+                    left: 0.0,
+                    bottom: 0.0,
+                    right: 0.0,
+                });
+                let collection = UICollectionView::initWithFrame_collectionViewLayout(
+                    UICollectionView::alloc(mtm),
+                    CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(0.0, 0.0)),
+                    &layout,
+                );
+                collection.setShowsVerticalScrollIndicator(true);
+                collection.setAlwaysBounceVertical(true);
+                let identifier = NSString::from_str(ROW_CELL_ID);
+                // SAFETY: the cell class is a `UICollectionViewCell`, which is
+                // what the dequeue call below expects.
+                unsafe {
+                    collection.registerClass_forCellWithReuseIdentifier(
+                        Some(UICollectionViewCell::class()),
+                        &identifier,
+                    );
+                }
+                let data_source = RecyclerDataSource::new(self.handle, node.id, props, mtm);
+                collection.setDataSource(Some(ProtocolObject::from_ref(&*data_source)));
+                // SAFETY: the data source is kept alive by the view handle and
+                // only reads the collection view's size and index paths.
+                unsafe {
+                    collection.setDelegate(Some(ProtocolObject::from_ref(&*data_source)));
+                }
+                let view = cast_view(collection.clone());
+                ViewHandle::new(
+                    view,
+                    Content::Recycler {
+                        collection,
+                        data_source,
+                    },
+                    node,
+                )
+            }
             NodeKind::Column | NodeKind::Row => {
                 let view = UIView::new(mtm);
                 let host = UIView::new(mtm);
@@ -493,8 +732,13 @@ impl IosState {
         handle
     }
 
-    fn apply_layout(&mut self, id: NodeId, frame: Rect, content_size: Option<Size>) {
-        let Some(handle) = self.views.get_mut(&id) else {
+    fn apply_layout(
+        views: &mut HashMap<NodeId, ViewHandle>,
+        id: NodeId,
+        frame: Rect,
+        content_size: Option<Size>,
+    ) {
+        let Some(handle) = views.get_mut(&id) else {
             return;
         };
 
@@ -571,6 +815,198 @@ impl IosState {
         if self.images.in_flight.insert(url.to_string()) {
             start_download(self.handle, id, url);
         }
+    }
+
+    /// The element of one recycled row, or `None` when the item vanished.
+    fn row_element(&self, list: NodeId, index: usize) -> Option<Element> {
+        let source = self.runtime.row_source(list)?;
+        (index < source.item_count).then(|| (source.rows)(index))
+    }
+
+    /// Builds and lays out one recycled row with its own root identifier.
+    fn row_layout(&self, list: NodeId, index: usize, width: f32) -> Option<(UiNode, LayoutResult)> {
+        let element = self.row_element(list, index)?;
+        let root = tree::row_root(list, index);
+        let (tree, layout) =
+            self.runtime
+                .layout_subtree(&element, root, Size::new(width.max(1.0), 100_000.0));
+        Some((tree, layout))
+    }
+
+    /// The height a variable-height row needs at the given width.
+    fn row_height(&self, list: NodeId, index: usize, width: f32) -> f32 {
+        let Some((_, layout)) = self.row_layout(list, index, width) else {
+            return 0.0;
+        };
+        layout
+            .frames
+            .get(&tree::row_root(list, index))
+            .map_or(0.0, |frame| frame.height.max(0.0))
+    }
+
+    /// The collection view of a recycled list, for reloads outside the lock.
+    fn collection_for(&self, id: NodeId) -> Option<Retained<UICollectionView>> {
+        match &self.views.get(&id)?.content {
+            Content::Recycler { collection, .. } => Some(collection.clone()),
+            _ => None,
+        }
+    }
+
+    /// Diffs every visible cell in place after an application state change.
+    fn rebind_visible_rows(&mut self, id: NodeId) {
+        let Some(collection) = self.collection_for(id) else {
+            return;
+        };
+        let width = collection.bounds().size.width;
+        let paths = collection.indexPathsForVisibleItems();
+        for path in paths.iter() {
+            let index = path.item().max(0) as usize;
+            if let Some(cell) = collection.cellForItemAtIndexPath(&path) {
+                self.bind_row(id, index, &cell, width);
+            }
+        }
+        // Content changes can alter a row's measured height.
+        collection.collectionViewLayout().invalidateLayout();
+    }
+
+    /// Builds or updates one recycled row inside a collection-view cell.
+    fn bind_row(&mut self, list: NodeId, index: usize, cell: &UICollectionViewCell, width: f64) {
+        let Some((tree, layout)) = self.row_layout(list, index, width as f32) else {
+            return;
+        };
+        let content = cell.contentView();
+        let key = cell as *const UICollectionViewCell as usize;
+
+        let previous = self.row_states.remove(&key);
+        let (old_tree, old_layout, mut views) = if let Some(state) = previous {
+            self.clear_row_actions(state.list, state.index);
+            (state.tree, state.layout, state.views)
+        } else {
+            // The cell was recycled behind our back; start from an empty tree.
+            remove_subviews(&content);
+            (UiNode::empty(), LayoutResult::default(), HashMap::new())
+        };
+
+        let mut ops = render::diff(&old_tree, &tree);
+        ops.extend(render::diff_layout(&old_tree, &tree, &old_layout, &layout));
+        for op in ops {
+            self.apply_to(op, &mut views, &content);
+        }
+
+        self.record_row_actions(list, index, &tree);
+        self.row_states.insert(
+            key,
+            IosRowState {
+                list,
+                index,
+                tree,
+                layout,
+                views,
+            },
+        );
+    }
+
+    /// Releases the widgets and actions of the row a cell currently shows.
+    fn unbind_row(&mut self, key: usize) {
+        if let Some(state) = self.row_states.remove(&key) {
+            self.clear_row_actions(state.list, state.index);
+        }
+    }
+
+    /// Forgets actions and rows whose list or item no longer exists.
+    fn prune_rows(&mut self) {
+        let stale: Vec<((NodeId, usize), Vec<NodeId>)> = self
+            .row_action_ids
+            .iter()
+            .filter(|((list, index), _)| {
+                self.runtime
+                    .recycled_item_count(*list)
+                    .is_none_or(|count| *index >= count)
+            })
+            .map(|(key, ids)| (*key, ids.clone()))
+            .collect();
+        for (key, ids) in stale {
+            self.row_action_ids.remove(&key);
+            for id in ids {
+                self.row_actions.remove(&id);
+            }
+        }
+
+        let detached: Vec<usize> = self
+            .row_states
+            .iter()
+            .filter(|(_, row)| self.runtime.recycled_item_count(row.list).is_none())
+            .map(|(key, _)| *key)
+            .collect();
+        for key in detached {
+            self.row_states.remove(&key);
+        }
+    }
+
+    /// Drops the actions recorded for one row binding.
+    fn clear_row_actions(&mut self, list: NodeId, index: usize) {
+        if let Some(ids) = self.row_action_ids.remove(&(list, index)) {
+            for id in ids {
+                self.row_actions.remove(&id);
+            }
+        }
+    }
+
+    fn record_row_actions(&mut self, list: NodeId, index: usize, tree: &UiNode) {
+        let mut ids = Vec::new();
+        for node in tree::preorder(tree) {
+            let mut action = RowAction::default();
+            let mut any = false;
+            match &node.kind {
+                NodeKind::Button(props) if !props.action.is_empty() => {
+                    action.click = Some(props.action.clone());
+                    any = true;
+                }
+                NodeKind::Switch(props) if !props.action.is_empty() => {
+                    action.toggle = Some(props.action.clone());
+                    any = true;
+                }
+                NodeKind::TextField(props) => {
+                    if !props.action.is_empty() {
+                        action.text = Some(props.action.clone());
+                        any = true;
+                    }
+                    if !props.submit_action.is_empty() {
+                        action.submit = Some(props.submit_action.clone());
+                        any = true;
+                    }
+                    if !props.focus_action.is_empty() {
+                        action.focus = Some(props.focus_action.clone());
+                        any = true;
+                    }
+                }
+                _ => {}
+            }
+            if any {
+                self.row_actions.insert(node.id, action);
+                ids.push(node.id);
+            }
+        }
+        self.row_action_ids.insert((list, index), ids);
+    }
+}
+
+/// The view that hosts the children of the given native parent.
+fn parent_host_in(
+    views: &HashMap<NodeId, ViewHandle>,
+    root: &Retained<UIView>,
+    parent: Option<NodeId>,
+) -> Retained<UIView> {
+    match parent.and_then(|id| views.get(&id)) {
+        Some(handle) => handle.children_host(),
+        None => root.clone(),
+    }
+}
+
+/// Removes every subview, used before recreating a reused cell's row.
+fn remove_subviews(view: &UIView) {
+    for subview in view.subviews().iter() {
+        subview.removeFromSuperview();
     }
 }
 
@@ -761,7 +1197,7 @@ fn apply_style(view: &UIView, node: &RenderNode, gradient: &mut Option<Retained<
 
     let fills_frame =
         matches!(&node.kind, NodeKind::Image(props) if props.scale == ImageScale::Fill);
-    let clips = matches!(&node.kind, NodeKind::Scroll(_))
+    let clips = matches!(&node.kind, NodeKind::Scroll(_) | NodeKind::Recycler(_))
         || fills_frame
         || (radius > 0.0 && style.elevation <= 0.0);
     view.setClipsToBounds(clips);
@@ -952,11 +1388,30 @@ fn schedule(work: impl FnOnce() + Send + 'static) {
     DispatchQueue::main().exec_async(work);
 }
 
-fn with_state(handle: u64, body: impl FnOnce(&mut IosState)) {
+/// Reloads a recycled list without holding the state lock.
+///
+/// UIKit may ask the data source for cells synchronously during `reloadData`;
+/// those callbacks acquire the state lock themselves, so the reload must run
+/// after the lock that produced it has been released.
+fn reload_recycler(handle: u64, id: NodeId) {
+    guard("reload", || {
+        let collection = with_state(handle, |state| state.collection_for(id)).flatten();
+        if let Some(collection) = collection {
+            collection.reloadData();
+        }
+    });
+}
+
+/// Diffs the visible recycled rows without recreating their cells.
+fn refresh_recycler(handle: u64, id: NodeId) {
+    guard("refresh", || {
+        with_state(handle, |state| state.rebind_visible_rows(id));
+    });
+}
+
+fn with_state<T>(handle: u64, body: impl FnOnce(&mut IosState) -> T) -> Option<T> {
     let mut states = states().lock().expect("ios states");
-    if let Some(state) = states.get_mut(&handle) {
-        body(state);
-    }
+    states.get_mut(&handle).map(body)
 }
 
 /// Runs an event handler, reporting an Objective-C exception instead of
@@ -975,7 +1430,11 @@ fn guard(label: &str, body: impl FnOnce()) {
 fn dispatch_click(handle: u64, id: NodeId) {
     guard("click", || {
         with_state(handle, |state| {
-            if let Some(action) = state.runtime.click(id)
+            let action = state
+                .runtime
+                .click(id)
+                .or_else(|| state.row_actions.get(&id).and_then(|row| row.click.clone()));
+            if let Some(action) = action
                 && state.app.handle(Event::Click { action: &action })
             {
                 state.render();
@@ -987,7 +1446,11 @@ fn dispatch_click(handle: u64, id: NodeId) {
 fn dispatch_text(handle: u64, id: NodeId, value: &str) {
     guard("text", || {
         with_state(handle, |state| {
-            if let Some(action) = state.runtime.text_field_action(id)
+            let action = state
+                .runtime
+                .text_field_action(id)
+                .or_else(|| state.row_actions.get(&id).and_then(|row| row.text.clone()));
+            if let Some(action) = action
                 && state.app.handle(Event::TextChanged {
                     action: &action,
                     value,
@@ -1002,7 +1465,13 @@ fn dispatch_text(handle: u64, id: NodeId, value: &str) {
 fn dispatch_submitted(handle: u64, id: NodeId) {
     guard("submitted", || {
         with_state(handle, |state| {
-            if let Some(action) = state.runtime.text_field_submit_action(id)
+            let action = state.runtime.text_field_submit_action(id).or_else(|| {
+                state
+                    .row_actions
+                    .get(&id)
+                    .and_then(|row| row.submit.clone())
+            });
+            if let Some(action) = action
                 && state.app.handle(Event::Submitted { action: &action })
             {
                 state.render();
@@ -1018,6 +1487,7 @@ fn dispatch_focus(handle: u64, id: NodeId, focused: bool) {
             let handled = state
                 .runtime
                 .text_field_focus_action(id)
+                .or_else(|| state.row_actions.get(&id).and_then(|row| row.focus.clone()))
                 .is_some_and(|action| {
                     state.app.handle(Event::FocusChanged {
                         action: &action,
@@ -1034,7 +1504,13 @@ fn dispatch_focus(handle: u64, id: NodeId, focused: bool) {
 fn dispatch_checked(handle: u64, id: NodeId, checked: bool) {
     guard("checked", || {
         with_state(handle, |state| {
-            if let Some(action) = state.runtime.switch_action(id)
+            let action = state.runtime.switch_action(id).or_else(|| {
+                state
+                    .row_actions
+                    .get(&id)
+                    .and_then(|row| row.toggle.clone())
+            });
+            if let Some(action) = action
                 && state.app.handle(Event::Toggled {
                     action: &action,
                     checked,
@@ -1103,9 +1579,20 @@ fn finish_download(handle: u64, id: NodeId, url: String, image: Option<Retained<
                 .map(|(node_id, _)| *node_id)
                 .collect();
             for node_id in waiting {
+                let mut targets: Vec<Retained<UIImageView>> = Vec::new();
                 if let Some(view) = state.views.get(&node_id)
                     && let Content::Image(image_view) = &view.content
                 {
+                    targets.push(image_view.clone());
+                }
+                for row in state.row_states.values() {
+                    if let Some(view) = row.views.get(&node_id)
+                        && let Content::Image(image_view) = &view.content
+                    {
+                        targets.push(image_view.clone());
+                    }
+                }
+                for image_view in targets {
                     image_view.setImage(Some(&*image));
                 }
             }

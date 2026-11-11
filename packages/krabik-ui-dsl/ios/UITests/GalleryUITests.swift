@@ -141,6 +141,48 @@ final class GalleryUITests: XCTestCase {
         capture("12-list-variable")
         back()
 
+        // Recycled rows are built by a UICollectionView on demand and diffed
+        // when the application state changes.
+        if !app.buttons["List (recycled)"].isHittable {
+            app.swipeUp()
+        }
+        open("List (recycled)")
+        XCTAssertTrue(app.staticTexts["Row 1 · v0"].waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(rowNumbers().count, 40)
+        app.buttons["Tap"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Taps: 1"].waitForExistence(timeout: 5))
+        app.buttons["Bump rows"].tap()
+        XCTAssertTrue(app.staticTexts["Row 1 · v1"].waitForExistence(timeout: 5))
+        for _ in 0..<8 {
+            app.swipeUp()
+        }
+        waitForAbsence(app.staticTexts["Row 1 · v1"])
+        let recycledNumbers = rowNumbers()
+        XCTAssertFalse(recycledNumbers.contains(1), "row 1 stayed in the recycled list")
+        XCTAssertGreaterThan(recycledNumbers.max() ?? 0, 5, "recycled list did not scroll")
+        XCTAssertLessThanOrEqual(recycledNumbers.count, 40, "recycled window grew")
+        capture("13-list-recycled")
+        back()
+
+        // The same collection view sizes every holder from Rust's measurement.
+        if !app.buttons["List (recycled, variable)"].isHittable {
+            app.swipeUp()
+        }
+        open("List (recycled, variable)")
+        let recycledVariableRow = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Row 1 -"),
+        ).firstMatch
+        XCTAssertTrue(recycledVariableRow.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(rowNumbers().count, 40)
+        for _ in 0..<5 {
+            app.swipeUp()
+        }
+        let recycledVariableNumbers = rowNumbers()
+        XCTAssertGreaterThan(recycledVariableNumbers.max() ?? 0, 5)
+        XCTAssertLessThanOrEqual(recycledVariableNumbers.count, 40)
+        capture("14-list-recycled-variable")
+        back()
+
         XCTAssertTrue(app.staticTexts["Native UI DSL"].waitForExistence(timeout: 5))
     }
 

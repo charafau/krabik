@@ -39,6 +39,7 @@ pub enum Demo {
     List,
     ListVariable,
     ListRecycled,
+    ListRecycledVariable,
 }
 
 /// The state of the gallery demo application.
@@ -56,8 +57,12 @@ pub struct GalleryApp {
     pub list_items: Arc<Vec<String>>,
     /// Rows of mixed height for the measured-list demo.
     pub variable_items: Arc<Vec<String>>,
+    /// Rows of the recycled-list demo, so the test can shrink the list.
+    pub recycled_items: Arc<Vec<String>>,
     /// How many buttons inside recycled rows were pressed.
     pub recycled_taps: usize,
+    /// A value shown inside every recycled row, to prove rebinds pick up state.
+    pub recycled_bumps: usize,
 }
 
 impl Default for GalleryApp {
@@ -73,6 +78,8 @@ impl Default for GalleryApp {
             notifications: false,
             list_items: Arc::new((1..=1000).map(|index| format!("Row {index}")).collect()),
             recycled_taps: 0,
+            recycled_bumps: 0,
+            recycled_items: Arc::new((1..=1000).map(|index| format!("Row {index}")).collect()),
             variable_items: Arc::new(
                 (1..=300)
                     .map(|index| {
@@ -117,6 +124,10 @@ impl GalleryApp {
                     .child(Button::new("List").action("open:list"))
                     .child(Button::new("List (variable)").action("open:list-variable"))
                     .child(Button::new("List (recycled)").action("open:list-recycled"))
+                    .child(
+                        Button::new("List (recycled, variable)")
+                            .action("open:list-recycled-variable"),
+                    )
                     .child(caption(
                         "This list scrolls, so every demo stays reachable on small screens.",
                     )),
@@ -555,6 +566,7 @@ impl GalleryApp {
     }
 
     fn list_recycled(&self) -> Element {
+        let bumps = self.recycled_bumps;
         Column::new()
             .padding(24)
             .spacing(12)
@@ -564,20 +576,58 @@ impl GalleryApp {
             .child(back_button())
             .child(Text::new("List (recycled)").size(26).bold())
             .child(caption(
-                "A native RecyclerView owns scrolling; Rust builds each row on bind.",
+                "A native recycler owns scrolling; Rust diffs each row on bind.",
             ))
             .child(Text::new(format!("Taps: {}", self.recycled_taps)).size(15))
             .child(
-                List::new(Arc::clone(&self.list_items))
+                Row::new()
+                    .spacing(8)
+                    .child(Button::new("Bump rows").action("recycled:bump"))
+                    .child(Button::new("Shrink").action("recycled:shrink"))
+                    .child(Button::new("Reset").action("recycled:reset")),
+            )
+            .child(
+                List::new(Arc::clone(&self.recycled_items))
                     .item_height(56.0)
                     .recycled()
                     .key(|item| item.clone())
-                    .row(|item| {
+                    .row(move |item| {
                         Row::new()
                             .width_percent(1.0)
                             .padding_each(EdgeInsets::symmetric(12, 6))
                             .align_items(Align::Center)
-                            .child(Text::new(item.clone()).size(15).grow(1.0))
+                            .child(Text::new(format!("{item} · v{}", bumps)).size(15).grow(1.0))
+                            .child(Button::new("Tap").action("recycled:tap"))
+                            .into()
+                    }),
+            )
+            .into()
+    }
+
+    fn list_recycled_variable(&self) -> Element {
+        let bumps = self.recycled_bumps;
+        Column::new()
+            .padding(24)
+            .spacing(12)
+            .width_percent(1.0)
+            .height_percent(1.0)
+            .align_items(Align::Start)
+            .child(back_button())
+            .child(Text::new("List (recycled, variable)").size(26).bold())
+            .child(caption(
+                "Each holder takes the height Rust measured for its row.",
+            ))
+            .child(Text::new(format!("Taps: {}", self.recycled_taps)).size(15))
+            .child(
+                List::new(Arc::clone(&self.variable_items))
+                    .recycled()
+                    .key(|item| item.clone())
+                    .row(move |item| {
+                        Row::new()
+                            .width_percent(1.0)
+                            .padding_each(EdgeInsets::symmetric(12, 10))
+                            .align_items(Align::Center)
+                            .child(Text::new(format!("{item} · v{}", bumps)).size(15).grow(1.0))
                             .child(Button::new("Tap").action("recycled:tap"))
                             .into()
                     }),
@@ -679,6 +729,7 @@ impl App for GalleryApp {
             Demo::List => self.list(),
             Demo::ListVariable => self.list_variable(),
             Demo::ListRecycled => self.list_recycled(),
+            Demo::ListRecycledVariable => self.list_recycled_variable(),
         }
     }
 
@@ -730,7 +781,21 @@ impl App for GalleryApp {
                 "open:list" => self.demo = Demo::List,
                 "open:list-variable" => self.demo = Demo::ListVariable,
                 "open:list-recycled" => self.demo = Demo::ListRecycled,
+                "open:list-recycled-variable" => self.demo = Demo::ListRecycledVariable,
                 "recycled:tap" => self.recycled_taps += 1,
+                "recycled:bump" => self.recycled_bumps += 1,
+                "recycled:shrink" => {
+                    if self.recycled_items.len() > 200 {
+                        self.recycled_items =
+                            Arc::new(self.recycled_items.iter().take(200).cloned().collect());
+                    }
+                }
+                "recycled:reset" => {
+                    self.recycled_items =
+                        Arc::new((1..=1000).map(|index| format!("Row {index}")).collect());
+                    self.recycled_taps = 0;
+                    self.recycled_bumps = 0;
+                }
                 "counter:add" => self.count += 1,
                 "counter:reset" => self.count = 0,
                 "form:clear" => {

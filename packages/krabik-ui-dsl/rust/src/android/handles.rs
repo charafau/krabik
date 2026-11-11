@@ -450,7 +450,7 @@ impl Jni {
                 env,
                 &krabik_recyclers,
                 "update",
-                "(Landroid/view/ViewGroup;II)V",
+                "(Landroid/view/ViewGroup;IIJ)V",
                 VOID
             ),
             apply_style: static_method!(

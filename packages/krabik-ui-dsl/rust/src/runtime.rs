@@ -51,6 +51,9 @@ pub struct Runtime {
     row_sources: HashMap<NodeId, ListProps>,
     /// The viewport of the last update, needed to window lists on scroll.
     viewport: Size,
+    /// Incremented on every rebuild; stamped into recycled lists so their
+    /// adapters rebind the visible rows after an app state change.
+    revision: u64,
 }
 
 impl Runtime {
@@ -67,6 +70,7 @@ impl Runtime {
             focused_rows: HashMap::new(),
             row_sources: HashMap::new(),
             viewport: Size::ZERO,
+            revision: 0,
         }
     }
 
@@ -79,7 +83,7 @@ impl Runtime {
         // recompute the prefix sums and the window. Cap the loop so a row whose
         // height oscillates with the window cannot spin forever.
         let mut iteration = 0;
-        let (next, info, layout) = loop {
+        let (mut next, info, layout) = loop {
             let (next, info) = tree::build_with_focus(
                 element,
                 &self.scroll_offsets,
@@ -98,6 +102,13 @@ impl Runtime {
                 break (next, info, layout);
             }
         };
+
+        // RecyclerView does not know that the application description changed;
+        // a new revision is part of the node properties, so the diff emits an
+        // update and the adapter rebinds its attached cells.
+        self.revision = self.revision.wrapping_add(1);
+        tree::stamp_recycler_revision(&mut next, self.revision);
+
         // A focused node that disappeared (for example a screen swap) cannot
         // be pinned anymore.
         let focus_lost = self
@@ -234,13 +245,19 @@ impl Runtime {
     }
 
     /// The item source of a recycled list, for building rows on demand.
-    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
     pub(crate) fn row_source(&self, id: NodeId) -> Option<&ListProps> {
         self.row_sources.get(&id)
     }
 
+    /// The number of items a recycled list currently reports.
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    pub(crate) fn recycled_item_count(&self, id: NodeId) -> Option<usize> {
+        self.row_sources.get(&id).map(|props| props.item_count)
+    }
+
     /// Builds and lays out one recycled row with its own root id.
-    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
     pub(crate) fn layout_subtree(
         &self,
         element: &Element,
