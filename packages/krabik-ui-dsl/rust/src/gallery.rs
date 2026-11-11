@@ -40,6 +40,7 @@ pub enum Demo {
     ListVariable,
     ListRecycled,
     ListRecycledVariable,
+    ListRecycledForm,
 }
 
 /// The state of the gallery demo application.
@@ -63,6 +64,10 @@ pub struct GalleryApp {
     pub recycled_taps: usize,
     /// A value shown inside every recycled row, to prove rebinds pick up state.
     pub recycled_bumps: usize,
+    /// Notes edited by the recycled form demo.
+    pub recycled_notes: Arc<Vec<String>>,
+    /// Stable indices of the form rows.
+    pub recycled_form_rows: Arc<Vec<usize>>,
 }
 
 impl Default for GalleryApp {
@@ -80,6 +85,8 @@ impl Default for GalleryApp {
             recycled_taps: 0,
             recycled_bumps: 0,
             recycled_items: Arc::new((1..=1000).map(|index| format!("Row {index}")).collect()),
+            recycled_notes: Arc::new(vec![String::new(); 200]),
+            recycled_form_rows: Arc::new((0..200).collect()),
             variable_items: Arc::new(
                 (1..=300)
                     .map(|index| {
@@ -128,6 +135,7 @@ impl GalleryApp {
                         Button::new("List (recycled, variable)")
                             .action("open:list-recycled-variable"),
                     )
+                    .child(Button::new("List (recycled, form)").action("open:list-recycled-form"))
                     .child(caption(
                         "This list scrolls, so every demo stays reachable on small screens.",
                     )),
@@ -552,6 +560,7 @@ impl GalleryApp {
             ))
             .child(
                 List::new(Arc::clone(&self.variable_items))
+                    .revision(1)
                     .buffer(4)
                     .key(|item| item.clone())
                     .row(|item| {
@@ -598,6 +607,43 @@ impl GalleryApp {
                             .align_items(Align::Center)
                             .child(Text::new(format!("{item} · v{}", bumps)).size(15).grow(1.0))
                             .child(Button::new("Tap").action("recycled:tap"))
+                            .into()
+                    }),
+            )
+            .into()
+    }
+
+    fn list_recycled_form(&self) -> Element {
+        let notes = Arc::clone(&self.recycled_notes);
+        Column::new()
+            .padding(24)
+            .spacing(12)
+            .width_percent(1.0)
+            .height_percent(1.0)
+            .align_items(Align::Start)
+            .child(back_button())
+            .child(Text::new("List (recycled, form)").size(26).bold())
+            .child(caption(
+                "A focused field returns with its value after its row is recycled.",
+            ))
+            .child(Button::new("Refresh").action("recycled:refresh"))
+            .child(
+                List::new(Arc::clone(&self.recycled_form_rows))
+                    .item_height(56.0)
+                    .recycled()
+                    .key(|index| index.to_string())
+                    .row(move |index| {
+                        Row::new()
+                            .width_percent(1.0)
+                            .padding_each(EdgeInsets::symmetric(12, 6))
+                            .align_items(Align::Center)
+                            .child(
+                                TextField::new(notes[*index].clone())
+                                    .placeholder(format!("Note {}", index + 1))
+                                    .action(format!("recycled:note:{index}"))
+                                    .size(15)
+                                    .grow(1.0),
+                            )
                             .into()
                     }),
             )
@@ -730,6 +776,7 @@ impl App for GalleryApp {
             Demo::ListVariable => self.list_variable(),
             Demo::ListRecycled => self.list_recycled(),
             Demo::ListRecycledVariable => self.list_recycled_variable(),
+            Demo::ListRecycledForm => self.list_recycled_form(),
         }
     }
 
@@ -752,6 +799,21 @@ impl App for GalleryApp {
             } => {
                 self.email = value.to_string();
                 self.submitted = false;
+            }
+            Event::TextChanged { action, value } => {
+                let Some(index) = action
+                    .strip_prefix("recycled:note:")
+                    .and_then(|index| index.parse::<usize>().ok())
+                else {
+                    return false;
+                };
+                if index >= self.recycled_notes.len() {
+                    return false;
+                }
+                Arc::make_mut(&mut self.recycled_notes)[index] = value.to_string();
+                // The native field already shows the text; rebinding the whole
+                // list on every keystroke would only disturb typing.
+                return false;
             }
             Event::Submitted {
                 action: "form:submit",
@@ -782,6 +844,8 @@ impl App for GalleryApp {
                 "open:list-variable" => self.demo = Demo::ListVariable,
                 "open:list-recycled" => self.demo = Demo::ListRecycled,
                 "open:list-recycled-variable" => self.demo = Demo::ListRecycledVariable,
+                "open:list-recycled-form" => self.demo = Demo::ListRecycledForm,
+                "recycled:refresh" => {}
                 "recycled:tap" => self.recycled_taps += 1,
                 "recycled:bump" => self.recycled_bumps += 1,
                 "recycled:shrink" => {

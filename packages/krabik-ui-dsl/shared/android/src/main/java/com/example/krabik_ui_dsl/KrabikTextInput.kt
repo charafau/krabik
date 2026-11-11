@@ -64,11 +64,16 @@ class KrabikTextInput(
         }
 
         setOnFocusChangeListener { _, hasFocus ->
-            root.onFocusChanged(nodeId, hasFocus)
-            if (hasFocus) {
-                // Ask the surrounding scroll view to reveal the field once the
-                // keyboard has changed the viewport.
-                post {
+            // RecyclerView restores focus during a layout pass. Rendering from
+            // here would notify its adapter mid-layout, so both directions are
+            // reported on the next main-loop turn; Rust also sees whether the
+            // field is still attached, which distinguishes recycling from a
+            // real user blur.
+            post {
+                root.onFocusChanged(nodeId, hasFocus, isAttachedToWindow)
+                if (hasFocus) {
+                    // Ask the surrounding scroll view to reveal the field once
+                    // the keyboard has changed the viewport.
                     requestRectangleOnScreen(Rect(0, 0, width, height), true)
                 }
             }
