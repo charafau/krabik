@@ -1,11 +1,14 @@
 package com.example.krabik_ui_dsl
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
+import android.widget.ProgressBar
 import android.widget.ScrollView
+import kotlin.math.roundToInt
 
 /**
  * Creates the native containers that have no direct `View` counterpart.
@@ -42,6 +45,21 @@ object KrabikViews {
         scroll.isHorizontalFadingEdgeEnabled = horizontal
         return scroll
     }
+
+    /** Creates the horizontal progress bar used for `ProgressIndicator` nodes. */
+    @JvmStatic
+    fun createProgress(context: Context): ProgressBar =
+        ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal)
+
+    /** Applies a `0..1` fraction and the fill color to a progress bar. */
+    @JvmStatic
+    fun updateProgress(view: ProgressBar, value: Float, color: Int) {
+        view.max = PROGRESS_STEPS
+        view.progress = (value.coerceIn(0f, 1f) * PROGRESS_STEPS).roundToInt()
+        view.progressTintList = ColorStateList.valueOf(color)
+    }
+
+    private const val PROGRESS_STEPS = 1000
 }
 
 /**

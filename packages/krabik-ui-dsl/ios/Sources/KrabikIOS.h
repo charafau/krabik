@@ -22,6 +22,7 @@ void krabik_ios_on_text_changed(uint64_t handle, uint64_t node_id, const char *t
 void krabik_ios_on_submitted(uint64_t handle, uint64_t node_id);
 void krabik_ios_on_focus_changed(uint64_t handle, uint64_t node_id, bool focused);
 void krabik_ios_on_checked_changed(uint64_t handle, uint64_t node_id, bool checked);
+void krabik_ios_on_slider_changed(uint64_t handle, uint64_t node_id, double value);
 
 #ifdef __cplusplus
 }

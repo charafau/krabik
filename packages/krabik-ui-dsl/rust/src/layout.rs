@@ -38,6 +38,21 @@ const BUTTON_MIN_HEIGHT: f32 = 20.0;
 const SWITCH_WIDTH: f32 = 52.0;
 /// The default intrinsic height of a switch in logical points.
 const SWITCH_HEIGHT: f32 = 32.0;
+/// The side of a checkbox or radio indicator in logical points.
+const CHECK_INDICATOR: f32 = 20.0;
+/// The space reserved between a check indicator and its label.
+///
+/// This covers the native button drawable and the control's internal text
+/// inset, so the measured label always fits next to the indicator.
+const CHECK_GAP: f32 = 28.0;
+/// The minimum touch height of a checkbox or radio button.
+const CHECK_HEIGHT: f32 = 48.0;
+/// The intrinsic height of a slider.
+const SLIDER_HEIGHT: f32 = 40.0;
+/// The intrinsic height of a progress indicator.
+const PROGRESS_HEIGHT: f32 = 6.0;
+/// The width assumed for a slider or progress indicator without a constraint.
+const CONTROL_WIDTH: f32 = 200.0;
 
 /// Calculates the absolute frame of every node in the tree.
 pub fn compute(root: &UiNode, viewport: Size, measurer: &dyn Measure) -> LayoutResult {
@@ -314,6 +329,30 @@ fn content_size(
             max_width.map_or(SWITCH_WIDTH, |width| width.min(SWITCH_WIDTH)),
             SWITCH_HEIGHT,
         ),
+        NodeKind::Checkbox(props) | NodeKind::RadioButton(props) => {
+            let inner_width = max_width.map(|width| (width - CHECK_INDICATOR - CHECK_GAP).max(0.0));
+            let label = TextProps {
+                content: props.label.clone(),
+                size: props.size,
+                color: props.color,
+                weight: props.weight,
+                ..TextProps::new("")
+            };
+            let text = measurer.measure(
+                &label,
+                Constraints {
+                    max_width: inner_width,
+                    max_height: None,
+                },
+            );
+            Size::new(
+                text.width + CHECK_INDICATOR + CHECK_GAP,
+                text.height.max(CHECK_HEIGHT),
+            )
+        }
+        // A slider fills the width it is given and has a fixed touch height.
+        NodeKind::Slider(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), SLIDER_HEIGHT),
+        NodeKind::Progress(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), PROGRESS_HEIGHT),
         // Images are sized explicitly by the application in this milestone.
         NodeKind::Image(_) => Size::ZERO,
         _ => Size::ZERO,
@@ -377,8 +416,8 @@ mod tests {
     use crate::measure::ApproximateMeasure;
     use crate::tree::ROOT_ID;
     use crate::ui::{
-        Button, Column, EdgeInsets, Element, Image, ImageSource, Row, ScrollView, Spacer, Switch,
-        Text, TextField,
+        Button, Checkbox, Column, EdgeInsets, Element, Image, ImageSource, ProgressIndicator,
+        RadioButton, Row, ScrollView, Slider, Spacer, Switch, Text, TextField,
     };
 
     /// Measures every text as the same fixed box.
@@ -767,6 +806,33 @@ mod tests {
             frames[&tree.children[0].children[0].id],
             Rect::new(0.0, 0.0, 80.0, 40.0)
         );
+    }
+
+    #[test]
+    fn new_controls_have_intrinsic_sizes() {
+        let element: Element = Column::new()
+            .width(300)
+            .child(Checkbox::new("Wi-Fi", false))
+            .child(RadioButton::new("Large", true))
+            .child(Slider::new(0.5).width(300))
+            .child(ProgressIndicator::new(0.5).width(300))
+            .into();
+
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &ApproximateMeasure).frames;
+        let column = &tree.children[0];
+
+        let checkbox = frames[&column.children[0].id];
+        let radio = frames[&column.children[1].id];
+        let slider = frames[&column.children[2].id];
+        let progress = frames[&column.children[3].id];
+
+        assert!(checkbox.width > 28.0 && checkbox.height >= 48.0);
+        assert!(radio.width > 28.0 && radio.height >= 48.0);
+        assert_eq!(slider.width, 300.0);
+        assert_eq!(slider.height, 40.0);
+        assert_eq!(progress.width, 300.0);
+        assert_eq!(progress.height, 6.0);
     }
 
     #[test]

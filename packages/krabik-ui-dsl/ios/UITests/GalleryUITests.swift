@@ -18,6 +18,33 @@ final class GalleryUITests: XCTestCase {
         app = nil
     }
 
+    func testControls() throws {
+        open("Controls")
+        XCTAssertTrue(app.staticTexts["Notifications are off."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Wi-Fi is on."].waitForExistence(timeout: 5))
+
+        let wifi = app.buttons["Wi-Fi"]
+        XCTAssertTrue(wifi.waitForExistence(timeout: 5))
+        wifi.tap()
+        XCTAssertTrue(app.staticTexts["Wi-Fi is off."].waitForExistence(timeout: 5))
+
+        app.buttons["Large"].tap()
+        XCTAssertTrue(app.staticTexts["Size: Large"].waitForExistence(timeout: 5))
+
+        let slider = app.sliders.firstMatch
+        XCTAssertTrue(slider.waitForExistence(timeout: 5))
+        if !slider.isHittable {
+            app.swipeUp()
+        }
+        slider.adjust(toNormalizedSliderPosition: 0.75)
+        let volume = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Volume: 7"),
+        ).firstMatch
+        XCTAssertTrue(volume.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.progressIndicators.firstMatch.exists)
+        capture("16-controls")
+    }
+
     func testGalleryDemos() throws {
         capture("01-gallery")
 

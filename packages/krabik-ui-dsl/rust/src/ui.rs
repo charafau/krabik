@@ -327,6 +327,87 @@ impl SwitchProps {
     }
 }
 
+/// Platform-independent properties of a checkbox or radio button.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CheckProps {
+    /// The label shown next to the control.
+    pub label: String,
+    /// Whether the control is selected.
+    pub checked: bool,
+    /// The action dispatched whenever the control is toggled.
+    pub action: Cow<'static, str>,
+    /// Font size of the label in logical points.
+    pub size: f32,
+    /// ARGB color of the label.
+    pub color: u32,
+    /// Font weight of the label.
+    pub weight: FontWeight,
+}
+
+impl CheckProps {
+    /// Creates a control with the given label and state.
+    pub fn new(label: impl Into<String>, checked: bool) -> Self {
+        Self {
+            label: label.into(),
+            checked,
+            action: Cow::Borrowed(""),
+            size: 16.0,
+            color: 0xFF00_0000,
+            weight: FontWeight::Normal,
+        }
+    }
+}
+
+/// The default accent color of sliders and progress indicators.
+pub const CONTROL_ACCENT: u32 = 0xFF21_96F3;
+
+/// Platform-independent properties of a slider.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SliderProps {
+    /// The current value.
+    pub value: f32,
+    /// The lowest selectable value.
+    pub min: f32,
+    /// The highest selectable value.
+    pub max: f32,
+    /// The action dispatched whenever the value changes.
+    pub action: Cow<'static, str>,
+    /// ARGB color of the active track and thumb.
+    pub color: u32,
+}
+
+impl SliderProps {
+    /// Creates a slider with the given value and the default range `0..=1`.
+    pub fn new(value: f32) -> Self {
+        Self {
+            value,
+            min: 0.0,
+            max: 1.0,
+            action: Cow::Borrowed(""),
+            color: CONTROL_ACCENT,
+        }
+    }
+}
+
+/// Platform-independent properties of a progress indicator.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProgressProps {
+    /// The progress in the range `0.0..=1.0`.
+    pub value: f32,
+    /// ARGB color of the filled part.
+    pub color: u32,
+}
+
+impl ProgressProps {
+    /// Creates a progress indicator with the given fraction.
+    pub fn new(value: f32) -> Self {
+        Self {
+            value,
+            color: CONTROL_ACCENT,
+        }
+    }
+}
+
 /// The axis a scroll container scrolls along.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Axis {
@@ -596,6 +677,10 @@ pub(crate) enum ElementKind {
     Button(ButtonProps),
     TextField(TextFieldProps),
     Switch(SwitchProps),
+    Checkbox(CheckProps),
+    RadioButton(CheckProps),
+    Slider(SliderProps),
+    Progress(ProgressProps),
     Image(ImageProps),
     Scroll(ScrollProps),
     List(ListProps),
@@ -615,6 +700,10 @@ impl ElementKind {
             Self::Button(_) => 5,
             Self::TextField(_) => 6,
             Self::Switch(_) => 10,
+            Self::Checkbox(_) => 12,
+            Self::RadioButton(_) => 13,
+            Self::Slider(_) => 14,
+            Self::Progress(_) => 15,
             Self::Image(_) => 7,
             Self::Scroll(props) => match props.axis {
                 Axis::Vertical => 8,
@@ -1139,6 +1228,163 @@ impl From<Switch> for Element {
     }
 }
 
+/// A native checkbox with a text label.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Checkbox(pub(crate) Element);
+
+impl Checkbox {
+    /// Creates a checkbox with the given label and state.
+    pub fn new(label: impl Into<String>, checked: bool) -> Self {
+        let label = label.into();
+        let mut element = Element::leaf(ElementKind::Checkbox(CheckProps::new(
+            label.clone(),
+            checked,
+        )));
+        element.style.accessibility_label = Some(label);
+        Self(element)
+    }
+
+    /// Sets whether the checkbox is selected.
+    pub fn checked(mut self, checked: bool) -> Self {
+        if let ElementKind::Checkbox(props) = &mut self.0.kind {
+            props.checked = checked;
+        }
+        self
+    }
+
+    /// Sets the action dispatched whenever the checkbox is toggled.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+        if let ElementKind::Checkbox(props) = &mut self.0.kind {
+            props.action = action.into();
+        }
+        self
+    }
+}
+
+impl From<Checkbox> for Element {
+    fn from(component: Checkbox) -> Self {
+        component.0
+    }
+}
+
+/// A native radio button with a text label.
+///
+/// Radio buttons are independent controls; mutual exclusion is application
+/// state, usually a selected index rendered as one checked button.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RadioButton(pub(crate) Element);
+
+impl RadioButton {
+    /// Creates a radio button with the given label and state.
+    pub fn new(label: impl Into<String>, checked: bool) -> Self {
+        let label = label.into();
+        let mut element = Element::leaf(ElementKind::RadioButton(CheckProps::new(
+            label.clone(),
+            checked,
+        )));
+        element.style.accessibility_label = Some(label);
+        Self(element)
+    }
+
+    /// Sets whether the radio button is selected.
+    pub fn checked(mut self, checked: bool) -> Self {
+        if let ElementKind::RadioButton(props) = &mut self.0.kind {
+            props.checked = checked;
+        }
+        self
+    }
+
+    /// Sets the action dispatched whenever the radio button is selected.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+        if let ElementKind::RadioButton(props) = &mut self.0.kind {
+            props.action = action.into();
+        }
+        self
+    }
+}
+
+impl From<RadioButton> for Element {
+    fn from(component: RadioButton) -> Self {
+        component.0
+    }
+}
+
+/// A native slider.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Slider(pub(crate) Element);
+
+impl Slider {
+    /// Creates a slider with the given value and the default range `0..=1`.
+    pub fn new(value: f32) -> Self {
+        Self(Element::leaf(ElementKind::Slider(SliderProps::new(value))))
+    }
+
+    /// Sets the lowest selectable value.
+    pub fn min(mut self, min: f32) -> Self {
+        if let ElementKind::Slider(props) = &mut self.0.kind {
+            props.min = min;
+        }
+        self
+    }
+
+    /// Sets the highest selectable value.
+    pub fn max(mut self, max: f32) -> Self {
+        if let ElementKind::Slider(props) = &mut self.0.kind {
+            props.max = max;
+        }
+        self
+    }
+
+    /// Sets the action dispatched whenever the value changes.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+        if let ElementKind::Slider(props) = &mut self.0.kind {
+            props.action = action.into();
+        }
+        self
+    }
+
+    /// Sets the ARGB color of the active track and thumb.
+    pub fn color(mut self, color: u32) -> Self {
+        if let ElementKind::Slider(props) = &mut self.0.kind {
+            props.color = color;
+        }
+        self
+    }
+}
+
+impl From<Slider> for Element {
+    fn from(component: Slider) -> Self {
+        component.0
+    }
+}
+
+/// A native determinate progress indicator.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProgressIndicator(pub(crate) Element);
+
+impl ProgressIndicator {
+    /// Creates a progress indicator with a fraction in `0.0..=1.0`.
+    pub fn new(value: f32) -> Self {
+        Self(Element::leaf(ElementKind::Progress(ProgressProps::new(
+            value.clamp(0.0, 1.0),
+        ))))
+    }
+
+    /// Sets the ARGB color of the filled part.
+    pub fn color(mut self, color: u32) -> Self {
+        if let ElementKind::Progress(props) = &mut self.0.kind {
+            props.color = color;
+        }
+        self
+    }
+}
+
+impl From<ProgressIndicator> for Element {
+    fn from(component: ProgressIndicator) -> Self {
+        component.0
+    }
+}
+
 /// A native image.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Image(pub(crate) Element);
@@ -1367,6 +1613,7 @@ impl Element {
             ElementKind::Text(props) => props.size = size,
             ElementKind::Button(props) => props.size = size,
             ElementKind::TextField(props) => props.size = size,
+            ElementKind::Checkbox(props) | ElementKind::RadioButton(props) => props.size = size,
             _ => {}
         }
     }
@@ -1376,6 +1623,7 @@ impl Element {
             ElementKind::Text(props) => props.color = color,
             ElementKind::Button(props) => props.color = color,
             ElementKind::TextField(props) => props.color = color,
+            ElementKind::Checkbox(props) | ElementKind::RadioButton(props) => props.color = color,
             _ => {}
         }
     }
@@ -1385,6 +1633,7 @@ impl Element {
             ElementKind::Text(props) => props.weight = weight,
             ElementKind::Button(props) => props.weight = weight,
             ElementKind::TextField(props) => props.weight = weight,
+            ElementKind::Checkbox(props) | ElementKind::RadioButton(props) => props.weight = weight,
             _ => {}
         }
     }
@@ -1397,11 +1646,17 @@ style_builder!(Text);
 style_builder!(Button);
 style_builder!(TextField);
 style_builder!(Switch);
+style_builder!(Checkbox);
+style_builder!(RadioButton);
+style_builder!(Slider);
+style_builder!(ProgressIndicator);
 style_builder!(Image);
 style_builder!(ScrollView);
 text_builder!(Text);
 text_builder!(Button);
 text_builder!(TextField);
+text_builder!(Checkbox);
+text_builder!(RadioButton);
 
 #[cfg(test)]
 mod tests {
