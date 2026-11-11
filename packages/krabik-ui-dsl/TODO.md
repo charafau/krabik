@@ -90,7 +90,9 @@ expands during tree build into a native scroll container whose content is
 `[top spacer, visible rows, bottom spacer]`. Only the rows around the viewport
 become elements and native views; the spacers give the scroll extent the full
 list height, so rows keep their absolute content position and native scrolling
-needs no repositioning when the window slides.
+needs no repositioning when the window slides. `List::recycled()` (Android)
+uses a native `RecyclerView` instead of this materialization; the rest of the
+section describes the windowed path.
 
 - Rows are keyed, so their node identifiers stay stable across window changes.
 - The runtime owns the scroll offset per list and rebuilds only when the
@@ -119,16 +121,25 @@ needs no repositioning when the window slides.
 - iOS reports offsets from a `UIScrollViewDelegate` implemented in Rust; the
   latest value is coalesced into one main-queue update, matching the other
   deferred events.
-- Gallery demo: 1000 rows with a 44-point row height and a four-row buffer.
+- Gallery demos: 1000 fixed rows (44-point, four-row buffer), 300
+  variable-height rows, and a 1000-row `RecyclerView` with a per-row button.
 
 Covered by Rust tests (window maths, spacer geometry, row-id stability,
-rebuild throttling) and an Espresso test that scrolls the demo and asserts the
-materialized row count stays bounded.
+rebuild throttling, variable-height convergence, focus pinning) and Espresso
+tests that scroll the windowed demo and assert the materialized row count stays
+bounded, plus the recycled demo (bounded attached rows, late-row scrolling,
+row action dispatch).
 
-**Remaining on this track:** the prefix sums are recomputed per build (fine for
-hundreds of rows, not for tens of thousands); recycled lists need per-holder
-diffing instead of re-creating content on bind, variable-height rows, and an
-iOS `UICollectionView` counterpart.
+**Remaining on this track:**
+
+- Recycled lists (Android prototype): diff a holder's content on bind instead
+  of re-creating it; support variable heights; drop stale row-action entries
+  for indices that are no longer attached; use ranged adapter notifications
+  instead of `notifyDataSetChanged` on count changes.
+- iOS has no `UICollectionView` counterpart yet; `recycled()` falls back to the
+  windowed implementation there.
+- The prefix sums are recomputed per build, which is fine for hundreds of rows
+  but not for tens of thousands.
 
 ### 3. Expand Native Widget Set ✅
 
@@ -262,9 +273,6 @@ matters for large lists.
 
 ## Future (not yet started)
 
-- Variable-height list rows (the runtime measures rows and keeps a prefix-sum
-  offset table; the platform view recycling of RecyclerView/UICollectionView is
-  only worth it if a profile asks for it)
 - Animations via native platform APIs
 - Native intrinsic measurement for switches and images
 - Disabled-state styling for custom backgrounds (native text already dims)
