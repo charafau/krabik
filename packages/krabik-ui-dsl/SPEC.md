@@ -649,10 +649,6 @@ The architecture should leave room for additional capabilities.
 
 More native components can be introduced over time:
 
-- Checkbox
-- RadioButton
-- Slider
-- ProgressIndicator
 - DatePicker
 - Dialog
 - BottomSheet

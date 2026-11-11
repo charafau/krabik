@@ -172,7 +172,7 @@ when the row returns; the runtime does not keep an off-screen cell attached.
 
 ### 3. Expand Native Widget Set ✅
 
-All core widgets from SPEC.md §7.1 are implemented on Android.
+All core widgets from SPEC.md §7.1 are implemented on Android and iOS.
 
 | Rust component | Android renderer | Platform widget |
 |---|---|---|
@@ -180,8 +180,18 @@ All core widgets from SPEC.md §7.1 are implemented on Android.
 | `Button` | [`configure_button()`](rust/src/android.rs) | `Button` |
 | `TextField` | [`update_text_field()`](rust/src/android.rs) | Custom `KrabikTextInput` (EditText) |
 | `Switch` | [`update_switch()`](rust/src/android.rs) | Custom `KrabikSwitch` (`android.widget.Switch`) |
+| `Checkbox` | [`update_check()`](rust/src/android.rs) | Custom `KrabikCheckBox` (`CheckBox`) |
+| `RadioButton` | [`update_check()`](rust/src/android.rs) | Custom `KrabikRadioButton` (`RadioButton`) |
+| `Slider` | [`update_slider()`](rust/src/android.rs) | Custom `KrabikSeekBar` (`SeekBar`) |
+| `ProgressIndicator` | [`update_progress()`](rust/src/android.rs) | `ProgressBar` (horizontal) |
 | `Image` | [`update_image()`](rust/src/android.rs) | `ImageView` (assets + URLs) |
 | `ScrollView` | [`create_scroll()`](rust/src/android.rs) | Custom scroll container (vertical + horizontal) |
+
+iOS renders the controls as `UIButton` with SF Symbol images (checkbox and
+radio), `UISlider`, and `UIProgressView`. Checkbox and radio buttons dispatch
+the same `Toggled` event as a switch; a slider dispatches `ValueChanged`.
+Radio buttons are independent controls, so the application renders the selected
+one and enforces mutual exclusion.
 
 Full `Style` system (applied via [`apply_style()`](rust/src/android.rs)):
 - Background color & linear gradients
@@ -197,7 +207,7 @@ Additional capabilities:
 - Multiline, secure and keyboard-configured inputs
 - Submit and focus events for inputs
 - Aspect-ratio sizing
-- Controls demo with native switches
+- Controls demo with switches, checks, radio buttons, a slider and a progress indicator, covered by `ControlsTest` on Android and `testControls` on iOS
 
 ### 5. Type-Safe State Management & Event Dispatch ✅
 
@@ -210,6 +220,7 @@ pub enum Event<'a> {
     Submitted { action: &'a str },
     FocusChanged { action: &'a str, focused: bool },
     Toggled { action: &'a str, checked: bool },
+    ValueChanged { action: &'a str, value: f32 },
 }
 ```
 
@@ -300,10 +311,57 @@ matters for large lists.
 
 ---
 
-## Future (not yet started)
+## Future backlog (not yet started)
 
-- Animations via native platform APIs
-- Native intrinsic measurement for switches and images
-- Disabled-state styling for custom backgrounds (native text already dims)
-- More widgets: Checkbox, RadioButton, Slider, ProgressIndicator, DatePicker, Dialog, BottomSheet, Navigation
-- Platform-specific extensions
+### Rendering & UX
+
+- Animations via native platform APIs (duration/curve properties on the
+  element description, applied from the renderer's operation diff).
+- Native intrinsic measurement for switches and images, so their intrinsic
+  size comes from the platform rather than the hard-coded defaults.
+- Disabled-state styling for custom backgrounds (native text already dims).
+- Continuous focus for recycled rows: today the field regains focus when its
+  row is bound again. Keeping the focused holder attached off-screen would need
+  a custom Android `LayoutManager`; iOS has no native collection-view
+  equivalent and would need a separate container.
+- Keep a row's scroll position and focus through a screen swap at the same
+  tree position where possible.
+
+### Widgets
+
+- Larger design work (hosting, presentation, back handling): DatePicker,
+  Dialog, BottomSheet, Navigation.
+- A radio-group container that owns mutual exclusion, instead of independent
+  radio buttons that the application coordinates.
+- Stepped sliders (quantized values) and indeterminate progress indicators.
+
+### Lists & scaling
+
+- Automatic item fingerprint, so `List::revision` becomes optional for large
+  lists; unversioned lists are currently fully re-keyed on every build.
+- Incremental or estimated prefix sums (for example a Fenwick tree) if
+  tens of thousands of mixed-height rows become a target.
+- RecyclerView: payload-based partial row updates instead of a full
+  `notifyItemRangeChanged` of the visible range on every render.
+- UICollectionView: batch updates with insert/remove ranges instead of
+  `reloadData` when only the item count changes.
+
+### Platform-specific extensions
+
+- Expose platform-only capabilities without leaking them into the shared DSL
+  (for example Android ripple/press states, iOS SF Symbols or blur effects).
+
+## Nice-to-haves
+
+- CI: verify the existing Android job on a runner, then add the Android
+  emulator (`connectedDebugAndroidTest`) and iOS simulator (`xcodebuild test`)
+  jobs. Tracked under "Remaining ❌" above.
+- The gallery's recycled form demo deliberately returns `false` from its text
+  handler to avoid a list rebind per keystroke; a real form may want to render
+  on every edit.
+- `List::revision` is manual. Losing the cached prefix by accident is safe but
+  slow; a debug warning when a very large list has no revision would catch it.
+- Benchmark fixtures for large lists (10k+ rows) so prefix/key regressions show
+  up in CI rather than in a demo.
+- Document the recycled-row focus rules (restore on rebind, real blur clears)
+  in `SPEC.md`, not only the gallery demo and the API docs.
