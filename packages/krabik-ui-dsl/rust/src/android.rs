@@ -1971,6 +1971,31 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnScr
     });
 }
 
+/// Dispatches Android's system back button to the application.
+///
+/// Returns whether the application handled the event; when it did not, the
+/// Activity falls back to its normal back behavior.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnBack<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+) -> jboolean {
+    run(&mut unenv, "nativeOnBack", |env| {
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(false as jboolean);
+        };
+        let Some(state) = states.get_mut(&handle) else {
+            return Ok(false as jboolean);
+        };
+        let handled = state.app.handle(Event::Back);
+        if handled {
+            state.render(env)?;
+        }
+        Ok(handled as jboolean)
+    })
+}
+
 /// Builds one recycled-list row into the holder view the adapter provides.
 ///
 /// Returns the row height in pixels, so a variable-height list can size the
