@@ -61,6 +61,13 @@ pub enum Event<'a> {
         /// The index of the newly selected option.
         index: usize,
     },
+    /// The date of a date picker changed.
+    DateChanged {
+        /// The action configured on the date picker.
+        action: &'a str,
+        /// The newly selected date.
+        date: crate::ui::DateValue,
+    },
 }
 
 impl Event<'_> {
@@ -73,7 +80,8 @@ impl Event<'_> {
             | Self::FocusChanged { action, .. }
             | Self::Toggled { action, .. }
             | Self::ValueChanged { action, .. }
-            | Self::Selected { action, .. } => action,
+            | Self::Selected { action, .. }
+            | Self::DateChanged { action, .. } => action,
         }
     }
 }

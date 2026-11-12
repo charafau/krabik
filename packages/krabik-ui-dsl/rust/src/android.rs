@@ -26,9 +26,9 @@ use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Axis, CheckProps, EdgeInsets, FontWeight, GradientDirection, ImageProps, ImageScale,
-    ImageSource, ImeAction, KeyboardType, ProgressProps, RadioGroupProps, SliderProps, SwitchProps,
-    TextAlign, TextFieldProps, TextProps, snap_slider_value,
+    Axis, CheckProps, DatePickerMode, DatePickerProps, EdgeInsets, FontWeight, GradientDirection,
+    ImageProps, ImageScale, ImageSource, ImeAction, KeyboardType, ProgressProps, RadioGroupProps,
+    SliderProps, SwitchProps, TextAlign, TextFieldProps, TextProps, snap_slider_value,
 };
 
 mod handles;
@@ -55,6 +55,7 @@ const SWITCH_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSwitch")
 const CHECKBOX_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikCheckBox");
 const RADIO_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioButton");
 const RADIO_GROUP_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioGroup");
+const DATE_PICKER_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikDatePicker");
 const SEEK_BAR_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSeekBar");
 const PROGRESS_BAR_CLASS: &JNIStr = jni_str!("android/widget/ProgressBar");
 const KRABIK_IMAGES_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikImages");
@@ -288,6 +289,7 @@ struct RowAction {
     focus: Option<Cow<'static, str>>,
     toggle: Option<Cow<'static, str>>,
     selected: Option<Cow<'static, str>>,
+    date: Option<Cow<'static, str>>,
     value: Option<Cow<'static, str>>,
     value_min: f32,
     value_max: f32,
@@ -626,6 +628,10 @@ impl AndroidState {
                     ids.radio_group_ctor
                         .construct(env, &ids.radio_group, &child_context)?
                 }
+                NodeKind::DatePicker(_) => {
+                    ids.date_picker_ctor
+                        .construct(env, &ids.date_picker, &child_context)?
+                }
                 NodeKind::Slider(_) => {
                     ids.seek_bar_ctor
                         .construct(env, &ids.seek_bar, &child_context)?
@@ -675,6 +681,8 @@ impl AndroidState {
             update_check(env, &view, props, true)?;
         } else if let NodeKind::RadioGroup(props) = &node.kind {
             update_radio_group(env, &view, props)?;
+        } else if let NodeKind::DatePicker(props) = &node.kind {
+            update_date_picker(env, &view, props)?;
         } else if let NodeKind::Slider(props) = &node.kind {
             update_slider(env, &view, props)?;
         } else if let NodeKind::Progress(props) = &node.kind {
@@ -846,6 +854,10 @@ impl AndroidState {
                 }
                 NodeKind::RadioGroup(props) if !props.action.is_empty() => {
                     action.selected = Some(props.action.clone());
+                    any = true;
+                }
+                NodeKind::DatePicker(props) if !props.action.is_empty() => {
+                    action.date = Some(props.action.clone());
                     any = true;
                 }
                 NodeKind::Slider(props) if !props.action.is_empty() => {
@@ -1090,6 +1102,27 @@ fn update_check(
         ids.checkbox_set_checked_silently
     };
     setter.call_void(env, view, &[JValue::Bool(props.checked)])
+}
+
+fn update_date_picker(
+    env: &mut Env<'_>,
+    view: &JObject<'_>,
+    props: &DatePickerProps,
+) -> JniResult<()> {
+    let ids = jni_handles(env)?;
+    ids.configure_date_picker.call_void(
+        env,
+        view,
+        &[
+            JValue::Int(props.value.year),
+            JValue::Int(props.value.month as jint),
+            JValue::Int(props.value.day as jint),
+            JValue::Bool(props.mode == DatePickerMode::Inline),
+            JValue::Float(props.size),
+            JValue::Int(props.color as jint),
+            JValue::Bool(matches!(props.weight, FontWeight::Bold)),
+        ],
+    )
 }
 
 fn update_slider(env: &mut Env<'_>, view: &JObject<'_>, props: &SliderProps) -> JniResult<()> {
@@ -1823,6 +1856,46 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSli
             && state.app.handle(Event::ValueChanged {
                 action: &action,
                 value,
+            })
+        {
+            state.render(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Dispatches a date selection back into the Rust tree.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnDateChanged<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    node_id: jlong,
+    year: jint,
+    month: jint,
+    day: jint,
+) {
+    run(&mut unenv, "nativeOnDateChanged", |env| {
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        let Some(state) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+
+        let id = NodeId(node_id as u64);
+        let action = state
+            .runtime
+            .date_picker_action(id)
+            .or_else(|| state.row_actions.get(&id).and_then(|row| row.date.clone()));
+        let date =
+            crate::ui::DateValue::new(year, month.clamp(0, 255) as u8, day.clamp(0, 255) as u8);
+        if let Some(action) = action
+            && state.app.handle(Event::DateChanged {
+                action: &action,
+                date,
             })
         {
             state.render(env)?;

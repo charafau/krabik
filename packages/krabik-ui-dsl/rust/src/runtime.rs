@@ -437,6 +437,15 @@ impl Runtime {
         }
     }
 
+    /// Returns the action of the date picker with the given identifier, if any.
+    pub fn date_picker_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
+        let node = tree::find(&self.tree, id)?;
+        match &node.kind {
+            NodeKind::DatePicker(props) if !props.action.is_empty() => Some(props.action.clone()),
+            _ => None,
+        }
+    }
+
     /// Returns the action of the text input with the given identifier, if any.
     pub fn text_field_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;

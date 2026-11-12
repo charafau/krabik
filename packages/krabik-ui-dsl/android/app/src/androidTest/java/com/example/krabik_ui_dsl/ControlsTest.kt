@@ -8,8 +8,10 @@ import androidx.test.espresso.action.Press
 import androidx.test.espresso.action.Swipe
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.scrollTo
+import androidx.test.espresso.action.ViewActions.swipeUp
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -37,6 +39,22 @@ class ControlsTest {
             onView(withText("Size: Large")).check(matches(isDisplayed()))
         }
     }
+
+    private fun swipeUntil(text: String) {
+        repeat(10) {
+            if (isVisible(text)) return
+            onView(isRoot()).perform(swipeUp())
+            Thread.sleep(300)
+        }
+    }
+
+    private fun isVisible(text: String): Boolean =
+        try {
+            onView(withText(text)).check(matches(isDisplayed()))
+            true
+        } catch (_: Throwable) {
+            false
+        }
 
     @Test
     fun sliderUpdatesTheValueAndProgressIndicator() {
@@ -71,6 +89,14 @@ class ControlsTest {
             )
             onView(withText("Stepped: 100")).check(matches(withText("Stepped: 100")))
             onView(withContentDescription("Loading spinner")).check(matches(isDisplayed()))
+
+            // The compact date field opens the platform date picker and keeps
+            // the selected calendar date.
+            swipeUntil("Date: 2026-11-12")
+            onView(withText("Date: 2026-11-12")).check(matches(isDisplayed()))
+            onView(withText("2026-11-12")).perform(click())
+            onView(withText("OK")).perform(click())
+            onView(withText("Date: 2026-11-12")).check(matches(isDisplayed()))
         }
     }
 }

@@ -358,6 +358,60 @@ impl CheckProps {
     }
 }
 
+/// A calendar date in the device's local calendar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DateValue {
+    /// Full year, for example `2026`.
+    pub year: i32,
+    /// Month in the range `1..=12`.
+    pub month: u8,
+    /// Day in the range `1..=31`.
+    pub day: u8,
+}
+
+impl DateValue {
+    /// Creates a date, clamping the month and day to their valid ranges.
+    pub const fn new(year: i32, month: u8, day: u8) -> Self {
+        Self {
+            year,
+            month: if month < 1 {
+                1
+            } else if month > 12 {
+                12
+            } else {
+                month
+            },
+            day: if day < 1 {
+                1
+            } else if day > 31 {
+                31
+            } else {
+                day
+            },
+        }
+    }
+}
+
+impl fmt::Display for DateValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{:04}-{:02}-{:02}",
+            self.year, self.month, self.day
+        )
+    }
+}
+
+/// How a [`DatePicker`] presents its calendar.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DatePickerMode {
+    /// A compact field that opens the platform's date picker.
+    #[default]
+    Compact,
+    /// An inline calendar that is always visible.
+    Inline,
+}
+
 /// The default accent color of sliders and progress indicators.
 pub const CONTROL_ACCENT: u32 = 0xFF21_96F3;
 
@@ -478,6 +532,37 @@ impl RadioGroupProps {
             color: 0xFF00_0000,
             weight: FontWeight::Normal,
             spacing: 8.0,
+        }
+    }
+}
+
+/// Platform-independent properties of a date picker.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DatePickerProps {
+    /// The selected date.
+    pub value: DateValue,
+    /// How the calendar is presented.
+    pub mode: DatePickerMode,
+    /// The action dispatched whenever the date changes.
+    pub action: Cow<'static, str>,
+    /// Font size of the compact field in logical points.
+    pub size: f32,
+    /// ARGB color of the compact field's text.
+    pub color: u32,
+    /// Font weight of the compact field's text.
+    pub weight: FontWeight,
+}
+
+impl DatePickerProps {
+    /// Creates a compact date picker with the given date.
+    pub fn new(value: DateValue) -> Self {
+        Self {
+            value,
+            mode: DatePickerMode::Compact,
+            action: Cow::Borrowed(""),
+            size: 16.0,
+            color: 0xFF00_0000,
+            weight: FontWeight::Normal,
         }
     }
 }
@@ -754,6 +839,7 @@ pub(crate) enum ElementKind {
     Checkbox(CheckProps),
     RadioButton(CheckProps),
     RadioGroup(RadioGroupProps),
+    DatePicker(DatePickerProps),
     Slider(SliderProps),
     Progress(ProgressProps),
     Spinner(SpinnerProps),
@@ -779,6 +865,7 @@ impl ElementKind {
             Self::Checkbox(_) => 12,
             Self::RadioButton(_) => 13,
             Self::RadioGroup(_) => 16,
+            Self::DatePicker(_) => 18,
             Self::Slider(_) => 14,
             Self::Progress(_) => 15,
             Self::Spinner(_) => 17,
@@ -1434,6 +1521,41 @@ impl From<RadioGroup> for Element {
     }
 }
 
+/// A native date picker.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DatePicker(pub(crate) Element);
+
+impl DatePicker {
+    /// Creates a compact date picker with the given date.
+    pub fn new(value: DateValue) -> Self {
+        Self(Element::leaf(ElementKind::DatePicker(
+            DatePickerProps::new(value),
+        )))
+    }
+
+    /// Chooses between the compact field and the inline calendar.
+    pub fn mode(mut self, mode: DatePickerMode) -> Self {
+        if let ElementKind::DatePicker(props) = &mut self.0.kind {
+            props.mode = mode;
+        }
+        self
+    }
+
+    /// Sets the action dispatched whenever the date changes.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+        if let ElementKind::DatePicker(props) = &mut self.0.kind {
+            props.action = action.into();
+        }
+        self
+    }
+}
+
+impl From<DatePicker> for Element {
+    fn from(component: DatePicker) -> Self {
+        component.0
+    }
+}
+
 /// A native slider.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Slider(pub(crate) Element);
@@ -1757,6 +1879,7 @@ impl Element {
             ElementKind::TextField(props) => props.size = size,
             ElementKind::Checkbox(props) | ElementKind::RadioButton(props) => props.size = size,
             ElementKind::RadioGroup(props) => props.size = size,
+            ElementKind::DatePicker(props) => props.size = size,
             _ => {}
         }
     }
@@ -1768,6 +1891,7 @@ impl Element {
             ElementKind::TextField(props) => props.color = color,
             ElementKind::Checkbox(props) | ElementKind::RadioButton(props) => props.color = color,
             ElementKind::RadioGroup(props) => props.color = color,
+            ElementKind::DatePicker(props) => props.color = color,
             _ => {}
         }
     }
@@ -1779,6 +1903,7 @@ impl Element {
             ElementKind::TextField(props) => props.weight = weight,
             ElementKind::Checkbox(props) | ElementKind::RadioButton(props) => props.weight = weight,
             ElementKind::RadioGroup(props) => props.weight = weight,
+            ElementKind::DatePicker(props) => props.weight = weight,
             _ => {}
         }
     }
@@ -1794,6 +1919,7 @@ style_builder!(Switch);
 style_builder!(Checkbox);
 style_builder!(RadioButton);
 style_builder!(RadioGroup);
+style_builder!(DatePicker);
 style_builder!(Slider);
 style_builder!(ProgressIndicator);
 style_builder!(Image);
@@ -1804,6 +1930,7 @@ text_builder!(TextField);
 text_builder!(Checkbox);
 text_builder!(RadioButton);
 text_builder!(RadioGroup);
+text_builder!(DatePicker);
 
 #[cfg(test)]
 mod tests {
@@ -1909,5 +2036,27 @@ mod tests {
             panic!("expected spinner");
         };
         assert_eq!(props.color, 0xFF00_897B);
+    }
+
+    #[test]
+    fn dates_format_and_clamp() {
+        assert_eq!(DateValue::new(2026, 11, 12).to_string(), "2026-11-12");
+        assert_eq!(DateValue::new(2026, 0, 0), DateValue::new(2026, 1, 1));
+        assert_eq!(DateValue::new(2026, 13, 40), DateValue::new(2026, 12, 31));
+    }
+
+    #[test]
+    fn date_picker_keeps_its_mode_and_action() {
+        let element: Element = DatePicker::new(DateValue::new(2026, 11, 12))
+            .mode(DatePickerMode::Inline)
+            .action("pick")
+            .into();
+
+        let ElementKind::DatePicker(props) = element.kind else {
+            panic!("expected date picker");
+        };
+        assert_eq!(props.value, DateValue::new(2026, 11, 12));
+        assert_eq!(props.mode, DatePickerMode::Inline);
+        assert_eq!(props.action, "pick");
     }
 }

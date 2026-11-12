@@ -1,9 +1,9 @@
 //! One page per widget for the showcase app.
 
 use krabik_ui_dsl::ui::{
-    Align, Button, Checkbox, Column, EdgeInsets, Element, Gradient, Image, ImageScale, ImageSource,
-    Justify, List, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider, Spacer,
-    Switch, Text, TextAlign, TextField,
+    Align, Button, Checkbox, Column, DatePicker, DatePickerMode, EdgeInsets, Element, Gradient,
+    Image, ImageScale, ImageSource, Justify, List, ProgressIndicator, RadioButton, RadioGroup, Row,
+    ScrollView, Slider, Spacer, Switch, Text, TextAlign, TextField,
 };
 
 use crate::{Page, ShowcaseApp};
@@ -67,6 +67,7 @@ pub(crate) fn view(app: &ShowcaseApp) -> Element {
         Page::Checkbox => checkbox_page(app),
         Page::RadioButtons => radio_buttons_page(app),
         Page::RadioGroup => radio_group_page(app),
+        Page::DatePicker => date_picker_page(app),
         Page::Slider => slider_page(app),
         Page::Progress => progress_page(app),
         Page::Spinner => spinner_page(),
@@ -102,6 +103,7 @@ fn home() -> Element {
                 ("Checkbox", "page:checkbox"),
                 ("Radio buttons", "page:radio-buttons"),
                 ("Radio group", "page:radio-group"),
+                ("Date picker", "page:date-picker"),
             ],
         ),
         (
@@ -317,6 +319,30 @@ fn radio_group_page(app: &ShowcaseApp) -> Element {
                 "Selected: {}",
                 ["Small", "Medium", "Large"][app.size_choice]
             )),
+        ],
+    )
+}
+
+fn date_picker_page(app: &ShowcaseApp) -> Element {
+    page(
+        "Date picker",
+        "Compact fields open the platform picker; inline calendars stay visible.",
+        body![
+            Text::new(format!("Compact: {}", app.date))
+                .size(18)
+                .color(COLOR_TEXT),
+            DatePicker::new(app.date)
+                .action("demo:date")
+                .accessibility_label("Compact date"),
+            caption("Tap the field to open the native date picker."),
+            Text::new(format!("Inline: {}", app.inline_date))
+                .size(18)
+                .color(COLOR_TEXT),
+            DatePicker::new(app.inline_date)
+                .mode(DatePickerMode::Inline)
+                .action("demo:date-inline")
+                .accessibility_label("Inline date"),
+            caption("The inline calendar reports every selected day."),
         ],
     )
 }

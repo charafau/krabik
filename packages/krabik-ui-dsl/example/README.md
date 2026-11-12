@@ -23,7 +23,7 @@ WebViews, or custom renderers.
 ```text
 Home
 ├── Text & layout   Text · Button · Text field · Layouts
-├── Inputs          Switch · Checkbox · Radio buttons · Radio group
+├── Inputs          Switch · Checkbox · Radio buttons · Radio group · Date picker
 ├── Values          Slider · Progress · Spinner
 ├── Media           Image · Scroll view
 ├── Lists           Windowed list · Recycled list
@@ -34,6 +34,8 @@ Highlights:
 
 - **Radio group** — the group owns mutual exclusion and reports the selected index through
   `Event::Selected`.
+- **Date picker** — a compact native field and an inline calendar, both reporting `DateValue`
+  through `Event::DateChanged`.
 - **Slider** — a continuous slider and a stepped one; the DSL quantizes the latter to multiples of
   ten before the app sees the value.
 - **Progress** — a determinate bar driven by buttons and an indeterminate spinner.

@@ -53,6 +53,12 @@ const SLIDER_HEIGHT: f32 = 40.0;
 const PROGRESS_HEIGHT: f32 = 6.0;
 /// The default side of an indeterminate spinner in logical points.
 const SPINNER_SIZE: f32 = 24.0;
+/// The width assumed for a compact date field without a constraint.
+const DATE_PICKER_WIDTH: f32 = 200.0;
+/// The height of a compact date field.
+const DATE_PICKER_HEIGHT: f32 = 48.0;
+/// The default inline calendar size.
+const INLINE_DATE_PICKER: f32 = 320.0;
 /// The width assumed for a slider or progress indicator without a constraint.
 const CONTROL_WIDTH: f32 = 200.0;
 
@@ -380,6 +386,17 @@ fn content_size(
             height += props.spacing * (props.options.len() - 1) as f32;
             Size::new(widest + CHECK_INDICATOR + CHECK_GAP, height)
         }
+        NodeKind::DatePicker(props) => match props.mode {
+            // A date field keeps its compact size unless the style sets one.
+            crate::ui::DatePickerMode::Compact => Size::new(DATE_PICKER_WIDTH, DATE_PICKER_HEIGHT),
+            // An inline calendar fits the available width up to its natural size.
+            crate::ui::DatePickerMode::Inline => Size::new(
+                max_width
+                    .unwrap_or(INLINE_DATE_PICKER)
+                    .min(INLINE_DATE_PICKER),
+                INLINE_DATE_PICKER,
+            ),
+        },
         // A slider fills the width it is given and has a fixed touch height.
         NodeKind::Slider(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), SLIDER_HEIGHT),
         NodeKind::Progress(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), PROGRESS_HEIGHT),
@@ -447,8 +464,9 @@ mod tests {
     use crate::measure::ApproximateMeasure;
     use crate::tree::ROOT_ID;
     use crate::ui::{
-        Button, Checkbox, Column, EdgeInsets, Element, Image, ImageSource, ProgressIndicator,
-        RadioButton, RadioGroup, Row, ScrollView, Slider, Spacer, Switch, Text, TextField,
+        Button, Checkbox, Column, DatePicker, DatePickerMode, DateValue, EdgeInsets, Element,
+        Image, ImageSource, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider,
+        Spacer, Switch, Text, TextField,
     };
 
     /// Measures every text as the same fixed box.
@@ -850,6 +868,8 @@ mod tests {
             .child(ProgressIndicator::new(0.5).width(300))
             .child(ProgressIndicator::indeterminate())
             .child(RadioGroup::new(["Small", "Medium", "Large"]).spacing(8))
+            .child(DatePicker::new(DateValue::new(2026, 11, 12)))
+            .child(DatePicker::new(DateValue::new(2026, 11, 12)).mode(DatePickerMode::Inline))
             .into();
 
         let tree = tree::build(&element);
@@ -862,6 +882,8 @@ mod tests {
         let progress = frames[&column.children[3].id];
         let spinner = frames[&column.children[4].id];
         let group = frames[&column.children[5].id];
+        let compact_date = frames[&column.children[6].id];
+        let inline_date = frames[&column.children[7].id];
 
         assert!(checkbox.width > 28.0 && checkbox.height >= 48.0);
         assert!(radio.width > 28.0 && radio.height >= 48.0);
@@ -874,6 +896,10 @@ mod tests {
         assert!(group.width > 28.0);
         // Three 48-point rows plus two 8-point gaps.
         assert_eq!(group.height, 160.0);
+        assert_eq!(compact_date.width, 200.0);
+        assert_eq!(compact_date.height, 48.0);
+        assert_eq!(inline_date.width, 300.0);
+        assert_eq!(inline_date.height, 320.0);
     }
 
     #[test]

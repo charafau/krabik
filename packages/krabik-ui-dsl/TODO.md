@@ -136,6 +136,20 @@ the new indeterminate `Spinner`, `Image`, `ScrollView`, windowed and recycled
 `List`, layouts and styling. `krabik.webp` is bundled in both shells for the
 image page.
 
+### 2e. Date picker ✅
+
+`DatePicker` uses a platform-independent `DateValue` and reports changes through
+`Event::DateChanged { action, date }`. Two modes are available:
+
+- **Compact** — a date field; Android opens the native `DatePickerDialog`, iOS
+  uses a compact `UIDatePicker`.
+- **Inline** — an always-visible calendar (`DatePicker` on Android, inline
+  `UIDatePicker` on iOS).
+
+Dates are converted through calendar components at local noon so daylight
+saving cannot shift the selected day. The controls demo and the widget showcase
+exercise both modes.
+
 ### 3b. Virtualized lists ✅
 
 [`List`](rust/src/ui.rs) (`List::new(items).item_height(..).buffer(..).key(..).row(..)`)
@@ -233,6 +247,7 @@ All core widgets from SPEC.md §7.1 are implemented on Android and iOS.
 | `Slider` | [`update_slider()`](rust/src/android.rs) | Custom `KrabikSeekBar` (`SeekBar`) |
 | `ProgressIndicator` | [`update_progress()`](rust/src/android.rs) | `ProgressBar` (horizontal) |
 | `ProgressIndicator::indeterminate()` | [`update_spinner()`](rust/src/android.rs) | Circular `ProgressBar` |
+| `DatePicker` | [`update_date_picker()`](rust/src/android.rs) | Custom `KrabikDatePicker` (`DatePickerDialog` / `DatePicker`) |
 | `Image` | [`update_image()`](rust/src/android.rs) | `ImageView` (assets + URLs) |
 | `ScrollView` | [`create_scroll()`](rust/src/android.rs) | Custom scroll container (vertical + horizontal) |
 
@@ -385,8 +400,8 @@ matters for large lists.
 
 ### Widgets
 
-- Larger design work (hosting, presentation, back handling): DatePicker,
-  Dialog, BottomSheet, Navigation.
+- Larger design work (native hosting, presentation, back handling): Dialog,
+  BottomSheet, Navigation.
 - A radio-group container that owns mutual exclusion, instead of independent
   radio buttons that the application coordinates.
 - Stepped sliders (quantized values) and indeterminate progress indicators.
