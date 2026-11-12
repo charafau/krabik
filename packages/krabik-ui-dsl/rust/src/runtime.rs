@@ -419,6 +419,24 @@ impl Runtime {
         }
     }
 
+    /// Returns the range and quantization step of the slider with the given identifier.
+    pub fn slider_config(&self, id: NodeId) -> Option<(f32, f32, Option<f32>)> {
+        let node = tree::find(&self.tree, id)?;
+        match &node.kind {
+            NodeKind::Slider(props) => Some((props.min, props.max, props.step)),
+            _ => None,
+        }
+    }
+
+    /// Returns the action of the radio group with the given identifier, if any.
+    pub fn radio_group_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
+        let node = tree::find(&self.tree, id)?;
+        match &node.kind {
+            NodeKind::RadioGroup(props) if !props.action.is_empty() => Some(props.action.clone()),
+            _ => None,
+        }
+    }
+
     /// Returns the action of the text input with the given identifier, if any.
     pub fn text_field_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;

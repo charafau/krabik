@@ -13,7 +13,7 @@ final class ChecklistUITests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launch()
-        XCTAssertTrue(app.staticTexts["Ship the app"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Krabik UI DSL"].waitForExistence(timeout: 10))
     }
 
     override func tearDownWithError() throws {
@@ -21,6 +21,10 @@ final class ChecklistUITests: XCTestCase {
     }
 
     func testChecklist() throws {
+        // The checklist is one page of the widget showcase.
+        app.buttons["Checklist"].tap()
+        XCTAssertTrue(app.staticTexts["1 of 3 tasks done · 0 notes"].waitForExistence(timeout: 10))
+
         // The summary reflects the initial state.
         XCTAssertTrue(app.staticTexts["1 of 3 tasks done · 0 notes"].exists)
 

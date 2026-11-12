@@ -28,6 +28,10 @@ class ChecklistTest {
     @Test
     fun checklistEndToEnd() {
         ActivityScenario.launch(MainActivity::class.java).use {
+            // The checklist is one page of the showcase.
+            openPage("Checklist")
+            onView(withText("1 of 3 tasks done · 0 notes")).check(matches(isDisplayed()))
+
             // The summary reflects the initial state.
             onView(withText("1 of 3 tasks done · 0 notes")).check(matches(isDisplayed()))
 

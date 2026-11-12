@@ -31,7 +31,7 @@ final class GalleryUITests: XCTestCase {
         app.buttons["Large"].tap()
         XCTAssertTrue(app.staticTexts["Size: Large"].waitForExistence(timeout: 5))
 
-        let slider = app.sliders.firstMatch
+        let slider = app.sliders["Volume"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
         if !slider.isHittable {
             app.swipeUp()
@@ -42,6 +42,12 @@ final class GalleryUITests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(volume.waitForExistence(timeout: 5))
         XCTAssertTrue(app.progressIndicators.firstMatch.exists)
+
+        let stepped = app.sliders["Stepped"]
+        XCTAssertTrue(stepped.waitForExistence(timeout: 5))
+        stepped.adjust(toNormalizedSliderPosition: 1.0)
+        XCTAssertTrue(app.staticTexts["Stepped: 100"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.activityIndicators.firstMatch.exists)
         capture("16-controls")
     }
 

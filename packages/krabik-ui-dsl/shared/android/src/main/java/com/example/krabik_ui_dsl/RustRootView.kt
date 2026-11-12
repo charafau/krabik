@@ -197,6 +197,13 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
         }
     }
 
+    /** Forwards the selected index of a native radio group back to Rust. */
+    fun onRadioGroupSelected(nodeId: Long, index: Int) {
+        if (handle != 0L) {
+            nativeOnRadioGroupSelected(handle, nodeId, index)
+        }
+    }
+
     /** Asks Rust to build one recycled-list row into [host], at [width] pixels. */
     fun bindRow(nodeId: Long, index: Int, holderId: Long, host: ViewGroup, width: Int): Int =
         if (handle != 0L) {
@@ -252,6 +259,8 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     private external fun nativeOnCheckedChanged(handle: Long, nodeId: Long, checked: Boolean)
 
     private external fun nativeOnSliderChanged(handle: Long, nodeId: Long, value: Float)
+
+    private external fun nativeOnRadioGroupSelected(handle: Long, nodeId: Long, index: Int)
 
     private external fun nativeOnScroll(handle: Long, nodeId: Long, offset: Float)
 
