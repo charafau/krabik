@@ -164,6 +164,14 @@ impl App for ShowcaseApp {
                 self.page = page;
                 true
             }
+            Event::Back => {
+                if self.page == Page::Home {
+                    false
+                } else {
+                    self.page = Page::Home;
+                    true
+                }
+            }
             // The checklist page owns every remaining event on its page.
             _ if self.page == Page::Checklist => self.checklist.handle(event),
             Event::TextChanged {
@@ -329,6 +337,16 @@ mod tests {
         assert!(app.handle(click("page:home")));
         assert_eq!(app.page, Page::Home);
         assert!(!app.handle(click("page:unknown")));
+    }
+
+    #[test]
+    fn back_returns_to_the_catalog() {
+        let mut app = app();
+        assert!(!app.handle(Event::Back));
+        assert!(app.handle(click("page:radio-group")));
+        assert!(app.handle(Event::Back));
+        assert_eq!(app.page, Page::Home);
+        assert!(!app.handle(Event::Back));
     }
 
     #[test]

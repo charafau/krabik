@@ -20,6 +20,8 @@ pub mod gallery;
 pub mod geometry;
 pub mod layout;
 pub mod measure;
+pub mod navigation;
+pub mod presentation;
 pub mod render;
 pub mod runtime;
 pub mod tree;
