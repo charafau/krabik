@@ -66,6 +66,9 @@ dependencies {
   // Core Android dependencies
   implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.recyclerview)
+  implementation(libs.androidx.fragment)
+  implementation(libs.androidx.activity.ktx)
+  implementation(libs.material)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.activity.compose)
 

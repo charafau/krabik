@@ -55,6 +55,30 @@ final class ShowcaseUITests: XCTestCase {
         backToCatalog()
     }
 
+    func testNativeNavigationAndPresentations() throws {
+        open("Navigation")
+        XCTAssertTrue(app.staticTexts["Navigation root"].waitForExistence(timeout: 5))
+        app.buttons["Open details"].tap()
+        XCTAssertTrue(app.staticTexts["Detail screen"].waitForExistence(timeout: 5))
+
+        // The native navigation bar's back button dispatches Event::Back.
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Navigation root"].waitForExistence(timeout: 5))
+
+        app.buttons["Close navigation"].tap()
+        XCTAssertTrue(app.staticTexts["Krabik UI DSL"].waitForExistence(timeout: 5))
+
+        open("Dialog")
+        XCTAssertTrue(app.staticTexts["Delete task?"].waitForExistence(timeout: 5))
+        app.buttons["Cancel"].tap()
+        XCTAssertFalse(app.staticTexts["Delete task?"].exists)
+
+        open("Bottom sheet")
+        XCTAssertTrue(app.staticTexts["Filters"].waitForExistence(timeout: 5))
+        app.buttons["Close"].tap()
+        XCTAssertFalse(app.staticTexts["Filters"].exists)
+    }
+
     func testWindowedListExists() throws {
         open("Windowed list")
         XCTAssertTrue(app.staticTexts["Windowed row 1"].waitForExistence(timeout: 5))

@@ -1,4 +1,6 @@
 [versions]
+androidxFragment = "1.8.9"
+material = "1.12.0"
 androidGradlePlugin = "9.0.1"
 androidxCore = "1.18.0"
 androidxLifecycle = "2.10.0"
@@ -17,6 +19,9 @@ nav3Core = "1.0.1"
 lifecycleViewmodelNav3 = "2.10.0"
 
 [libraries]
+androidx-fragment = { module = "androidx.fragment:fragment-ktx", version.ref = "androidxFragment" }
+androidx-activity-ktx = { module = "androidx.activity:activity-ktx", version.ref = "androidxActivity" }
+material = { module = "com.google.android.material:material", version.ref = "material" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
 androidx-recyclerview = { module = "androidx.recyclerview:recyclerview", version.ref = "recyclerview" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidxActivity" }

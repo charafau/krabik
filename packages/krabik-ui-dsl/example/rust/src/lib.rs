@@ -14,6 +14,8 @@ use std::sync::Arc;
 use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Event, set_app_factory};
+use krabik_ui_dsl::navigation::{Navigation, Screen};
+use krabik_ui_dsl::presentation::{Presentation, PresentationKind};
 use krabik_ui_dsl::ui::{DateValue, Element};
 
 mod checklist;
@@ -97,6 +99,9 @@ pub struct ShowcaseApp {
     list_items: Arc<Vec<String>>,
     recycled_items: Arc<Vec<String>>,
     recycled_taps: usize,
+    navigation: Vec<&'static str>,
+    dialog_open: bool,
+    sheet_open: bool,
 }
 
 impl ShowcaseApp {
@@ -129,6 +134,9 @@ impl ShowcaseApp {
                     .collect(),
             ),
             recycled_taps: 0,
+            navigation: Vec::new(),
+            dialog_open: false,
+            sheet_open: false,
         }
     }
 
@@ -152,6 +160,57 @@ impl App for ShowcaseApp {
         pages::view(self)
     }
 
+    fn navigation(&self) -> Option<Navigation> {
+        if self.navigation.is_empty() {
+            return None;
+        }
+        Some(Navigation::new(
+            self.navigation
+                .iter()
+                .map(|key| match *key {
+                    "detail" => Screen::new("detail", "Details"),
+                    _ => Screen::new("root", "Navigation"),
+                })
+                .collect(),
+        ))
+    }
+
+    fn screen(&self, key: &str) -> Option<Element> {
+        match key {
+            "root" => Some(pages::navigation_root(self)),
+            "detail" => Some(pages::navigation_detail(self)),
+            _ => None,
+        }
+    }
+
+    fn presentation(&self) -> Option<Presentation> {
+        if self.dialog_open {
+            Some(Presentation::new(
+                "dialog",
+                PresentationKind::Dialog,
+                "dialog:close",
+            ))
+        } else if self.sheet_open {
+            Some(Presentation::new(
+                "sheet",
+                PresentationKind::Sheet,
+                "sheet:close",
+            ))
+        } else {
+            None
+        }
+    }
+
+    fn presentation_view(&self) -> Option<Element> {
+        if self.dialog_open {
+            Some(pages::dialog_view(self))
+        } else if self.sheet_open {
+            Some(pages::sheet_view(self))
+        } else {
+            None
+        }
+    }
+
     fn handle(&mut self, event: Event<'_>) -> bool {
         match event {
             Event::Click { action } if action.starts_with("page:") => {
@@ -165,7 +224,20 @@ impl App for ShowcaseApp {
                 true
             }
             Event::Back => {
-                if self.page == Page::Home {
+                if self.dialog_open {
+                    self.dialog_open = false;
+                    true
+                } else if self.sheet_open {
+                    self.sheet_open = false;
+                    true
+                } else if !self.navigation.is_empty() {
+                    if self.navigation.len() > 1 {
+                        self.navigation.pop();
+                    } else {
+                        self.navigation.clear();
+                    }
+                    true
+                } else if self.page == Page::Home {
                     false
                 } else {
                     self.page = Page::Home;
@@ -212,6 +284,50 @@ impl App for ShowcaseApp {
                 "demo:recycled-tap" => {
                     self.recycled_taps += 1;
                     true
+                }
+                "nav:open" => {
+                    self.navigation = vec!["root"];
+                    true
+                }
+                "nav:push" => {
+                    if self.navigation.last() != Some(&"detail") {
+                        self.navigation.push("detail");
+                    }
+                    true
+                }
+                "nav:pop" => {
+                    if self.navigation.len() > 1 {
+                        self.navigation.pop();
+                        true
+                    } else {
+                        false
+                    }
+                }
+                "nav:close" => {
+                    if self.navigation.is_empty() {
+                        false
+                    } else {
+                        self.navigation.clear();
+                        true
+                    }
+                }
+                "dialog:open" => {
+                    self.dialog_open = true;
+                    true
+                }
+                "dialog:close" => {
+                    let changed = self.dialog_open;
+                    self.dialog_open = false;
+                    changed
+                }
+                "sheet:open" => {
+                    self.sheet_open = true;
+                    true
+                }
+                "sheet:close" => {
+                    let changed = self.sheet_open;
+                    self.sheet_open = false;
+                    changed
                 }
                 _ => false,
             },
@@ -326,6 +442,37 @@ mod tests {
         assert_eq!(app.page, Page::Home);
         assert_eq!(app.size_choice, 1);
         assert_eq!(app.volume, 40.0);
+    }
+
+    #[test]
+    fn navigation_state_is_published_and_back_pops_it() {
+        let mut app = app();
+        assert!(app.navigation().is_none());
+        assert!(app.handle(click("nav:open")));
+        assert_eq!(app.navigation().unwrap().screens.len(), 1);
+        assert!(app.screen("root").is_some());
+        assert!(app.handle(click("nav:push")));
+        assert_eq!(app.navigation().unwrap().screens.len(), 2);
+        assert!(app.screen("detail").is_some());
+        assert!(app.handle(Event::Back));
+        assert_eq!(app.navigation().unwrap().screens.len(), 1);
+        assert!(app.handle(Event::Back));
+        assert!(app.navigation().is_none());
+    }
+
+    #[test]
+    fn presentations_are_exclusive_and_dismissible() {
+        let mut app = app();
+        assert!(app.presentation().is_none());
+        assert!(app.handle(click("dialog:open")));
+        assert_eq!(app.presentation().unwrap().kind, PresentationKind::Dialog);
+        assert!(app.presentation_view().is_some());
+        assert!(app.handle(click("dialog:close")));
+        assert!(app.presentation().is_none());
+        assert!(app.handle(click("sheet:open")));
+        assert_eq!(app.presentation().unwrap().kind, PresentationKind::Sheet);
+        assert!(app.handle(Event::Back));
+        assert!(app.presentation().is_none());
     }
 
     #[test]

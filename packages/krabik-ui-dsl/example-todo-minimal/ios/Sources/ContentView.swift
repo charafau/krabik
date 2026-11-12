@@ -1,16 +1,16 @@
 import SwiftUI
 
-/// Hosts the UIKit view whose widgets are created by the Rust renderer.
-private struct RustView: UIViewRepresentable {
-    func makeUIView(context: Context) -> RustRootView {
-        RustRootView()
+/// Hosts the native navigation controller whose screens are rendered by Rust.
+private struct HostView: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> KrabikHostController {
+        KrabikHostController()
     }
 
-    func updateUIView(_ uiView: RustRootView, context: Context) {}
+    func updateUIViewController(_ controller: KrabikHostController, context: Context) {}
 }
 
 struct ContentView: View {
     var body: some View {
-        RustView()
+        HostView()
     }
 }

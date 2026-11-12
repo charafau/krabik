@@ -1,22 +1,30 @@
 package com.example.krabik_ui_dsl
 
-import android.app.Activity
 import android.os.Build
 import android.os.Bundle
+import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.FrameLayout
-import android.window.OnBackInvokedDispatcher
+import android.widget.LinearLayout
+import android.widget.Toolbar
+import androidx.activity.OnBackPressedCallback
+import androidx.fragment.app.FragmentActivity
 
 /**
- * Hosts a [RustRootView] full screen and keeps it inside the system bars.
+ * Hosts the Rust session full screen and keeps it inside the system bars.
+ *
+ * The main root, navigation screens and modal hosts share one session handle.
+ * A [KrabikHostController] owns the native toolbar, fragment stack and modal
+ * presentations; Rust remains the source of truth for what is shown.
  *
  * Subclasses load their native renderer and, if they provide one, register
  * their app factory. That ordering matters: the renderer must be loaded before
  * the root view is constructed, and the factory installed before it renders.
  */
-abstract class KrabikActivity : Activity() {
+abstract class KrabikActivity : FragmentActivity() {
 
     private lateinit var root: RustRootView
+    private lateinit var controller: KrabikHostController
 
     /** Loads the native renderer, e.g. with `System.loadLibrary`. */
     protected open fun loadNativeLibrary() {}
@@ -31,14 +39,40 @@ abstract class KrabikActivity : Activity() {
         installApp()
         root = RustRootView(this)
 
-        // Android 15 draws app content edge to edge. Keep the Rust UI inside
-        // the system bars by insetting the container instead of the root view.
-        val container = FrameLayout(this).apply {
+        val toolbar = Toolbar(this)
+        val mainContainer = FrameLayout(this).apply {
             addView(
                 root,
                 FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+        }
+        val navContainer = FrameLayout(this)
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(
+                toolbar,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            addView(
+                mainContainer,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f,
+                ),
+            )
+            addView(
+                navContainer,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f,
                 ),
             )
             setOnApplyWindowInsetsListener { view, insets ->
@@ -73,26 +107,38 @@ abstract class KrabikActivity : Activity() {
             }
         }
 
-        setContentView(container)
+        setContentView(
+            column,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
 
-        // Android 13+ routes back through the predictive-back dispatcher by
-        // default; keep the older onBackPressed path as the fallback.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            onBackInvokedDispatcher.registerOnBackInvokedCallback(
-                OnBackInvokedDispatcher.PRIORITY_DEFAULT,
-            ) {
-                if (!root.onBackPressed()) {
-                    finish()
+        controller = KrabikHostController(
+            this,
+            root.session,
+            toolbar,
+            mainContainer,
+            navContainer,
+            root,
+        )
+        controller.setRootVisible(true)
+
+        // Route back through AndroidX so FragmentManager and predictive back
+        // share one ordered pipeline. Rust gets the first chance to pop a
+        // screen or close a dialog.
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    if (!root.onBackPressed()) {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                    }
                 }
-            }
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() {
-        if (!root.onBackPressed()) {
-            super.onBackPressed()
-        }
+            },
+        )
     }
 
     override fun onDestroy() {

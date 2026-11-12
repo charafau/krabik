@@ -170,6 +170,7 @@ struct ScrollShared {
 /// What a scroll delegate remembers about its node.
 struct ScrollDelegateIvars {
     handle: u64,
+    host: u64,
     id: NodeId,
     horizontal: bool,
     shared: Arc<ScrollShared>,
@@ -202,20 +203,28 @@ objc2::define_class!(
 
             let shared = Arc::clone(&ivars.shared);
             let handle = ivars.handle;
+            let host = ivars.host;
             let id = ivars.id;
             schedule(move || {
                 shared.scheduled.store(false, Ordering::Release);
                 let offset = f64::from_bits(shared.latest.load(Ordering::Acquire));
-                dispatch_scroll(handle, id, offset);
+                dispatch_scroll(handle, host, id, offset);
             });
         }
     }
 );
 
 impl ScrollDelegate {
-    fn new(handle: u64, id: NodeId, horizontal: bool, mtm: MainThreadMarker) -> Retained<Self> {
+    fn new(
+        handle: u64,
+        host: u64,
+        id: NodeId,
+        horizontal: bool,
+        mtm: MainThreadMarker,
+    ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(ScrollDelegateIvars {
             handle,
+            host,
             id,
             horizontal,
             shared: Arc::new(ScrollShared::default()),
@@ -235,6 +244,7 @@ const ROW_CELL_ID: &str = "KrabikRow";
 /// `&self`, so the mutable parts are atomics.
 struct RecyclerIvars {
     handle: u64,
+    host: u64,
     id: NodeId,
     /// The item count the collection view currently shows.
     count: AtomicU64,
@@ -298,7 +308,7 @@ objc2::define_class!(
             let ivars = self.ivars();
             let index = index_path.item().max(0) as usize;
             let width = collection_view.bounds().size.width;
-            let _ = with_state(ivars.handle, |state| {
+            let _ = with_state(ivars.handle, ivars.host, |state| {
                 state.bind_row(ivars.id, index, &cell, width);
             });
             cell
@@ -314,7 +324,8 @@ objc2::define_class!(
             _index_path: &NSIndexPath,
         ) {
             let key = cell as *const UICollectionViewCell as usize;
-            let _ = with_state(self.ivars().handle, |state| state.unbind_row(key));
+            let ivars = self.ivars();
+            let _ = with_state(ivars.handle, ivars.host, |state| state.unbind_row(key));
         }
     }
 
@@ -334,7 +345,7 @@ objc2::define_class!(
             }
 
             let index = index_path.item().max(0) as usize;
-            let height = with_state(ivars.handle, |state| {
+            let height = with_state(ivars.handle, ivars.host, |state| {
                 state.row_height(ivars.id, index, width as f32)
             })
             .unwrap_or(0.0);
@@ -346,12 +357,14 @@ objc2::define_class!(
 impl RecyclerDataSource {
     fn new(
         handle: u64,
+        host: u64,
         id: NodeId,
         props: &RecyclerProps,
         mtm: MainThreadMarker,
     ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(RecyclerIvars {
             handle,
+            host,
             id,
             count: AtomicU64::new(props.item_count as u64),
             target_count: AtomicU64::new(props.item_count as u64),
@@ -393,8 +406,9 @@ impl RecyclerDataSource {
             && !ivars.pending.swap(true, Ordering::AcqRel)
         {
             let handle = ivars.handle;
+            let host = ivars.host;
             let id = ivars.id;
-            schedule(move || sync_recycler(handle, id));
+            schedule(move || sync_recycler(handle, host, id));
         }
     }
 
@@ -562,12 +576,22 @@ struct IosRowState {
     views: HashMap<NodeId, ViewHandle>,
 }
 
-/// The state of one `RustRootView`.
+/// What one native iOS host renders.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+enum IosHostKind {
+    Main,
+    Screen(String),
+    Modal,
+}
+
+/// The state of one host view in a session.
 struct IosState {
     handle: u64,
+    host: u64,
+    kind: IosHostKind,
     runtime: Runtime,
-    app: Box<dyn App>,
-    /// A weak reference so the Rust state does not keep the Swift root view
+    /// A weak reference so the Rust state does not keep the Swift host view
     /// alive and prevent its `deinit` from destroying the state.
     root: Weak<UIView>,
     views: HashMap<NodeId, ViewHandle>,
@@ -589,11 +613,18 @@ struct IosState {
 unsafe impl Send for IosState {}
 
 impl IosState {
-    fn new(handle: u64, root: &Retained<UIView>, mtm: MainThreadMarker) -> Self {
+    fn new(
+        handle: u64,
+        host: u64,
+        kind: IosHostKind,
+        root: &Retained<UIView>,
+        mtm: MainThreadMarker,
+    ) -> Self {
         Self {
             handle,
+            host,
+            kind,
             runtime: Runtime::new(Box::new(IosMeasure::new(mtm))),
-            app: crate::app::create_app(),
             root: Weak::from_retained(root),
             views: HashMap::new(),
             images: ImageLoader::default(),
@@ -605,9 +636,8 @@ impl IosState {
         }
     }
 
-    fn render(&mut self) {
-        let element = self.app.view();
-        let update = self.runtime.update(&element, self.viewport);
+    fn render(&mut self, element: &crate::ui::Element) {
+        let update = self.runtime.update(element, self.viewport);
         let Some(root) = self.root.load() else {
             return;
         };
@@ -645,7 +675,7 @@ impl IosState {
             }
             Op::Update(node) => {
                 if let Some(handle) = views.get_mut(&node.id) {
-                    update_content(&mut handle.content, &node, self.handle, mtm);
+                    update_content(&mut handle.content, &node, self.handle, self.host, mtm);
                     apply_style(&handle.view, &node, &mut handle.gradient);
                     apply_accessibility(&handle.view, &node, mtm);
                 }
@@ -712,28 +742,28 @@ impl IosState {
                 let field = UITextField::new(mtm);
                 field.setBorderStyle(UITextBorderStyle::None);
                 update_field(&field, props);
-                wire_field(&field, self.handle, node.id, mtm);
+                wire_field(&field, self.handle, self.host, node.id, mtm);
                 wrapper.addSubview(&field);
                 ViewHandle::new(wrapper, Content::Field(field), node)
             }
             NodeKind::Button(props) => {
                 let button = UIButton::buttonWithType(UIButtonType::System, mtm);
                 update_button(&button, props);
-                wire_click(&button, self.handle, node.id, mtm);
+                wire_click(&button, self.handle, self.host, node.id, mtm);
                 let view = cast_view(button.clone());
                 ViewHandle::new(view, Content::Button(button), node)
             }
             NodeKind::Switch(props) => {
                 let switch = UISwitch::new(mtm);
                 switch.setOn(props.checked);
-                wire_switch(&switch, self.handle, node.id, mtm);
+                wire_switch(&switch, self.handle, self.host, node.id, mtm);
                 let view = cast_view(switch.clone());
                 ViewHandle::new(view, Content::Switch(switch), node)
             }
             NodeKind::Checkbox(props) => {
                 let button = UIButton::buttonWithType(UIButtonType::Custom, mtm);
                 update_check(&button, props, false);
-                wire_check(&button, self.handle, node.id, mtm);
+                wire_check(&button, self.handle, self.host, node.id, mtm);
                 let view = cast_view(button.clone());
                 ViewHandle::new(
                     view,
@@ -747,7 +777,7 @@ impl IosState {
             NodeKind::RadioButton(props) => {
                 let button = UIButton::buttonWithType(UIButtonType::Custom, mtm);
                 update_check(&button, props, true);
-                wire_check(&button, self.handle, node.id, mtm);
+                wire_check(&button, self.handle, self.host, node.id, mtm);
                 let view = cast_view(button.clone());
                 ViewHandle::new(
                     view,
@@ -771,6 +801,7 @@ impl IosState {
                     &mut labels,
                     props,
                     self.handle,
+                    self.host,
                     node.id,
                     mtm,
                 );
@@ -788,14 +819,14 @@ impl IosState {
             NodeKind::DatePicker(props) => {
                 let picker = UIDatePicker::new(mtm);
                 update_date_picker(&picker, props);
-                wire_date_picker(&picker, self.handle, node.id, mtm);
+                wire_date_picker(&picker, self.handle, self.host, node.id, mtm);
                 let view = cast_view(picker.clone());
                 ViewHandle::new(view, Content::DatePicker(picker), node)
             }
             NodeKind::Slider(props) => {
                 let slider = UISlider::new(mtm);
                 update_slider(&slider, props);
-                wire_slider(&slider, self.handle, node.id, mtm);
+                wire_slider(&slider, self.handle, self.host, node.id, mtm);
                 let view = cast_view(slider.clone());
                 ViewHandle::new(view, Content::Slider(slider), node)
             }
@@ -829,8 +860,13 @@ impl IosState {
                 scroll.setAlwaysBounceHorizontal(props.axis == Axis::Horizontal);
                 let host = UIView::new(mtm);
                 scroll.addSubview(&host);
-                let delegate =
-                    ScrollDelegate::new(self.handle, node.id, props.axis == Axis::Horizontal, mtm);
+                let delegate = ScrollDelegate::new(
+                    self.handle,
+                    self.host,
+                    node.id,
+                    props.axis == Axis::Horizontal,
+                    mtm,
+                );
                 // SAFETY: the delegate is owned by the view handle below and
                 // only reads the scroll view's offset.
                 unsafe { scroll.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
@@ -871,7 +907,8 @@ impl IosState {
                         &identifier,
                     );
                 }
-                let data_source = RecyclerDataSource::new(self.handle, node.id, props, mtm);
+                let data_source =
+                    RecyclerDataSource::new(self.handle, self.host, node.id, props, mtm);
                 collection.setDataSource(Some(ProtocolObject::from_ref(&*data_source)));
                 // SAFETY: the data source is kept alive by the view handle and
                 // only reads the collection view's size and index paths.
@@ -987,7 +1024,7 @@ impl IosState {
             return;
         }
         if self.images.in_flight.insert(url.to_string()) {
-            start_download(self.handle, id, url);
+            start_download(self.handle, self.host, id, url);
         }
     }
 
@@ -1171,8 +1208,9 @@ impl IosState {
         } else {
             // The cell is not in the window yet; try again next turn.
             let handle = self.handle;
+            let host = self.host;
             let field = focus.field;
-            schedule(move || focus_row_async(handle, field));
+            schedule(move || focus_row_async(handle, host, field));
         }
     }
 
@@ -1317,7 +1355,13 @@ fn inset(size: CGSize, padding: EdgeInsets) -> CGRect {
     )
 }
 
-fn update_content(content: &mut Content, node: &RenderNode, handle: u64, mtm: MainThreadMarker) {
+fn update_content(
+    content: &mut Content,
+    node: &RenderNode,
+    handle: u64,
+    host: u64,
+    mtm: MainThreadMarker,
+) {
     match (content, &node.kind) {
         (Content::Label(label), NodeKind::Text(props)) => update_label(label, props),
         (Content::Field(field), NodeKind::TextField(props)) => update_field(field, props),
@@ -1336,7 +1380,7 @@ fn update_content(content: &mut Content, node: &RenderNode, handle: u64, mtm: Ma
                 labels,
             },
             NodeKind::RadioGroup(props),
-        ) => update_radio_group(stack, buttons, labels, props, handle, node.id, mtm),
+        ) => update_radio_group(stack, buttons, labels, props, handle, host, node.id, mtm),
         (Content::DatePicker(picker), NodeKind::DatePicker(props)) => {
             update_date_picker(picker, props);
         }
@@ -1351,12 +1395,14 @@ fn update_content(content: &mut Content, node: &RenderNode, handle: u64, mtm: Ma
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_radio_group(
     stack: &UIStackView,
     buttons: &mut Vec<Retained<UIButton>>,
     labels: &mut Vec<String>,
     props: &RadioGroupProps,
     handle: u64,
+    host: u64,
     id: NodeId,
     mtm: MainThreadMarker,
 ) {
@@ -1368,7 +1414,7 @@ fn update_radio_group(
         labels.clear();
         for (index, label) in props.options.iter().enumerate() {
             let button = UIButton::buttonWithType(UIButtonType::Custom, mtm);
-            wire_radio_group_item(&button, handle, id, index, mtm);
+            wire_radio_group_item(&button, handle, host, id, index, mtm);
             buttons.push(button);
             labels.push(label.clone());
         }
@@ -1760,17 +1806,17 @@ fn add_action(
     control.addAction_forControlEvents(&action, events);
 }
 
-fn wire_click(button: &UIButton, handle: u64, id: NodeId, mtm: MainThreadMarker) {
+fn wire_click(button: &UIButton, handle: u64, host: u64, id: NodeId, mtm: MainThreadMarker) {
     add_action(
         button,
         UIControlEvents::TouchUpInside,
         "krabik.click",
         mtm,
-        move |_| schedule(move || dispatch_click(handle, id)),
+        move |_| schedule(move || dispatch_click(handle, host, id)),
     );
 }
 
-fn wire_switch(switch: &UISwitch, handle: u64, id: NodeId, mtm: MainThreadMarker) {
+fn wire_switch(switch: &UISwitch, handle: u64, host: u64, id: NodeId, mtm: MainThreadMarker) {
     add_action(
         switch,
         UIControlEvents::ValueChanged,
@@ -1782,12 +1828,12 @@ fn wire_switch(switch: &UISwitch, handle: u64, id: NodeId, mtm: MainThreadMarker
                 .and_then(|sender| sender.downcast::<UISwitch>().ok())
                 .map(|switch| switch.isOn())
                 .unwrap_or(false);
-            schedule(move || dispatch_checked(handle, id, checked));
+            schedule(move || dispatch_checked(handle, host, id, checked));
         },
     );
 }
 
-fn wire_check(button: &UIButton, handle: u64, id: NodeId, mtm: MainThreadMarker) {
+fn wire_check(button: &UIButton, handle: u64, host: u64, id: NodeId, mtm: MainThreadMarker) {
     add_action(
         button,
         UIControlEvents::TouchUpInside,
@@ -1799,7 +1845,7 @@ fn wire_check(button: &UIButton, handle: u64, id: NodeId, mtm: MainThreadMarker)
                 .and_then(|sender| sender.downcast::<UIButton>().ok())
                 .map(|button| !button.isSelected())
                 .unwrap_or(false);
-            schedule(move || dispatch_checked(handle, id, checked));
+            schedule(move || dispatch_checked(handle, host, id, checked));
         },
     );
 }
@@ -1807,6 +1853,7 @@ fn wire_check(button: &UIButton, handle: u64, id: NodeId, mtm: MainThreadMarker)
 fn wire_radio_group_item(
     button: &UIButton,
     handle: u64,
+    host: u64,
     id: NodeId,
     index: usize,
     mtm: MainThreadMarker,
@@ -1816,11 +1863,17 @@ fn wire_radio_group_item(
         UIControlEvents::TouchUpInside,
         "krabik.radio-group",
         mtm,
-        move |_| schedule(move || dispatch_selected(handle, id, index)),
+        move |_| schedule(move || dispatch_selected(handle, host, id, index)),
     );
 }
 
-fn wire_date_picker(picker: &UIDatePicker, handle: u64, id: NodeId, mtm: MainThreadMarker) {
+fn wire_date_picker(
+    picker: &UIDatePicker,
+    handle: u64,
+    host: u64,
+    id: NodeId,
+    mtm: MainThreadMarker,
+) {
     add_action(
         picker,
         UIControlEvents::ValueChanged,
@@ -1832,13 +1885,13 @@ fn wire_date_picker(picker: &UIDatePicker, handle: u64, id: NodeId, mtm: MainThr
                 .and_then(|sender| sender.downcast::<UIDatePicker>().ok())
                 .and_then(|picker| date_value_from_nsdate(&picker.date()));
             if let Some(value) = value {
-                schedule(move || dispatch_date(handle, id, value));
+                schedule(move || dispatch_date(handle, host, id, value));
             }
         },
     );
 }
 
-fn wire_slider(slider: &UISlider, handle: u64, id: NodeId, mtm: MainThreadMarker) {
+fn wire_slider(slider: &UISlider, handle: u64, host: u64, id: NodeId, mtm: MainThreadMarker) {
     add_action(
         slider,
         UIControlEvents::ValueChanged,
@@ -1850,12 +1903,12 @@ fn wire_slider(slider: &UISlider, handle: u64, id: NodeId, mtm: MainThreadMarker
                 .and_then(|sender| sender.downcast::<UISlider>().ok())
                 .map(|slider| slider.value())
                 .unwrap_or(0.0);
-            schedule(move || dispatch_value(handle, id, f64::from(value)));
+            schedule(move || dispatch_value(handle, host, id, f64::from(value)));
         },
     );
 }
 
-fn wire_field(field: &UITextField, handle: u64, id: NodeId, mtm: MainThreadMarker) {
+fn wire_field(field: &UITextField, handle: u64, host: u64, id: NodeId, mtm: MainThreadMarker) {
     add_action(
         field,
         UIControlEvents::EditingChanged,
@@ -1868,7 +1921,7 @@ fn wire_field(field: &UITextField, handle: u64, id: NodeId, mtm: MainThreadMarke
                 .and_then(|field| field.text())
                 .map(|text| text.to_string())
                 .unwrap_or_default();
-            schedule(move || dispatch_text(handle, id, &value));
+            schedule(move || dispatch_text(handle, host, id, &value));
         },
     );
     add_action(
@@ -1876,21 +1929,21 @@ fn wire_field(field: &UITextField, handle: u64, id: NodeId, mtm: MainThreadMarke
         UIControlEvents::EditingDidEndOnExit,
         "krabik.submit",
         mtm,
-        move |_| schedule(move || dispatch_submitted(handle, id)),
+        move |_| schedule(move || dispatch_submitted(handle, host, id)),
     );
     add_action(
         field,
         UIControlEvents::EditingDidBegin,
         "krabik.focus-begin",
         mtm,
-        move |_| schedule(move || dispatch_focus(handle, id, true)),
+        move |_| schedule(move || dispatch_focus(handle, host, id, true)),
     );
     add_action(
         field,
         UIControlEvents::EditingDidEnd,
         "krabik.focus-end",
         mtm,
-        move |_| schedule(move || dispatch_focus(handle, id, false)),
+        move |_| schedule(move || dispatch_focus(handle, host, id, false)),
     );
 }
 
@@ -1908,10 +1961,10 @@ fn schedule(work: impl FnOnce() + Send + 'static) {
 /// UIKit may ask the data source for cells synchronously during a batch
 /// update; those callbacks acquire the state lock themselves, so the sync runs
 /// after the lock that produced it has been released.
-fn sync_recycler(handle: u64, id: NodeId) {
+fn sync_recycler(handle: u64, host: u64, id: NodeId) {
     guard("recycler", || {
         let Some((collection, data_source)) =
-            with_state(handle, |state| state.recycler_for(id)).flatten()
+            with_state(handle, host, |state| state.recycler_for(id)).flatten()
         else {
             return;
         };
@@ -1952,14 +2005,14 @@ fn sync_recycler(handle: u64, id: NodeId) {
             collection.collectionViewLayout().invalidateLayout();
         }
         if changes.refresh {
-            with_state(handle, |state| state.rebind_visible_rows(id));
+            with_state(handle, host, |state| state.rebind_visible_rows(id));
         }
     });
 }
 
-fn focus_row_async(handle: u64, field: NodeId) {
+fn focus_row_async(handle: u64, host: u64, field: NodeId) {
     guard("focus", || {
-        with_state(handle, |state| {
+        with_state(handle, host, |state| {
             let Some(focus) = state.runtime.row_focus() else {
                 return;
             };
@@ -1975,7 +2028,15 @@ fn focus_row_async(handle: u64, field: NodeId) {
     });
 }
 
-fn with_state<T>(handle: u64, body: impl FnOnce(&mut IosState) -> T) -> Option<T> {
+fn with_state<T>(handle: u64, host: u64, body: impl FnOnce(&mut IosState) -> T) -> Option<T> {
+    let mut states = states().lock().expect("ios states");
+    states
+        .get_mut(&handle)
+        .and_then(|session| session.hosts.get_mut(&host))
+        .map(body)
+}
+
+fn with_session<T>(handle: u64, body: impl FnOnce(&mut IosSession) -> T) -> Option<T> {
     let mut states = states().lock().expect("ios states");
     states.get_mut(&handle).map(body)
 }
@@ -1993,62 +2054,71 @@ fn guard(label: &str, body: impl FnOnce()) {
     }
 }
 
-fn dispatch_click(handle: u64, id: NodeId) {
+fn dispatch_click(handle: u64, host: u64, id: NodeId) {
     guard("click", || {
-        with_state(handle, |state| {
-            let action = state
-                .runtime
-                .click(id)
-                .or_else(|| state.row_actions.get(&id).and_then(|row| row.click.clone()));
+        with_session(handle, |session| {
+            let action = session.hosts.get(&host).and_then(|state| {
+                state
+                    .runtime
+                    .click(id)
+                    .or_else(|| state.row_actions.get(&id).and_then(|row| row.click.clone()))
+            });
             if let Some(action) = action
-                && state.app.handle(Event::Click { action: &action })
+                && session.app.handle(Event::Click { action: &action })
             {
-                state.render();
+                session.render_all();
             }
         });
     });
 }
 
-fn dispatch_text(handle: u64, id: NodeId, value: &str) {
+fn dispatch_text(handle: u64, host: u64, id: NodeId, value: &str) {
     guard("text", || {
-        with_state(handle, |state| {
-            let action = state
-                .runtime
-                .text_field_action(id)
-                .or_else(|| state.row_actions.get(&id).and_then(|row| row.text.clone()));
+        with_session(handle, |session| {
+            let action = session.hosts.get(&host).and_then(|state| {
+                state
+                    .runtime
+                    .text_field_action(id)
+                    .or_else(|| state.row_actions.get(&id).and_then(|row| row.text.clone()))
+            });
             if let Some(action) = action
-                && state.app.handle(Event::TextChanged {
+                && session.app.handle(Event::TextChanged {
                     action: &action,
                     value,
                 })
             {
-                state.render();
+                session.render_all();
             }
         });
     });
 }
 
-fn dispatch_submitted(handle: u64, id: NodeId) {
+fn dispatch_submitted(handle: u64, host: u64, id: NodeId) {
     guard("submitted", || {
-        with_state(handle, |state| {
-            let action = state.runtime.text_field_submit_action(id).or_else(|| {
-                state
-                    .row_actions
-                    .get(&id)
-                    .and_then(|row| row.submit.clone())
+        with_session(handle, |session| {
+            let action = session.hosts.get(&host).and_then(|state| {
+                state.runtime.text_field_submit_action(id).or_else(|| {
+                    state
+                        .row_actions
+                        .get(&id)
+                        .and_then(|row| row.submit.clone())
+                })
             });
             if let Some(action) = action
-                && state.app.handle(Event::Submitted { action: &action })
+                && session.app.handle(Event::Submitted { action: &action })
             {
-                state.render();
+                session.render_all();
             }
         });
     });
 }
 
-fn dispatch_focus(handle: u64, id: NodeId, focused: bool) {
+fn dispatch_focus(handle: u64, host: u64, id: NodeId, focused: bool) {
     guard("focus", || {
-        with_state(handle, |state| {
+        with_session(handle, |session| {
+            let Some(state) = session.hosts.get_mut(&host) else {
+                return;
+            };
             let row = state.row_nodes.get(&id).copied();
             let focus_changed = if focused {
                 match row {
@@ -2074,118 +2144,135 @@ fn dispatch_focus(handle: u64, id: NodeId, focused: bool) {
             } else {
                 state.runtime.set_focus(id, false)
             };
-            let handled = state
+            let action = state
                 .runtime
                 .text_field_focus_action(id)
-                .or_else(|| state.row_actions.get(&id).and_then(|row| row.focus.clone()))
-                .is_some_and(|action| {
-                    state.app.handle(Event::FocusChanged {
-                        action: &action,
-                        focused,
-                    })
-                });
+                .or_else(|| state.row_actions.get(&id).and_then(|row| row.focus.clone()));
+            let handled = action.is_some_and(|action| {
+                session.app.handle(Event::FocusChanged {
+                    action: &action,
+                    focused,
+                })
+            });
             if focus_changed || handled {
-                state.render();
+                session.render_all();
             }
         });
     });
 }
 
-fn dispatch_checked(handle: u64, id: NodeId, checked: bool) {
+fn dispatch_checked(handle: u64, host: u64, id: NodeId, checked: bool) {
     guard("checked", || {
-        with_state(handle, |state| {
-            let action = state.runtime.toggle_action(id).or_else(|| {
-                state
-                    .row_actions
-                    .get(&id)
-                    .and_then(|row| row.toggle.clone())
+        with_session(handle, |session| {
+            let action = session.hosts.get(&host).and_then(|state| {
+                state.runtime.toggle_action(id).or_else(|| {
+                    state
+                        .row_actions
+                        .get(&id)
+                        .and_then(|row| row.toggle.clone())
+                })
             });
             if let Some(action) = action
-                && state.app.handle(Event::Toggled {
+                && session.app.handle(Event::Toggled {
                     action: &action,
                     checked,
                 })
             {
-                state.render();
+                session.render_all();
             }
         });
     });
 }
 
-fn dispatch_value(handle: u64, id: NodeId, value: f64) {
+fn dispatch_value(handle: u64, host: u64, id: NodeId, value: f64) {
     guard("slider", || {
-        with_state(handle, |state| {
-            let action = state
-                .runtime
-                .slider_action(id)
-                .or_else(|| state.row_actions.get(&id).and_then(|row| row.value.clone()));
-            let config = state.runtime.slider_config(id).or_else(|| {
-                state
-                    .row_actions
-                    .get(&id)
-                    .map(|row| (row.value_min, row.value_max, row.value_step))
-            });
+        with_session(handle, |session| {
+            let (action, config) = session
+                .hosts
+                .get(&host)
+                .map(|state| {
+                    let action = state
+                        .runtime
+                        .slider_action(id)
+                        .or_else(|| state.row_actions.get(&id).and_then(|row| row.value.clone()));
+                    let config = state.runtime.slider_config(id).or_else(|| {
+                        state
+                            .row_actions
+                            .get(&id)
+                            .map(|row| (row.value_min, row.value_max, row.value_step))
+                    });
+                    (action, config)
+                })
+                .unwrap_or((None, None));
             let value = match config {
                 Some((min, max, step)) => snap_slider_value(value as f32, min, max, step),
                 None => value as f32,
             };
             if let Some(action) = action
-                && state.app.handle(Event::ValueChanged {
+                && session.app.handle(Event::ValueChanged {
                     action: &action,
                     value,
                 })
             {
-                state.render();
+                session.render_all();
             }
         });
     });
 }
 
-fn dispatch_date(handle: u64, id: NodeId, date: DateValue) {
+fn dispatch_date(handle: u64, host: u64, id: NodeId, date: DateValue) {
     guard("date", || {
-        with_state(handle, |state| {
-            let action = state
-                .runtime
-                .date_picker_action(id)
-                .or_else(|| state.row_actions.get(&id).and_then(|row| row.date.clone()));
+        with_session(handle, |session| {
+            let action = session.hosts.get(&host).and_then(|state| {
+                state
+                    .runtime
+                    .date_picker_action(id)
+                    .or_else(|| state.row_actions.get(&id).and_then(|row| row.date.clone()))
+            });
             if let Some(action) = action
-                && state.app.handle(Event::DateChanged {
+                && session.app.handle(Event::DateChanged {
                     action: &action,
                     date,
                 })
             {
-                state.render();
+                session.render_all();
             }
         });
     });
 }
 
-fn dispatch_selected(handle: u64, id: NodeId, index: usize) {
+fn dispatch_selected(handle: u64, host: u64, id: NodeId, index: usize) {
     guard("radio group", || {
-        with_state(handle, |state| {
-            let action = state.runtime.radio_group_action(id).or_else(|| {
-                state
-                    .row_actions
-                    .get(&id)
-                    .and_then(|row| row.selected.clone())
+        with_session(handle, |session| {
+            let action = session.hosts.get(&host).and_then(|state| {
+                state.runtime.radio_group_action(id).or_else(|| {
+                    state
+                        .row_actions
+                        .get(&id)
+                        .and_then(|row| row.selected.clone())
+                })
             });
             if let Some(action) = action
-                && state.app.handle(Event::Selected {
+                && session.app.handle(Event::Selected {
                     action: &action,
                     index,
                 })
             {
-                state.render();
+                session.render_all();
             }
         });
     });
 }
 
-fn dispatch_scroll(handle: u64, id: NodeId, offset: f64) {
+fn dispatch_scroll(handle: u64, host: u64, id: NodeId, offset: f64) {
     guard("scroll", || {
-        with_state(handle, |state| {
-            if state.runtime.scroll(id, offset as f32) {
-                state.render();
+        with_session(handle, |session| {
+            let changed = session
+                .hosts
+                .get_mut(&host)
+                .is_some_and(|state| state.runtime.scroll(id, offset as f32));
+            if changed {
+                session.render_all();
             }
         });
     });
@@ -2195,7 +2282,7 @@ fn dispatch_scroll(handle: u64, id: NodeId, offset: f64) {
 ///
 /// The completion handler decodes the image off the main thread and hands it
 /// to the main queue, where [`finish_download`] applies it.
-fn start_download(handle: u64, id: NodeId, url: &str) {
+fn start_download(handle: u64, host: u64, id: NodeId, url: &str) {
     let Some(url_object) = NSURL::URLWithString(&NSString::from_str(url)) else {
         eprintln!("krabik ios: invalid image URL: {url}");
         return;
@@ -2205,7 +2292,7 @@ fn start_download(handle: u64, id: NodeId, url: &str) {
         move |data: *mut NSData, _: *mut NSURLResponse, _: *mut NSError| {
             let image = unsafe { data.as_ref() }.and_then(UIImage::imageWithData);
             let url = url.clone();
-            schedule(move || finish_download(handle, id, url, image));
+            schedule(move || finish_download(handle, host, id, url, image));
         },
     );
     // SAFETY: the block is sendable and retained by the task until the
@@ -2217,9 +2304,15 @@ fn start_download(handle: u64, id: NodeId, url: &str) {
 }
 
 /// Applies a finished download to every view that still expects the image.
-fn finish_download(handle: u64, id: NodeId, url: String, image: Option<Retained<UIImage>>) {
+fn finish_download(
+    handle: u64,
+    host: u64,
+    id: NodeId,
+    url: String,
+    image: Option<Retained<UIImage>>,
+) {
     guard("image", || {
-        with_state(handle, |state| {
+        with_state(handle, host, |state| {
             state.images.in_flight.remove(&url);
             let Some(image) = image else {
                 // Allow a later render to retry the failed URL, but only if
@@ -2260,10 +2353,182 @@ fn finish_download(handle: u64, id: NodeId, url: String, image: Option<Retained<
     });
 }
 
-static STATES: OnceLock<Mutex<HashMap<u64, IosState>>> = OnceLock::new();
+/// One application instance shared by every native host in a scene.
+struct IosSession {
+    handle: u64,
+    app: Box<dyn App>,
+    hosts: HashMap<u64, IosState>,
+    pending: HashMap<u64, IosHostKind>,
+    next_host: u64,
+    controller: Option<Retained<NSObject>>,
+    navigation: Vec<crate::navigation::Screen>,
+    presentation: Option<crate::presentation::Presentation>,
+}
+
+// SAFETY: every host and the controller are only touched on the main thread,
+// serialized by the global session mutex.
+unsafe impl Send for IosSession {}
+
+impl IosSession {
+    fn new(handle: u64, root: &Retained<UIView>, mtm: MainThreadMarker) -> Self {
+        let main = IosState::new(handle, 0, IosHostKind::Main, root, mtm);
+        let mut hosts = HashMap::new();
+        hosts.insert(0, main);
+        Self {
+            handle,
+            app: crate::app::create_app(),
+            hosts,
+            pending: HashMap::new(),
+            next_host: 1,
+            controller: None,
+            navigation: Vec::new(),
+            presentation: None,
+        }
+    }
+
+    fn render_all(&mut self) {
+        let mut elements = Vec::new();
+        for (id, host) in &self.hosts {
+            let element = match &host.kind {
+                IosHostKind::Main => Some(self.app.view()),
+                IosHostKind::Screen(key) => self.app.screen(key),
+                IosHostKind::Modal => self.app.presentation_view(),
+            };
+            if let Some(element) = element {
+                elements.push((*id, element));
+            }
+        }
+        for (id, element) in elements {
+            if let Some(host) = self.hosts.get_mut(&id) {
+                host.render(&element);
+            }
+        }
+        self.sync();
+    }
+
+    /// Reconciles the Rust state with the native iOS controller.
+    fn sync(&mut self) {
+        if self.controller.is_none() {
+            return;
+        }
+        let navigation = self
+            .app
+            .navigation()
+            .map(|nav| nav.screens)
+            .unwrap_or_default();
+        if navigation != self.navigation {
+            self.sync_navigation(&navigation);
+            self.navigation = navigation;
+        }
+        let presentation = self.app.presentation();
+        if presentation != self.presentation {
+            self.sync_presentation(presentation.as_ref());
+            self.presentation = presentation;
+        }
+    }
+
+    fn sync_navigation(&mut self, screens: &[crate::navigation::Screen]) {
+        let Some(controller) = self.controller.as_ref() else {
+            return;
+        };
+        let common = self
+            .navigation
+            .iter()
+            .zip(screens.iter())
+            .take_while(|(old, new)| old.key == new.key)
+            .count();
+
+        for screen in self.navigation.iter().skip(common).rev() {
+            controller_pop(controller);
+            if let Some(host) = self.screen_host(&screen.key) {
+                self.hosts.remove(&host);
+                self.pending.remove(&host);
+            }
+        }
+        for screen in screens.iter().skip(common) {
+            let host = self.next_host;
+            self.next_host += 1;
+            self.pending
+                .insert(host, IosHostKind::Screen(screen.key.clone()));
+            controller_push(controller, host, &screen.title);
+        }
+
+        controller_set_root_visible(controller, screens.is_empty());
+    }
+
+    fn sync_presentation(&mut self, presentation: Option<&crate::presentation::Presentation>) {
+        let Some(controller) = self.controller.as_ref() else {
+            return;
+        };
+        if let Some(host) = self.modal_host() {
+            controller_dismiss(controller);
+            self.hosts.remove(&host);
+            self.pending.remove(&host);
+        }
+        if let Some(presentation) = presentation {
+            let host = self.next_host;
+            self.next_host += 1;
+            self.pending.insert(host, IosHostKind::Modal);
+            controller_present(controller, host, presentation.kind as i64);
+        }
+    }
+
+    fn attach_host(&mut self, host: u64, root: &Retained<UIView>, mtm: MainThreadMarker) {
+        let kind = if let Some(existing) = self.hosts.get(&host) {
+            existing.kind.clone()
+        } else if let Some(kind) = self.pending.remove(&host) {
+            kind
+        } else {
+            return;
+        };
+        let state = IosState::new(self.handle, host, kind, root, mtm);
+        self.hosts.insert(host, state);
+    }
+
+    fn screen_host(&self, key: &str) -> Option<u64> {
+        self.hosts.iter().find_map(|(id, host)| match &host.kind {
+            IosHostKind::Screen(screen) if screen == key => Some(*id),
+            _ => None,
+        })
+    }
+
+    fn modal_host(&self) -> Option<u64> {
+        self.hosts
+            .iter()
+            .find_map(|(id, host)| matches!(host.kind, IosHostKind::Modal).then_some(*id))
+    }
+}
+
+fn controller_push(controller: &NSObject, host: u64, title: &str) {
+    let title = NSString::from_str(title);
+    // SAFETY: the controller is a live Swift object with this @objc method.
+    let _: () = unsafe { objc2::msg_send![controller, krabikPush: host as i64, title: &*title] };
+}
+
+fn controller_pop(controller: &NSObject) {
+    // SAFETY: see `controller_push`.
+    let _: () = unsafe { objc2::msg_send![controller, krabikPop] };
+}
+
+fn controller_set_root_visible(controller: &NSObject, visible: bool) {
+    // SAFETY: see `controller_push`.
+    let _: () = unsafe { objc2::msg_send![controller, krabikSetRootVisible: visible] };
+}
+
+fn controller_present(controller: &NSObject, host: u64, kind: i64) {
+    // SAFETY: see `controller_push`.
+    let _: () = unsafe { objc2::msg_send![controller, krabikPresent: host as i64, kind: kind] };
+}
+
+fn controller_dismiss(controller: &NSObject) {
+    // SAFETY: see `controller_push`.
+    let _: () = unsafe { objc2::msg_send![controller, krabikDismiss] };
+}
+
+static STATES: OnceLock<Mutex<HashMap<u64, IosSession>>> = OnceLock::new();
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
 
-fn states() -> &'static Mutex<HashMap<u64, IosState>> {
+fn states() -> &'static Mutex<HashMap<u64, IosSession>> {
     STATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -2283,12 +2548,14 @@ pub unsafe extern "C" fn krabik_ios_create(root: *mut c_void, width: f64, height
     };
 
     let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
-    let mut state = IosState::new(handle, &root, mtm);
+    let mut session = IosSession::new(handle, &root, mtm);
     guard("create", || {
-        state.viewport = Size::new(width.max(0.0) as f32, height.max(0.0) as f32);
-        state.render();
+        if let Some(main) = session.hosts.get_mut(&0) {
+            main.viewport = Size::new(width.max(0.0) as f32, height.max(0.0) as f32);
+        }
+        session.render_all();
     });
-    states().lock().expect("ios states").insert(handle, state);
+    states().lock().expect("ios states").insert(handle, session);
     handle
 }
 
@@ -2298,31 +2565,125 @@ pub unsafe extern "C" fn krabik_ios_create(root: *mut c_void, width: f64, height
 ///
 /// The call must happen on the main thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_render(handle: u64, width: f64, height: f64) {
+pub unsafe extern "C" fn krabik_ios_render(handle: u64, host: u64, width: f64, height: f64) {
     if MainThreadMarker::new().is_none() {
         return;
     }
     guard("render", || {
-        with_state(handle, |state| {
-            state.viewport = Size::new(width.max(0.0) as f32, height.max(0.0) as f32);
-            state.render();
+        with_session(handle, |session| {
+            if let Some(state) = session.hosts.get_mut(&host) {
+                state.viewport = Size::new(width.max(0.0) as f32, height.max(0.0) as f32);
+            }
+            session.render_all();
         });
     });
 }
 
-/// Releases the widgets and the Rust state of a `RustRootView`.
+/// Releases every widget and the Rust state of a scene.
 ///
 /// # Safety
 ///
 /// The call must happen on the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_destroy(handle: u64) {
-    let Some(state) = states().lock().expect("ios states").remove(&handle) else {
+    let Some(session) = states().lock().expect("ios states").remove(&handle) else {
         return;
     };
-    for view in state.views.values() {
-        view.view.removeFromSuperview();
+    for host in session.hosts.values() {
+        for view in host.views.values() {
+            view.view.removeFromSuperview();
+        }
     }
+}
+
+/// Attaches a new native host view to a session.
+///
+/// # Safety
+///
+/// `root` must be a live `UIView` and the call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_attach_host(handle: u64, host: u64, root: *mut c_void) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    // SAFETY: the caller guarantees a live view for the duration of the call.
+    let Some(root) = (unsafe { Retained::retain(root.cast::<UIView>()) }) else {
+        return;
+    };
+    guard("attach host", || {
+        with_session(handle, |session| {
+            session.attach_host(host, &root, mtm);
+            session.render_all();
+        });
+    });
+}
+
+/// Drops one host after its native view is destroyed.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_destroy_host(handle: u64, host: u64) {
+    if MainThreadMarker::new().is_none() {
+        return;
+    }
+    guard("destroy host", || {
+        with_session(handle, |session| {
+            session.hosts.remove(&host);
+            session.pending.remove(&host);
+        });
+    });
+}
+
+/// Registers the native navigation/modal controller.
+///
+/// # Safety
+///
+/// `controller` must be a live Objective-C object and the call must happen on
+/// the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_set_controller(handle: u64, controller: *mut c_void) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let _ = mtm;
+    // SAFETY: the caller guarantees a live Objective-C object.
+    let Some(controller) = (unsafe { Retained::retain(controller.cast::<NSObject>()) }) else {
+        return;
+    };
+    guard("controller", || {
+        with_session(handle, |session| {
+            session.controller = Some(controller);
+            session.render_all();
+        });
+    });
+}
+
+/// Dispatches the native dismissal of the presented dialog or sheet.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_modal_dismiss(handle: u64) {
+    if MainThreadMarker::new().is_none() {
+        return;
+    }
+    guard("modal dismiss", || {
+        with_session(handle, |session| {
+            let Some(action) = session
+                .app
+                .presentation()
+                .map(|presentation| presentation.dismiss_action)
+            else {
+                return;
+            };
+            if session.app.handle(Event::Click { action: &action }) {
+                session.render_all();
+            }
+        });
+    });
 }
 
 /// Dispatches a click on a native widget back into the Rust tree.
@@ -2331,8 +2692,8 @@ pub unsafe extern "C" fn krabik_ios_destroy(handle: u64) {
 ///
 /// The call must happen on the main thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_click(handle: u64, node_id: u64) {
-    dispatch_click(handle, NodeId(node_id));
+pub unsafe extern "C" fn krabik_ios_on_click(handle: u64, host: u64, node_id: u64) {
+    dispatch_click(handle, host, NodeId(node_id));
 }
 
 /// Dispatches a text edit on a native input back into the Rust tree.
@@ -2344,6 +2705,7 @@ pub unsafe extern "C" fn krabik_ios_on_click(handle: u64, node_id: u64) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_on_text_changed(
     handle: u64,
+    host: u64,
     node_id: u64,
     text: *const c_char,
 ) {
@@ -2352,7 +2714,7 @@ pub unsafe extern "C" fn krabik_ios_on_text_changed(
     }
     // SAFETY: the caller guarantees a valid NUL-terminated string.
     let value = unsafe { CStr::from_ptr(text) }.to_string_lossy();
-    dispatch_text(handle, NodeId(node_id), &value);
+    dispatch_text(handle, host, NodeId(node_id), &value);
 }
 
 /// Dispatches a submit on a native input back into the Rust tree.
@@ -2361,8 +2723,8 @@ pub unsafe extern "C" fn krabik_ios_on_text_changed(
 ///
 /// The call must happen on the main thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_submitted(handle: u64, node_id: u64) {
-    dispatch_submitted(handle, NodeId(node_id));
+pub unsafe extern "C" fn krabik_ios_on_submitted(handle: u64, host: u64, node_id: u64) {
+    dispatch_submitted(handle, host, NodeId(node_id));
 }
 
 /// Dispatches a focus change on a native input back into the Rust tree.
@@ -2371,18 +2733,28 @@ pub unsafe extern "C" fn krabik_ios_on_submitted(handle: u64, node_id: u64) {
 ///
 /// The call must happen on the main thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_focus_changed(handle: u64, node_id: u64, focused: bool) {
-    dispatch_focus(handle, NodeId(node_id), focused);
+pub unsafe extern "C" fn krabik_ios_on_focus_changed(
+    handle: u64,
+    host: u64,
+    node_id: u64,
+    focused: bool,
+) {
+    dispatch_focus(handle, host, NodeId(node_id), focused);
 }
 
-/// Dispatches a switch toggle back into the Rust tree.
+/// Dispatches a switch, checkbox or radio toggle back into the Rust tree.
 ///
 /// # Safety
 ///
 /// The call must happen on the main thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_checked_changed(handle: u64, node_id: u64, checked: bool) {
-    dispatch_checked(handle, NodeId(node_id), checked);
+pub unsafe extern "C" fn krabik_ios_on_checked_changed(
+    handle: u64,
+    host: u64,
+    node_id: u64,
+    checked: bool,
+) {
+    dispatch_checked(handle, host, NodeId(node_id), checked);
 }
 
 /// Dispatches a slider value back into the Rust tree.
@@ -2391,6 +2763,31 @@ pub unsafe extern "C" fn krabik_ios_on_checked_changed(handle: u64, node_id: u64
 ///
 /// The call must happen on the main thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_slider_changed(handle: u64, node_id: u64, value: f64) {
-    dispatch_value(handle, NodeId(node_id), value);
+pub unsafe extern "C" fn krabik_ios_on_slider_changed(
+    handle: u64,
+    host: u64,
+    node_id: u64,
+    value: f64,
+) {
+    dispatch_value(handle, host, NodeId(node_id), value);
+}
+
+/// Dispatches the native back action to the application.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_back(handle: u64) -> bool {
+    if MainThreadMarker::new().is_none() {
+        return false;
+    }
+    with_session(handle, |session| {
+        let handled = session.app.handle(Event::Back);
+        if handled {
+            session.render_all();
+        }
+        handled
+    })
+    .unwrap_or(false)
 }
