@@ -402,13 +402,96 @@ impl fmt::Display for DateValue {
     }
 }
 
-/// How a [`DatePicker`] presents its calendar.
+/// A time of day in the device's local timezone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TimeValue {
+    /// Hour in the range `0..=23`.
+    pub hour: u8,
+    /// Minute in the range `0..=59`.
+    pub minute: u8,
+}
+
+impl TimeValue {
+    /// Creates a time, clamping the hour and minute to their valid ranges.
+    pub const fn new(hour: u8, minute: u8) -> Self {
+        Self {
+            hour: if hour > 23 { 23 } else { hour },
+            minute: if minute > 59 { 59 } else { minute },
+        }
+    }
+}
+
+impl fmt::Display for TimeValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{:02}:{:02}", self.hour, self.minute)
+    }
+}
+
+/// The value of a [`DatePicker`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DatePickerValue {
+    /// A calendar date.
+    Date(DateValue),
+    /// A time of day.
+    Time(TimeValue),
+    /// A calendar date and a time of day.
+    DateTime {
+        /// The selected date.
+        date: DateValue,
+        /// The selected time.
+        time: TimeValue,
+    },
+}
+
+impl DatePickerValue {
+    /// Clamps this value to the optional date and time ranges.
+    pub fn clamped(
+        self,
+        date_range: Option<(DateValue, DateValue)>,
+        time_range: Option<(TimeValue, TimeValue)>,
+    ) -> Self {
+        // A range whose bounds are reversed is treated as unset.
+        let date_range = date_range.filter(|(min, max)| max >= min);
+        let time_range = time_range.filter(|(min, max)| max >= min);
+        let clamp_date = |date: DateValue| match date_range {
+            Some((min, max)) => date.max(min).min(max),
+            None => date,
+        };
+        let clamp_time = |time: TimeValue| match time_range {
+            Some((min, max)) => time.max(min).min(max),
+            None => time,
+        };
+        match self {
+            Self::Date(date) => Self::Date(clamp_date(date)),
+            Self::Time(time) => Self::Time(clamp_time(time)),
+            Self::DateTime { date, time } => {
+                let date = clamp_date(date);
+                let mut time = clamp_time(time);
+                if let (Some((min, _)), Some((min_time, _))) = (date_range, time_range)
+                    && date == min
+                    && time < min_time
+                {
+                    time = min_time;
+                }
+                if let (Some((_, max)), Some((_, max_time))) = (date_range, time_range)
+                    && date == max
+                    && time > max_time
+                {
+                    time = max_time;
+                }
+                Self::DateTime { date, time }
+            }
+        }
+    }
+}
+
+/// How a [`DatePicker`] presents its picker.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DatePickerMode {
-    /// A compact field that opens the platform's date picker.
+    /// A compact field that opens the platform's picker.
     #[default]
     Compact,
-    /// An inline calendar that is always visible.
+    /// An inline picker that is always visible.
     Inline,
 }
 
@@ -536,14 +619,49 @@ impl RadioGroupProps {
     }
 }
 
-/// Platform-independent properties of a date picker.
+/// Platform-independent properties of a native tab bar.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TabBarProps {
+    /// The labels of the tabs, in display order.
+    pub tabs: Vec<String>,
+    /// The index of the selected tab.
+    pub selected: usize,
+    /// The action dispatched whenever the selection changes.
+    pub action: Cow<'static, str>,
+    /// Font size of the labels in logical points.
+    pub size: f32,
+    /// ARGB color of the labels.
+    pub color: u32,
+    /// Font weight of the labels.
+    pub weight: FontWeight,
+}
+
+impl TabBarProps {
+    /// Creates a tab bar with the given labels.
+    pub fn new(tabs: Vec<String>) -> Self {
+        Self {
+            tabs,
+            selected: 0,
+            action: Cow::Borrowed(""),
+            size: 14.0,
+            color: 0xFF00_0000,
+            weight: FontWeight::Normal,
+        }
+    }
+}
+
+/// Platform-independent properties of a date, time or date-and-time picker.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DatePickerProps {
-    /// The selected date.
-    pub value: DateValue,
-    /// How the calendar is presented.
+    /// The selected date, time or both.
+    pub value: DatePickerValue,
+    /// How the picker is presented.
     pub mode: DatePickerMode,
-    /// The action dispatched whenever the date changes.
+    /// The optional inclusive date range.
+    pub date_range: Option<(DateValue, DateValue)>,
+    /// The optional inclusive time range.
+    pub time_range: Option<(TimeValue, TimeValue)>,
+    /// The action dispatched whenever the value changes.
     pub action: Cow<'static, str>,
     /// Font size of the compact field in logical points.
     pub size: f32,
@@ -554,11 +672,13 @@ pub struct DatePickerProps {
 }
 
 impl DatePickerProps {
-    /// Creates a compact date picker with the given date.
-    pub fn new(value: DateValue) -> Self {
+    /// Creates a compact date picker with the given value.
+    pub fn new(value: DatePickerValue) -> Self {
         Self {
             value,
             mode: DatePickerMode::Compact,
+            date_range: None,
+            time_range: None,
             action: Cow::Borrowed(""),
             size: 16.0,
             color: 0xFF00_0000,
@@ -839,6 +959,7 @@ pub(crate) enum ElementKind {
     Checkbox(CheckProps),
     RadioButton(CheckProps),
     RadioGroup(RadioGroupProps),
+    TabBar(TabBarProps),
     DatePicker(DatePickerProps),
     Slider(SliderProps),
     Progress(ProgressProps),
@@ -865,6 +986,7 @@ impl ElementKind {
             Self::Checkbox(_) => 12,
             Self::RadioButton(_) => 13,
             Self::RadioGroup(_) => 16,
+            Self::TabBar(_) => 19,
             Self::DatePicker(_) => 18,
             Self::Slider(_) => 14,
             Self::Progress(_) => 15,
@@ -1521,7 +1643,99 @@ impl From<RadioGroup> for Element {
     }
 }
 
-/// A native date picker.
+/// A native tab bar that reports the tapped tab through [`Event::Selected`].
+///
+/// The application owns the selection: it stores the index and passes it back
+/// with [`TabBar::selected`]. Use [`Tabs`] to pair the bar with a content view.
+///
+/// [`Event::Selected`]: crate::app::Event::Selected
+#[derive(Clone, Debug, PartialEq)]
+pub struct TabBar(pub(crate) Element);
+
+impl TabBar {
+    /// Creates a tab bar with the given labels and the first tab selected.
+    pub fn new(tabs: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        let tabs: Vec<String> = tabs.into_iter().map(Into::into).collect();
+        Self(Element::leaf(ElementKind::TabBar(TabBarProps::new(tabs))))
+    }
+
+    /// Sets the index of the selected tab.
+    pub fn selected(mut self, index: usize) -> Self {
+        if let ElementKind::TabBar(props) = &mut self.0.kind {
+            props.selected = index;
+        }
+        self
+    }
+
+    /// Sets the action dispatched whenever the selection changes.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+        if let ElementKind::TabBar(props) = &mut self.0.kind {
+            props.action = action.into();
+        }
+        self
+    }
+}
+
+impl From<TabBar> for Element {
+    fn from(component: TabBar) -> Self {
+        component.0
+    }
+}
+
+/// A tab bar stacked above application-owned content.
+///
+/// This is a plain composition of [`TabBar`] and one child; it does not create
+/// a native tab controller. The application chooses which content to build for
+/// the current index and handles [`Event::Selected`](crate::app::Event::Selected).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tabs(pub(crate) Element);
+
+impl Tabs {
+    /// Creates a tab bar with the given labels above empty content.
+    pub fn new(tabs: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        let mut column = Column::new();
+        column.0.children.push(TabBar::new(tabs).into());
+        Self(column.0)
+    }
+
+    /// Sets the index of the selected tab.
+    pub fn selected(mut self, index: usize) -> Self {
+        if let Some(tab_bar) = self.0.children.first_mut()
+            && let ElementKind::TabBar(props) = &mut tab_bar.kind
+        {
+            props.selected = index;
+        }
+        self
+    }
+
+    /// Sets the action dispatched whenever the selection changes.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+        if let Some(tab_bar) = self.0.children.first_mut()
+            && let ElementKind::TabBar(props) = &mut tab_bar.kind
+        {
+            props.action = action.into();
+        }
+        self
+    }
+
+    /// Appends the content shown below the tab bar.
+    pub fn child(mut self, child: impl Into<Element>) -> Self {
+        self.0.children.push(child.into());
+        self
+    }
+}
+
+impl From<Tabs> for Element {
+    fn from(component: Tabs) -> Self {
+        component.0
+    }
+}
+
+/// A native date, time or date-and-time picker.
+///
+/// The value kind is chosen by the constructor: [`DatePicker::new`] for a
+/// date, [`DatePicker::time`] for a time, and [`DatePicker::date_time`] for
+/// both. The reported event matches the kind.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DatePicker(pub(crate) Element);
 
@@ -1529,14 +1743,44 @@ impl DatePicker {
     /// Creates a compact date picker with the given date.
     pub fn new(value: DateValue) -> Self {
         Self(Element::leaf(ElementKind::DatePicker(
-            DatePickerProps::new(value),
+            DatePickerProps::new(DatePickerValue::Date(value)),
         )))
     }
 
-    /// Chooses between the compact field and the inline calendar.
+    /// Creates a compact time picker with the given time.
+    pub fn time(value: TimeValue) -> Self {
+        Self(Element::leaf(ElementKind::DatePicker(
+            DatePickerProps::new(DatePickerValue::Time(value)),
+        )))
+    }
+
+    /// Creates a compact date-and-time picker.
+    pub fn date_time(date: DateValue, time: TimeValue) -> Self {
+        Self(Element::leaf(ElementKind::DatePicker(
+            DatePickerProps::new(DatePickerValue::DateTime { date, time }),
+        )))
+    }
+
+    /// Chooses between the compact field and the inline picker.
     pub fn mode(mut self, mode: DatePickerMode) -> Self {
         if let ElementKind::DatePicker(props) = &mut self.0.kind {
             props.mode = mode;
+        }
+        self
+    }
+
+    /// Sets inclusive date bounds.
+    pub fn range(mut self, min: DateValue, max: DateValue) -> Self {
+        if let ElementKind::DatePicker(props) = &mut self.0.kind {
+            props.date_range = Some((min, max));
+        }
+        self
+    }
+
+    /// Sets inclusive time bounds.
+    pub fn time_range(mut self, min: TimeValue, max: TimeValue) -> Self {
+        if let ElementKind::DatePicker(props) = &mut self.0.kind {
+            props.time_range = Some((min, max));
         }
         self
     }
@@ -1879,6 +2123,7 @@ impl Element {
             ElementKind::TextField(props) => props.size = size,
             ElementKind::Checkbox(props) | ElementKind::RadioButton(props) => props.size = size,
             ElementKind::RadioGroup(props) => props.size = size,
+            ElementKind::TabBar(props) => props.size = size,
             ElementKind::DatePicker(props) => props.size = size,
             _ => {}
         }
@@ -1891,6 +2136,7 @@ impl Element {
             ElementKind::TextField(props) => props.color = color,
             ElementKind::Checkbox(props) | ElementKind::RadioButton(props) => props.color = color,
             ElementKind::RadioGroup(props) => props.color = color,
+            ElementKind::TabBar(props) => props.color = color,
             ElementKind::DatePicker(props) => props.color = color,
             _ => {}
         }
@@ -1903,6 +2149,7 @@ impl Element {
             ElementKind::TextField(props) => props.weight = weight,
             ElementKind::Checkbox(props) | ElementKind::RadioButton(props) => props.weight = weight,
             ElementKind::RadioGroup(props) => props.weight = weight,
+            ElementKind::TabBar(props) => props.weight = weight,
             ElementKind::DatePicker(props) => props.weight = weight,
             _ => {}
         }
@@ -1919,6 +2166,7 @@ style_builder!(Switch);
 style_builder!(Checkbox);
 style_builder!(RadioButton);
 style_builder!(RadioGroup);
+style_builder!(TabBar);
 style_builder!(DatePicker);
 style_builder!(Slider);
 style_builder!(ProgressIndicator);
@@ -2046,6 +2294,111 @@ mod tests {
     }
 
     #[test]
+    fn times_format_and_clamp() {
+        assert_eq!(TimeValue::new(9, 5).to_string(), "09:05");
+        assert_eq!(TimeValue::new(30, 90), TimeValue::new(23, 59));
+    }
+
+    #[test]
+    fn picker_values_clamp_to_their_ranges() {
+        let date_range = Some((DateValue::new(2026, 1, 10), DateValue::new(2026, 1, 20)));
+        let time_range = Some((TimeValue::new(9, 0), TimeValue::new(17, 0)));
+
+        assert_eq!(
+            DatePickerValue::Date(DateValue::new(2025, 12, 31)).clamped(date_range, time_range),
+            DatePickerValue::Date(DateValue::new(2026, 1, 10))
+        );
+        assert_eq!(
+            DatePickerValue::Time(TimeValue::new(18, 30)).clamped(date_range, time_range),
+            DatePickerValue::Time(TimeValue::new(17, 0))
+        );
+        assert_eq!(
+            DatePickerValue::DateTime {
+                date: DateValue::new(2026, 1, 20),
+                time: TimeValue::new(18, 30),
+            }
+            .clamped(date_range, time_range),
+            DatePickerValue::DateTime {
+                date: DateValue::new(2026, 1, 20),
+                time: TimeValue::new(17, 0),
+            }
+        );
+        // A range whose bounds are reversed is ignored.
+        assert_eq!(
+            DatePickerValue::Time(TimeValue::new(12, 0))
+                .clamped(None, Some((TimeValue::new(17, 0), TimeValue::new(9, 0)))),
+            DatePickerValue::Time(TimeValue::new(12, 0))
+        );
+    }
+
+    #[test]
+    fn time_and_datetime_pickers_keep_their_ranges() {
+        let element: Element = DatePicker::time(TimeValue::new(10, 30))
+            .time_range(TimeValue::new(9, 0), TimeValue::new(17, 0))
+            .action("time")
+            .into();
+        let ElementKind::DatePicker(props) = element.kind else {
+            panic!("expected date picker");
+        };
+        assert_eq!(props.value, DatePickerValue::Time(TimeValue::new(10, 30)));
+        assert_eq!(
+            props.time_range,
+            Some((TimeValue::new(9, 0), TimeValue::new(17, 0)))
+        );
+
+        let element: Element =
+            DatePicker::date_time(DateValue::new(2026, 11, 12), TimeValue::new(10, 30))
+                .range(DateValue::new(2026, 11, 1), DateValue::new(2026, 11, 30))
+                .into();
+        let ElementKind::DatePicker(props) = element.kind else {
+            panic!("expected date picker");
+        };
+        assert_eq!(
+            props.value,
+            DatePickerValue::DateTime {
+                date: DateValue::new(2026, 11, 12),
+                time: TimeValue::new(10, 30),
+            }
+        );
+        assert_eq!(
+            props.date_range,
+            Some((DateValue::new(2026, 11, 1), DateValue::new(2026, 11, 30)))
+        );
+    }
+
+    #[test]
+    fn tab_bar_keeps_tabs_selection_and_action() {
+        let element: Element = TabBar::new(["Day", "Week", "Month"])
+            .selected(2)
+            .action("period")
+            .into();
+        let ElementKind::TabBar(props) = element.kind else {
+            panic!("expected tab bar");
+        };
+        assert_eq!(props.tabs, ["Day", "Week", "Month"]);
+        assert_eq!(props.selected, 2);
+        assert_eq!(props.action, "period");
+    }
+
+    #[test]
+    fn tabs_compose_a_bar_above_their_content() {
+        let element: Element = Tabs::new(["One", "Two"])
+            .selected(1)
+            .action("tab")
+            .child(Text::new("content"))
+            .into();
+
+        assert_eq!(element.children.len(), 2);
+        let ElementKind::TabBar(props) = &element.children[0].kind else {
+            panic!("expected tab bar");
+        };
+        assert_eq!(props.tabs, ["One", "Two"]);
+        assert_eq!(props.selected, 1);
+        assert_eq!(props.action, "tab");
+        assert!(matches!(element.children[1].kind, ElementKind::Text(_)));
+    }
+
+    #[test]
     fn date_picker_keeps_its_mode_and_action() {
         let element: Element = DatePicker::new(DateValue::new(2026, 11, 12))
             .mode(DatePickerMode::Inline)
@@ -2055,7 +2408,10 @@ mod tests {
         let ElementKind::DatePicker(props) = element.kind else {
             panic!("expected date picker");
         };
-        assert_eq!(props.value, DateValue::new(2026, 11, 12));
+        assert_eq!(
+            props.value,
+            DatePickerValue::Date(DateValue::new(2026, 11, 12))
+        );
         assert_eq!(props.mode, DatePickerMode::Inline);
         assert_eq!(props.action, "pick");
     }

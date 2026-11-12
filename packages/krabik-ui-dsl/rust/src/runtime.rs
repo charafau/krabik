@@ -437,11 +437,30 @@ impl Runtime {
         }
     }
 
-    /// Returns the action of the date picker with the given identifier, if any.
-    pub fn date_picker_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
+    /// Returns the action of the tab bar with the given identifier, if any.
+    pub fn tab_bar_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::DatePicker(props) if !props.action.is_empty() => Some(props.action.clone()),
+            NodeKind::TabBar(props) if !props.action.is_empty() => Some(props.action.clone()),
+            _ => None,
+        }
+    }
+
+    /// Returns the action and ranges of the date picker with the given identifier.
+    #[allow(clippy::type_complexity)]
+    pub fn date_picker_config(
+        &self,
+        id: NodeId,
+    ) -> Option<(
+        Cow<'static, str>,
+        Option<(crate::ui::DateValue, crate::ui::DateValue)>,
+        Option<(crate::ui::TimeValue, crate::ui::TimeValue)>,
+    )> {
+        let node = tree::find(&self.tree, id)?;
+        match &node.kind {
+            NodeKind::DatePicker(props) if !props.action.is_empty() => {
+                Some((props.action.clone(), props.date_range, props.time_range))
+            }
             _ => None,
         }
     }

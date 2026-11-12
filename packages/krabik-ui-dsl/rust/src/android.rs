@@ -26,9 +26,10 @@ use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Axis, CheckProps, DatePickerMode, DatePickerProps, EdgeInsets, FontWeight, GradientDirection,
-    ImageProps, ImageScale, ImageSource, ImeAction, KeyboardType, ProgressProps, RadioGroupProps,
-    SliderProps, SwitchProps, TextAlign, TextFieldProps, TextProps, snap_slider_value,
+    Axis, CheckProps, DatePickerMode, DatePickerProps, DatePickerValue, DateValue, EdgeInsets,
+    FontWeight, GradientDirection, ImageProps, ImageScale, ImageSource, ImeAction, KeyboardType,
+    ProgressProps, RadioGroupProps, SliderProps, SwitchProps, TabBarProps, TextAlign,
+    TextFieldProps, TextProps, TimeValue, snap_slider_value,
 };
 
 mod handles;
@@ -55,6 +56,7 @@ const SWITCH_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSwitch")
 const CHECKBOX_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikCheckBox");
 const RADIO_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioButton");
 const RADIO_GROUP_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioGroup");
+const TAB_BAR_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikTabBar");
 const DATE_PICKER_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikDatePicker");
 const SEEK_BAR_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSeekBar");
 const PROGRESS_BAR_CLASS: &JNIStr = jni_str!("android/widget/ProgressBar");
@@ -290,6 +292,8 @@ struct RowAction {
     toggle: Option<Cow<'static, str>>,
     selected: Option<Cow<'static, str>>,
     date: Option<Cow<'static, str>>,
+    date_range: Option<(crate::ui::DateValue, crate::ui::DateValue)>,
+    time_range: Option<(crate::ui::TimeValue, crate::ui::TimeValue)>,
     value: Option<Cow<'static, str>>,
     value_min: f32,
     value_max: f32,
@@ -640,6 +644,10 @@ impl AndroidState {
                     ids.radio_group_ctor
                         .construct(env, &ids.radio_group, &child_context)?
                 }
+                NodeKind::TabBar(_) => {
+                    ids.tab_bar_ctor
+                        .construct(env, &ids.tab_bar, &child_context)?
+                }
                 NodeKind::DatePicker(_) => {
                     ids.date_picker_ctor
                         .construct(env, &ids.date_picker, &child_context)?
@@ -693,6 +701,8 @@ impl AndroidState {
             update_check(env, &view, props, true)?;
         } else if let NodeKind::RadioGroup(props) = &node.kind {
             update_radio_group(env, &view, props)?;
+        } else if let NodeKind::TabBar(props) = &node.kind {
+            update_tab_bar(env, &view, props)?;
         } else if let NodeKind::DatePicker(props) = &node.kind {
             update_date_picker(env, &view, props)?;
         } else if let NodeKind::Slider(props) = &node.kind {
@@ -868,8 +878,14 @@ impl AndroidState {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
+                NodeKind::TabBar(props) if !props.action.is_empty() => {
+                    action.selected = Some(props.action.clone());
+                    any = true;
+                }
                 NodeKind::DatePicker(props) if !props.action.is_empty() => {
                     action.date = Some(props.action.clone());
+                    action.date_range = props.date_range;
+                    action.time_range = props.time_range;
                     any = true;
                 }
                 NodeKind::Slider(props) if !props.action.is_empty() => {
@@ -1122,14 +1138,71 @@ fn update_date_picker(
     props: &DatePickerProps,
 ) -> JniResult<()> {
     let ids = jni_handles(env)?;
+    let (kind, year, month, day, hour, minute) = match props.value {
+        DatePickerValue::Date(date) => (0, date.year, date.month as jint, date.day as jint, 0, 0),
+        DatePickerValue::Time(time) => (1, 1970, 1, 1, time.hour as jint, time.minute as jint),
+        DatePickerValue::DateTime { date, time } => (
+            2,
+            date.year,
+            date.month as jint,
+            date.day as jint,
+            time.hour as jint,
+            time.minute as jint,
+        ),
+    };
     ids.configure_date_picker.call_void(
         env,
         view,
         &[
-            JValue::Int(props.value.year),
-            JValue::Int(props.value.month as jint),
-            JValue::Int(props.value.day as jint),
+            JValue::Int(kind),
+            JValue::Int(year),
+            JValue::Int(month),
+            JValue::Int(day),
+            JValue::Int(hour),
+            JValue::Int(minute),
             JValue::Bool(props.mode == DatePickerMode::Inline),
+        ],
+    )?;
+    let (min_date, max_date) = match props.date_range {
+        Some((min, max)) => (
+            [min.year, min.month as jint, min.day as jint],
+            [max.year, max.month as jint, max.day as jint],
+        ),
+        None => ([0; 3], [0; 3]),
+    };
+    ids.date_picker_set_date_range.call_void(
+        env,
+        view,
+        &[
+            JValue::Int(min_date[0]),
+            JValue::Int(min_date[1]),
+            JValue::Int(min_date[2]),
+            JValue::Int(max_date[0]),
+            JValue::Int(max_date[1]),
+            JValue::Int(max_date[2]),
+        ],
+    )?;
+    let (min_time, max_time) = match props.time_range {
+        Some((min, max)) => (
+            [min.hour as jint, min.minute as jint],
+            [max.hour as jint, max.minute as jint],
+        ),
+        None => ([-1; 2], [-1; 2]),
+    };
+    ids.date_picker_set_time_range.call_void(
+        env,
+        view,
+        &[
+            JValue::Int(min_time[0]),
+            JValue::Int(min_time[1]),
+            JValue::Int(max_time[0]),
+            JValue::Int(max_time[1]),
+        ],
+    )?;
+    ids.date_picker_set_style.call_void(
+        env,
+        view,
+        &[
             JValue::Float(props.size),
             JValue::Int(props.color as jint),
             JValue::Bool(matches!(props.weight, FontWeight::Bold)),
@@ -1180,6 +1253,31 @@ fn update_radio_group(
             JValue::Float(props.size),
             JValue::Int(props.color as jint),
             JValue::Float(props.spacing),
+            JValue::Bool(matches!(props.weight, FontWeight::Bold)),
+        ],
+    )
+}
+
+fn update_tab_bar(env: &mut Env<'_>, view: &JObject<'_>, props: &TabBarProps) -> JniResult<()> {
+    let ids = jni_handles(env)?;
+    let labels = env.new_object_array(
+        props.tabs.len() as jint,
+        jni_str!("java/lang/String"),
+        JObject::null(),
+    )?;
+    for (index, tab) in props.tabs.iter().enumerate() {
+        let label = jcall!(env, env.new_string(tab))?;
+        let object: &JObject<'_> = label.as_ref();
+        labels.set_element(env, index, object)?;
+    }
+    ids.configure_tab_bar.call_void(
+        env,
+        view,
+        &[
+            JValue::Object(&labels),
+            JValue::Int(props.selected as jint),
+            JValue::Float(props.size),
+            JValue::Int(props.color as jint),
             JValue::Bool(matches!(props.weight, FontWeight::Bold)),
         ],
     )
@@ -2106,9 +2204,9 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSli
     });
 }
 
-/// Dispatches a date selection back into the Rust tree.
+/// Dispatches a date, time or date-and-time selection back into the Rust tree.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnDateChanged<
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnPickerChanged<
     'caller,
 >(
     mut unenv: EnvUnowned<'caller>,
@@ -2116,11 +2214,14 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnDat
     handle: jlong,
     host: jlong,
     node_id: jlong,
+    kind: jint,
     year: jint,
     month: jint,
     day: jint,
+    hour: jint,
+    minute: jint,
 ) {
-    run(&mut unenv, "nativeOnDateChanged", |env| {
+    run(&mut unenv, "nativeOnPickerChanged", |env| {
         let Some(mut states) = lock_states_for_event() else {
             return Ok(());
         };
@@ -2129,20 +2230,47 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnDat
         };
 
         let id = NodeId(node_id as u64);
-        let action = session.hosts.get(&(host as u64)).and_then(|state| {
-            state
-                .runtime
-                .date_picker_action(id)
-                .or_else(|| state.row_actions.get(&id).and_then(|row| row.date.clone()))
+        let config = session.hosts.get(&(host as u64)).and_then(|state| {
+            state.runtime.date_picker_config(id).or_else(|| {
+                state.row_actions.get(&id).and_then(|row| {
+                    row.date
+                        .clone()
+                        .map(|action| (action, row.date_range, row.time_range))
+                })
+            })
         });
-        let date =
-            crate::ui::DateValue::new(year, month.clamp(0, 255) as u8, day.clamp(0, 255) as u8);
-        if let Some(action) = action
-            && session.app.handle(Event::DateChanged {
+        let Some((action, date_range, time_range)) = config else {
+            return Ok(());
+        };
+
+        let date = DateValue::new(year, month.clamp(0, 255) as u8, day.clamp(0, 255) as u8);
+        let time = TimeValue::new(hour.clamp(0, 255) as u8, minute.clamp(0, 255) as u8);
+        let value = match kind {
+            0 => DatePickerValue::Date(date),
+            1 => DatePickerValue::Time(time),
+            2 => DatePickerValue::DateTime { date, time },
+            _ => return Ok(()),
+        }
+        .clamped(date_range, time_range);
+
+        let handled = match value {
+            DatePickerValue::Date(date) => session.app.handle(Event::DateChanged {
                 action: &action,
                 date,
-            })
-        {
+            }),
+            DatePickerValue::Time(time) => session.app.handle(Event::TimeChanged {
+                action: &action,
+                time,
+            }),
+            DatePickerValue::DateTime { date, time } => {
+                session.app.handle(Event::DateTimeChanged {
+                    action: &action,
+                    date,
+                    time,
+                })
+            }
+        };
+        if handled {
             session.render_all(env)?;
         }
         Ok(())
@@ -2172,6 +2300,47 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnRad
         let id = NodeId(node_id as u64);
         let action = session.hosts.get(&(host as u64)).and_then(|state| {
             state.runtime.radio_group_action(id).or_else(|| {
+                state
+                    .row_actions
+                    .get(&id)
+                    .and_then(|row| row.selected.clone())
+            })
+        });
+        if let Some(action) = action
+            && session.app.handle(Event::Selected {
+                action: &action,
+                index: index.max(0) as usize,
+            })
+        {
+            session.render_all(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Dispatches a tab-bar selection back into the Rust tree.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnTabSelected<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    host: jlong,
+    node_id: jlong,
+    index: jint,
+) {
+    run(&mut unenv, "nativeOnTabSelected", |env| {
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        let Some(session) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+
+        let id = NodeId(node_id as u64);
+        let action = session.hosts.get(&(host as u64)).and_then(|state| {
+            state.runtime.tab_bar_action(id).or_else(|| {
                 state
                     .row_actions
                     .get(&id)

@@ -32,7 +32,21 @@ final class ShowcaseUITests: XCTestCase {
 
         open("Date picker")
         XCTAssertTrue(app.staticTexts["Compact: 2026-11-12"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.datePickers.count, 2)
+        XCTAssertTrue(app.staticTexts["Time: 10:30"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Bounded: 2026-06-15"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.datePickers.count, 5)
+        backToCatalog()
+
+        open("Tabs")
+        XCTAssertTrue(
+            app.staticTexts["Overview: the first tab is selected by default."]
+                .waitForExistence(timeout: 5)
+        )
+        app.segmentedControls.firstMatch.buttons["Settings"].tap()
+        XCTAssertTrue(
+            app.staticTexts["Settings: tapping a tab reports Event::Selected."]
+                .waitForExistence(timeout: 5)
+        )
         backToCatalog()
 
         open("Progress")

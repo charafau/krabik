@@ -47,6 +47,8 @@ const CHECK_INDICATOR: f32 = 20.0;
 const CHECK_GAP: f32 = 28.0;
 /// The minimum touch height of a checkbox or radio button.
 const CHECK_HEIGHT: f32 = 48.0;
+/// The height of a native tab bar.
+const TAB_BAR_HEIGHT: f32 = 48.0;
 /// The intrinsic height of a slider.
 const SLIDER_HEIGHT: f32 = 40.0;
 /// The intrinsic height of a progress indicator.
@@ -55,10 +57,12 @@ const PROGRESS_HEIGHT: f32 = 6.0;
 const SPINNER_SIZE: f32 = 24.0;
 /// The width assumed for a compact date field without a constraint.
 const DATE_PICKER_WIDTH: f32 = 200.0;
-/// The height of a compact date field.
+/// The width assumed for a compact time field.
+const TIME_PICKER_WIDTH: f32 = 120.0;
+/// The width assumed for a compact date-and-time field.
+const DATETIME_PICKER_WIDTH: f32 = 240.0;
+/// The height of a compact picker field.
 const DATE_PICKER_HEIGHT: f32 = 48.0;
-/// The default inline calendar size.
-const INLINE_DATE_PICKER: f32 = 320.0;
 /// The width assumed for a slider or progress indicator without a constraint.
 const CONTROL_WIDTH: f32 = 200.0;
 
@@ -386,17 +390,26 @@ fn content_size(
             height += props.spacing * (props.options.len() - 1) as f32;
             Size::new(widest + CHECK_INDICATOR + CHECK_GAP, height)
         }
-        NodeKind::DatePicker(props) => match props.mode {
-            // A date field keeps its compact size unless the style sets one.
-            crate::ui::DatePickerMode::Compact => Size::new(DATE_PICKER_WIDTH, DATE_PICKER_HEIGHT),
-            // An inline calendar fits the available width up to its natural size.
-            crate::ui::DatePickerMode::Inline => Size::new(
-                max_width
-                    .unwrap_or(INLINE_DATE_PICKER)
-                    .min(INLINE_DATE_PICKER),
-                INLINE_DATE_PICKER,
-            ),
-        },
+        // A tab bar fills the available width and has a fixed touch height.
+        NodeKind::TabBar(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), TAB_BAR_HEIGHT),
+        NodeKind::DatePicker(props) => {
+            let (compact_width, inline_width, inline_height) = match props.value {
+                crate::ui::DatePickerValue::Date(_) => (DATE_PICKER_WIDTH, 320.0, 320.0),
+                crate::ui::DatePickerValue::Time(_) => (TIME_PICKER_WIDTH, 240.0, 240.0),
+                crate::ui::DatePickerValue::DateTime { .. } => {
+                    (DATETIME_PICKER_WIDTH, 360.0, 480.0)
+                }
+            };
+            match props.mode {
+                // A field keeps its compact size unless the style sets one.
+                crate::ui::DatePickerMode::Compact => Size::new(compact_width, DATE_PICKER_HEIGHT),
+                // An inline picker fits the available width up to its natural size.
+                crate::ui::DatePickerMode::Inline => Size::new(
+                    max_width.unwrap_or(inline_width).min(inline_width),
+                    inline_height,
+                ),
+            }
+        }
         // A slider fills the width it is given and has a fixed touch height.
         NodeKind::Slider(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), SLIDER_HEIGHT),
         NodeKind::Progress(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), PROGRESS_HEIGHT),
@@ -466,7 +479,7 @@ mod tests {
     use crate::ui::{
         Button, Checkbox, Column, DatePicker, DatePickerMode, DateValue, EdgeInsets, Element,
         Image, ImageSource, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider,
-        Spacer, Switch, Text, TextField,
+        Spacer, Switch, TabBar, Text, TextField, TimeValue,
     };
 
     /// Measures every text as the same fixed box.
@@ -900,6 +913,31 @@ mod tests {
         assert_eq!(compact_date.height, 48.0);
         assert_eq!(inline_date.width, 300.0);
         assert_eq!(inline_date.height, 320.0);
+    }
+
+    #[test]
+    fn pickers_and_tab_bars_have_intrinsic_sizes() {
+        let element: Element = Column::new()
+            .width(300)
+            .align_items(Align::Start)
+            .child(DatePicker::time(TimeValue::new(10, 30)))
+            .child(DatePicker::date_time(
+                DateValue::new(2026, 11, 12),
+                TimeValue::new(10, 30),
+            ))
+            .child(TabBar::new(["One", "Two", "Three"]))
+            .into();
+
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &ApproximateMeasure).frames;
+        let column = &tree.children[0];
+
+        assert_eq!(frames[&column.children[0].id].width, 120.0);
+        assert_eq!(frames[&column.children[0].id].height, 48.0);
+        assert_eq!(frames[&column.children[1].id].width, 240.0);
+        assert_eq!(frames[&column.children[1].id].height, 48.0);
+        assert_eq!(frames[&column.children[2].id].width, 300.0);
+        assert_eq!(frames[&column.children[2].id].height, 48.0);
     }
 
     #[test]
