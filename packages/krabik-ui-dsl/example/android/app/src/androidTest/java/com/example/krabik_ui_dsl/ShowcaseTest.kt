@@ -44,6 +44,16 @@ class ShowcaseTest {
             onView(withText("Stepped: 100")).check(matches(isDisplayed()))
             tapBack()
 
+            openPage("Date picker")
+            onView(withText("Compact: 2026-11-12")).check(matches(isDisplayed()))
+            onView(withText("2026-11-12")).perform(click())
+            onView(withText("OK")).perform(click())
+            onView(withText("Compact: 2026-11-12")).check(matches(isDisplayed()))
+            onView(withContentDescription("Inline date"))
+                .perform(androidx.test.espresso.action.ViewActions.scrollTo())
+                .check(matches(isDisplayed()))
+            tapBack()
+
             openPage("Progress")
             onView(withText("Set 100%")).perform(click())
             onView(withText("100%")).check(matches(isDisplayed()))

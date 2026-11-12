@@ -14,7 +14,7 @@ use std::sync::Arc;
 use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Event, set_app_factory};
-use krabik_ui_dsl::ui::Element;
+use krabik_ui_dsl::ui::{DateValue, Element};
 
 mod checklist;
 mod pages;
@@ -34,6 +34,7 @@ pub enum Page {
     Checkbox,
     RadioButtons,
     RadioGroup,
+    DatePicker,
     Slider,
     Progress,
     Spinner,
@@ -58,6 +59,7 @@ impl Page {
             "checkbox" => Self::Checkbox,
             "radio-buttons" => Self::RadioButtons,
             "radio-group" => Self::RadioGroup,
+            "date-picker" => Self::DatePicker,
             "slider" => Self::Slider,
             "progress" => Self::Progress,
             "spinner" => Self::Spinner,
@@ -87,6 +89,8 @@ pub struct ShowcaseApp {
     bluetooth: bool,
     radio_choice: usize,
     size_choice: usize,
+    date: DateValue,
+    inline_date: DateValue,
     volume: f32,
     stepped: f32,
     progress: f32,
@@ -109,6 +113,8 @@ impl ShowcaseApp {
             bluetooth: false,
             radio_choice: 1,
             size_choice: 1,
+            date: DateValue::new(2026, 11, 12),
+            inline_date: DateValue::new(2026, 11, 12),
             volume: 40.0,
             stepped: 30.0,
             progress: 0.4,
@@ -238,6 +244,20 @@ impl App for ShowcaseApp {
                 self.size_choice = index;
                 true
             }
+            Event::DateChanged {
+                action: "demo:date",
+                date,
+            } => {
+                self.date = date;
+                true
+            }
+            Event::DateChanged {
+                action: "demo:date-inline",
+                date,
+            } => {
+                self.inline_date = date;
+                true
+            }
             Event::ValueChanged {
                 action: "demo:volume",
                 value,
@@ -337,6 +357,21 @@ mod tests {
             value: 70.0,
         }));
         assert_eq!(app.stepped, 70.0);
+    }
+
+    #[test]
+    fn date_pickers_update_their_dates() {
+        let mut app = app();
+        assert!(app.handle(Event::DateChanged {
+            action: "demo:date",
+            date: DateValue::new(2027, 1, 2),
+        }));
+        assert_eq!(app.date, DateValue::new(2027, 1, 2));
+        assert!(app.handle(Event::DateChanged {
+            action: "demo:date-inline",
+            date: DateValue::new(2027, 3, 4),
+        }));
+        assert_eq!(app.inline_date, DateValue::new(2027, 3, 4));
     }
 
     #[test]

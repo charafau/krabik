@@ -204,6 +204,13 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
         }
     }
 
+    /** Forwards a date selected in a native date picker back to Rust. */
+    fun onDateChanged(nodeId: Long, year: Int, month: Int, day: Int) {
+        if (handle != 0L) {
+            nativeOnDateChanged(handle, nodeId, year, month, day)
+        }
+    }
+
     /** Asks Rust to build one recycled-list row into [host], at [width] pixels. */
     fun bindRow(nodeId: Long, index: Int, holderId: Long, host: ViewGroup, width: Int): Int =
         if (handle != 0L) {
@@ -261,6 +268,14 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     private external fun nativeOnSliderChanged(handle: Long, nodeId: Long, value: Float)
 
     private external fun nativeOnRadioGroupSelected(handle: Long, nodeId: Long, index: Int)
+
+    private external fun nativeOnDateChanged(
+        handle: Long,
+        nodeId: Long,
+        year: Int,
+        month: Int,
+        day: Int,
+    )
 
     private external fun nativeOnScroll(handle: Long, nodeId: Long, offset: Float)
 

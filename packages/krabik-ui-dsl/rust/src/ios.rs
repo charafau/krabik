@@ -19,7 +19,8 @@ use objc2::{ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGColor;
 use objc2_foundation::{
-    NSArray, NSBundle, NSData, NSError, NSIndexPath, NSString, NSURL, NSURLResponse, NSURLSession,
+    NSArray, NSBundle, NSCalendar, NSCalendarUnit, NSData, NSDate, NSDateComponents, NSError,
+    NSIndexPath, NSString, NSURL, NSURLResponse, NSURLSession,
 };
 use objc2_quartz_core::{CACornerMask, CAGradientLayer};
 use objc2_ui_kit::{
@@ -28,10 +29,10 @@ use objc2_ui_kit::{
     UICollectionView, UICollectionViewCell, UICollectionViewDataSource, UICollectionViewDelegate,
     UICollectionViewDelegateFlowLayout, UICollectionViewFlowLayout, UICollectionViewLayout,
     UIColor, UIControl, UIControlContentHorizontalAlignment, UIControlEvents, UIControlState,
-    UIEdgeInsets, UIFont, UIImage, UIImageView, UIKeyboardType, UILabel, UILayoutConstraintAxis,
-    UIProgressView, UIReturnKeyType, UIScrollView, UIScrollViewDelegate, UISlider, UIStackView,
-    UIStackViewAlignment, UIStackViewDistribution, UISwitch, UITextBorderStyle, UITextField,
-    UITextInputTraits, UIView, UIViewContentMode,
+    UIDatePicker, UIDatePickerMode, UIDatePickerStyle, UIEdgeInsets, UIFont, UIImage, UIImageView,
+    UIKeyboardType, UILabel, UILayoutConstraintAxis, UIProgressView, UIReturnKeyType, UIScrollView,
+    UIScrollViewDelegate, UISlider, UIStackView, UIStackViewAlignment, UIStackViewDistribution,
+    UISwitch, UITextBorderStyle, UITextField, UITextInputTraits, UIView, UIViewContentMode,
 };
 
 use crate::app::{App, Event};
@@ -42,9 +43,10 @@ use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Axis, ButtonProps, CheckProps, EdgeInsets, Element, FontWeight, GradientDirection, ImageProps,
-    ImageScale, ImageSource, ImeAction, KeyboardType, ProgressProps, RadioGroupProps, SliderProps,
-    SpinnerProps, TextAlign, TextFieldProps, TextProps, snap_slider_value,
+    Axis, ButtonProps, CheckProps, DatePickerMode, DatePickerProps, DateValue, EdgeInsets, Element,
+    FontWeight, GradientDirection, ImageProps, ImageScale, ImageSource, ImeAction, KeyboardType,
+    ProgressProps, RadioGroupProps, SliderProps, SpinnerProps, TextAlign, TextFieldProps,
+    TextProps, snap_slider_value,
 };
 
 /// Measures text with an off-screen `UILabel`.
@@ -448,6 +450,7 @@ enum Content {
         buttons: Vec<Retained<UIButton>>,
         labels: Vec<String>,
     },
+    DatePicker(Retained<UIDatePicker>),
     Slider(Retained<UISlider>),
     Progress(Retained<UIProgressView>),
     Spinner(Retained<UIActivityIndicatorView>),
@@ -540,6 +543,7 @@ struct RowAction {
     focus: Option<Cow<'static, str>>,
     toggle: Option<Cow<'static, str>>,
     selected: Option<Cow<'static, str>>,
+    date: Option<Cow<'static, str>>,
     value: Option<Cow<'static, str>>,
     value_min: f32,
     value_max: f32,
@@ -780,6 +784,13 @@ impl IosState {
                     },
                     node,
                 )
+            }
+            NodeKind::DatePicker(props) => {
+                let picker = UIDatePicker::new(mtm);
+                update_date_picker(&picker, props);
+                wire_date_picker(&picker, self.handle, node.id, mtm);
+                let view = cast_view(picker.clone());
+                ViewHandle::new(view, Content::DatePicker(picker), node)
             }
             NodeKind::Slider(props) => {
                 let slider = UISlider::new(mtm);
@@ -1232,6 +1243,10 @@ impl IosState {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
+                NodeKind::DatePicker(props) if !props.action.is_empty() => {
+                    action.date = Some(props.action.clone());
+                    any = true;
+                }
                 NodeKind::Slider(props) if !props.action.is_empty() => {
                     action.value = Some(props.action.clone());
                     action.value_min = props.min;
@@ -1322,6 +1337,9 @@ fn update_content(content: &mut Content, node: &RenderNode, handle: u64, mtm: Ma
             },
             NodeKind::RadioGroup(props),
         ) => update_radio_group(stack, buttons, labels, props, handle, node.id, mtm),
+        (Content::DatePicker(picker), NodeKind::DatePicker(props)) => {
+            update_date_picker(picker, props);
+        }
         (Content::Slider(slider), NodeKind::Slider(props)) => update_slider(slider, props),
         (Content::Progress(progress), NodeKind::Progress(props)) => {
             update_progress(progress, props);
@@ -1440,6 +1458,41 @@ fn update_check(button: &UIButton, props: &CheckProps, radio: bool) {
     button.setContentHorizontalAlignment(UIControlContentHorizontalAlignment::Left);
     // SAFETY: the color is retained by the view for as long as it is set.
     unsafe { button.setTintColor(Some(&text_color)) };
+}
+
+fn update_date_picker(picker: &UIDatePicker, props: &DatePickerProps) {
+    picker.setDatePickerMode(UIDatePickerMode::Date);
+    picker.setPreferredDatePickerStyle(match props.mode {
+        DatePickerMode::Compact => UIDatePickerStyle::Compact,
+        DatePickerMode::Inline => UIDatePickerStyle::Inline,
+    });
+
+    let current = date_value_from_nsdate(&picker.date());
+    if current != Some(props.value)
+        && let Some(date) = nsdate_from_date_value(props.value)
+    {
+        picker.setDate(&date);
+    }
+}
+
+/// Builds a `Date` at local noon so DST transitions cannot shift the calendar day.
+fn nsdate_from_date_value(value: DateValue) -> Option<Retained<NSDate>> {
+    let components = NSDateComponents::new();
+    components.setYear(value.year as isize);
+    components.setMonth(value.month as isize);
+    components.setDay(value.day as isize);
+    components.setHour(12);
+    NSCalendar::currentCalendar().dateFromComponents(&components)
+}
+
+fn date_value_from_nsdate(date: &NSDate) -> Option<DateValue> {
+    let units = NSCalendarUnit::Year | NSCalendarUnit::Month | NSCalendarUnit::Day;
+    let components = NSCalendar::currentCalendar().components_fromDate(units, date);
+    Some(DateValue::new(
+        components.year() as i32,
+        components.month() as u8,
+        components.day() as u8,
+    ))
 }
 
 fn update_slider(slider: &UISlider, props: &SliderProps) {
@@ -1767,6 +1820,24 @@ fn wire_radio_group_item(
     );
 }
 
+fn wire_date_picker(picker: &UIDatePicker, handle: u64, id: NodeId, mtm: MainThreadMarker) {
+    add_action(
+        picker,
+        UIControlEvents::ValueChanged,
+        "krabik.date",
+        mtm,
+        move |action| {
+            let value = action
+                .sender()
+                .and_then(|sender| sender.downcast::<UIDatePicker>().ok())
+                .and_then(|picker| date_value_from_nsdate(&picker.date()));
+            if let Some(value) = value {
+                schedule(move || dispatch_date(handle, id, value));
+            }
+        },
+    );
+}
+
 fn wire_slider(slider: &UISlider, handle: u64, id: NodeId, mtm: MainThreadMarker) {
     add_action(
         slider,
@@ -2062,6 +2133,25 @@ fn dispatch_value(handle: u64, id: NodeId, value: f64) {
                 && state.app.handle(Event::ValueChanged {
                     action: &action,
                     value,
+                })
+            {
+                state.render();
+            }
+        });
+    });
+}
+
+fn dispatch_date(handle: u64, id: NodeId, date: DateValue) {
+    guard("date", || {
+        with_state(handle, |state| {
+            let action = state
+                .runtime
+                .date_picker_action(id)
+                .or_else(|| state.row_actions.get(&id).and_then(|row| row.date.clone()));
+            if let Some(action) = action
+                && state.app.handle(Event::DateChanged {
+                    action: &action,
+                    date,
                 })
             {
                 state.render();

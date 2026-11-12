@@ -30,6 +30,11 @@ final class ShowcaseUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Stepped: 100"].waitForExistence(timeout: 5))
         backToCatalog()
 
+        open("Date picker")
+        XCTAssertTrue(app.staticTexts["Compact: 2026-11-12"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.datePickers.count, 2)
+        backToCatalog()
+
         open("Progress")
         tapButton("Set 100%")
         XCTAssertTrue(app.staticTexts["100%"].waitForExistence(timeout: 5))
