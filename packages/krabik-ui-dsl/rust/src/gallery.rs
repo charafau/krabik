@@ -600,6 +600,7 @@ impl GalleryApp {
                 "A native recycler owns scrolling; Rust diffs each row on bind.",
             ))
             .child(Text::new(format!("Taps: {}", self.recycled_taps)).size(15))
+            .child(Text::new(format!("Rows: {}", self.recycled_items.len())).size(15))
             .child(
                 Row::new()
                     .spacing(8)

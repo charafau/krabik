@@ -186,10 +186,21 @@ final class GalleryUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Taps: 1"].waitForExistence(timeout: 5))
         app.buttons["Bump rows"].tap()
         XCTAssertTrue(app.staticTexts["Row 1 · v1"].waitForExistence(timeout: 5))
+
+        // A shrinking count deletes the trailing rows through a batch update.
+        app.buttons["Shrink"].tap()
+        XCTAssertTrue(app.staticTexts["Rows: 200"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Row 1 · v1"].exists)
+
+        // Resetting grows the list back through an insert batch.
+        app.buttons["Reset"].tap()
+        XCTAssertTrue(app.staticTexts["Rows: 1000"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Row 1 · v0"].waitForExistence(timeout: 5))
+
         for _ in 0..<8 {
             app.swipeUp()
         }
-        waitForAbsence(app.staticTexts["Row 1 · v1"])
+        waitForAbsence(app.staticTexts["Row 1 · v0"])
         let recycledNumbers = rowNumbers()
         XCTAssertFalse(recycledNumbers.contains(1), "row 1 stayed in the recycled list")
         XCTAssertGreaterThan(recycledNumbers.max() ?? 0, 5, "recycled list did not scroll")
