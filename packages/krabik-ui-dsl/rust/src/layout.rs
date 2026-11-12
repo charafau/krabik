@@ -51,6 +51,8 @@ const CHECK_HEIGHT: f32 = 48.0;
 const SLIDER_HEIGHT: f32 = 40.0;
 /// The intrinsic height of a progress indicator.
 const PROGRESS_HEIGHT: f32 = 6.0;
+/// The default side of an indeterminate spinner in logical points.
+const SPINNER_SIZE: f32 = 24.0;
 /// The width assumed for a slider or progress indicator without a constraint.
 const CONTROL_WIDTH: f32 = 200.0;
 
@@ -350,9 +352,38 @@ fn content_size(
                 text.height.max(CHECK_HEIGHT),
             )
         }
+        NodeKind::RadioGroup(props) => {
+            if props.options.is_empty() {
+                return Size::ZERO;
+            }
+            let inner_width = max_width.map(|width| (width - CHECK_INDICATOR - CHECK_GAP).max(0.0));
+            let mut widest = 0.0f32;
+            let mut height = 0.0f32;
+            for option in &props.options {
+                let label = TextProps {
+                    content: option.clone(),
+                    size: props.size,
+                    color: props.color,
+                    weight: props.weight,
+                    ..TextProps::new("")
+                };
+                let text = measurer.measure(
+                    &label,
+                    Constraints {
+                        max_width: inner_width,
+                        max_height: None,
+                    },
+                );
+                widest = widest.max(text.width);
+                height += text.height.max(CHECK_HEIGHT);
+            }
+            height += props.spacing * (props.options.len() - 1) as f32;
+            Size::new(widest + CHECK_INDICATOR + CHECK_GAP, height)
+        }
         // A slider fills the width it is given and has a fixed touch height.
         NodeKind::Slider(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), SLIDER_HEIGHT),
         NodeKind::Progress(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), PROGRESS_HEIGHT),
+        NodeKind::Spinner(_) => Size::new(SPINNER_SIZE, SPINNER_SIZE),
         // Images are sized explicitly by the application in this milestone.
         NodeKind::Image(_) => Size::ZERO,
         _ => Size::ZERO,
@@ -417,7 +448,7 @@ mod tests {
     use crate::tree::ROOT_ID;
     use crate::ui::{
         Button, Checkbox, Column, EdgeInsets, Element, Image, ImageSource, ProgressIndicator,
-        RadioButton, Row, ScrollView, Slider, Spacer, Switch, Text, TextField,
+        RadioButton, RadioGroup, Row, ScrollView, Slider, Spacer, Switch, Text, TextField,
     };
 
     /// Measures every text as the same fixed box.
@@ -812,10 +843,13 @@ mod tests {
     fn new_controls_have_intrinsic_sizes() {
         let element: Element = Column::new()
             .width(300)
+            .align_items(Align::Start)
             .child(Checkbox::new("Wi-Fi", false))
             .child(RadioButton::new("Large", true))
             .child(Slider::new(0.5).width(300))
             .child(ProgressIndicator::new(0.5).width(300))
+            .child(ProgressIndicator::indeterminate())
+            .child(RadioGroup::new(["Small", "Medium", "Large"]).spacing(8))
             .into();
 
         let tree = tree::build(&element);
@@ -826,6 +860,8 @@ mod tests {
         let radio = frames[&column.children[1].id];
         let slider = frames[&column.children[2].id];
         let progress = frames[&column.children[3].id];
+        let spinner = frames[&column.children[4].id];
+        let group = frames[&column.children[5].id];
 
         assert!(checkbox.width > 28.0 && checkbox.height >= 48.0);
         assert!(radio.width > 28.0 && radio.height >= 48.0);
@@ -833,6 +869,11 @@ mod tests {
         assert_eq!(slider.height, 40.0);
         assert_eq!(progress.width, 300.0);
         assert_eq!(progress.height, 6.0);
+        assert_eq!(spinner.width, 24.0);
+        assert_eq!(spinner.height, 24.0);
+        assert!(group.width > 28.0);
+        // Three 48-point rows plus two 8-point gaps.
+        assert_eq!(group.height, 160.0);
     }
 
     #[test]

@@ -1,6 +1,5 @@
 package com.example.krabik_ui_dsl
 
-import android.widget.SeekBar
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.GeneralLocation
@@ -10,12 +9,10 @@ import androidx.test.espresso.action.Swipe
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.assertion.ViewAssertions.matches
-import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
-import androidx.test.espresso.matcher.ViewMatchers.withClassName
+import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import org.hamcrest.Matchers.equalTo
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -47,7 +44,7 @@ class ControlsTest {
             onView(withText("Controls")).perform(scrollTo(), click())
             onView(withText("Volume: 40")).check(matches(withText("Volume: 40")))
 
-            onView(isAssignableFrom(SeekBar::class.java)).perform(
+            onView(withContentDescription("Volume")).perform(
                 scrollTo(),
                 GeneralSwipeAction(
                     Swipe.FAST,
@@ -58,9 +55,22 @@ class ControlsTest {
             )
 
             onView(withText("Volume: 100")).check(matches(withText("Volume: 100")))
-            onView(withClassName(equalTo("android.widget.ProgressBar")))
+            onView(withContentDescription("Progress bar"))
                 .perform(scrollTo())
                 .check(matches(isDisplayed()))
+
+            // The stepped slider only reports multiples of ten.
+            onView(withContentDescription("Stepped")).perform(
+                scrollTo(),
+                GeneralSwipeAction(
+                    Swipe.FAST,
+                    GeneralLocation.CENTER,
+                    GeneralLocation.CENTER_RIGHT,
+                    Press.FINGER,
+                ),
+            )
+            onView(withText("Stepped: 100")).check(matches(withText("Stepped: 100")))
+            onView(withContentDescription("Loading spinner")).check(matches(isDisplayed()))
         }
     }
 }

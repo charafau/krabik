@@ -54,6 +54,13 @@ pub enum Event<'a> {
         /// The new value.
         value: f32,
     },
+    /// The selection of a radio group changed.
+    Selected {
+        /// The action configured on the radio group.
+        action: &'a str,
+        /// The index of the newly selected option.
+        index: usize,
+    },
 }
 
 impl Event<'_> {
@@ -65,7 +72,8 @@ impl Event<'_> {
             | Self::Submitted { action }
             | Self::FocusChanged { action, .. }
             | Self::Toggled { action, .. }
-            | Self::ValueChanged { action, .. } => action,
+            | Self::ValueChanged { action, .. }
+            | Self::Selected { action, .. } => action,
         }
     }
 }

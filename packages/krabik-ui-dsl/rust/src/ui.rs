@@ -370,6 +370,8 @@ pub struct SliderProps {
     pub min: f32,
     /// The highest selectable value.
     pub max: f32,
+    /// The interval values snap to, or `None` for a continuous slider.
+    pub step: Option<f32>,
     /// The action dispatched whenever the value changes.
     pub action: Cow<'static, str>,
     /// ARGB color of the active track and thumb.
@@ -383,9 +385,25 @@ impl SliderProps {
             value,
             min: 0.0,
             max: 1.0,
+            step: None,
             action: Cow::Borrowed(""),
             color: CONTROL_ACCENT,
         }
+    }
+}
+
+/// Snaps a slider value to its range and step.
+#[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+pub(crate) fn snap_slider_value(value: f32, min: f32, max: f32, step: Option<f32>) -> f32 {
+    let low = min.min(max);
+    let high = max.max(min);
+    let clamped = value.clamp(low, high);
+    match step {
+        Some(step) if step > 0.0 => {
+            let snapped = low + ((clamped - low) / step).round() * step;
+            snapped.clamp(low, high)
+        }
+        _ => clamped,
     }
 }
 
@@ -404,6 +422,62 @@ impl ProgressProps {
         Self {
             value,
             color: CONTROL_ACCENT,
+        }
+    }
+}
+
+/// Platform-independent properties of an indeterminate progress spinner.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpinnerProps {
+    /// ARGB color of the spinner.
+    pub color: u32,
+}
+
+impl SpinnerProps {
+    /// Creates a spinner with the default accent color.
+    pub fn new() -> Self {
+        Self {
+            color: CONTROL_ACCENT,
+        }
+    }
+}
+
+impl Default for SpinnerProps {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Platform-independent properties of a group of mutually exclusive radio buttons.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RadioGroupProps {
+    /// The labels of the options, in display order.
+    pub options: Vec<String>,
+    /// The index of the selected option, or `None` when nothing is selected.
+    pub selected: Option<usize>,
+    /// The action dispatched whenever the selection changes.
+    pub action: Cow<'static, str>,
+    /// Font size of the labels in logical points.
+    pub size: f32,
+    /// ARGB color of the labels and indicators.
+    pub color: u32,
+    /// Font weight of the labels.
+    pub weight: FontWeight,
+    /// Space between two options in logical points.
+    pub spacing: f32,
+}
+
+impl RadioGroupProps {
+    /// Creates a radio group with the given option labels.
+    pub fn new(options: Vec<String>) -> Self {
+        Self {
+            options,
+            selected: None,
+            action: Cow::Borrowed(""),
+            size: 16.0,
+            color: 0xFF00_0000,
+            weight: FontWeight::Normal,
+            spacing: 8.0,
         }
     }
 }
@@ -679,8 +753,10 @@ pub(crate) enum ElementKind {
     Switch(SwitchProps),
     Checkbox(CheckProps),
     RadioButton(CheckProps),
+    RadioGroup(RadioGroupProps),
     Slider(SliderProps),
     Progress(ProgressProps),
+    Spinner(SpinnerProps),
     Image(ImageProps),
     Scroll(ScrollProps),
     List(ListProps),
@@ -702,8 +778,10 @@ impl ElementKind {
             Self::Switch(_) => 10,
             Self::Checkbox(_) => 12,
             Self::RadioButton(_) => 13,
+            Self::RadioGroup(_) => 16,
             Self::Slider(_) => 14,
             Self::Progress(_) => 15,
+            Self::Spinner(_) => 17,
             Self::Image(_) => 7,
             Self::Scroll(props) => match props.axis {
                 Axis::Vertical => 8,
@@ -1309,6 +1387,53 @@ impl From<RadioButton> for Element {
     }
 }
 
+/// A native group of mutually exclusive radio buttons.
+///
+/// Unlike individual [`RadioButton`]s, the group owns the selection: tapping an
+/// option reports the chosen index through [`Event::Selected`](crate::app::Event::Selected).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RadioGroup(pub(crate) Element);
+
+impl RadioGroup {
+    /// Creates a radio group with the given option labels.
+    pub fn new(options: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        let options: Vec<String> = options.into_iter().map(Into::into).collect();
+        Self(Element::leaf(ElementKind::RadioGroup(
+            RadioGroupProps::new(options),
+        )))
+    }
+
+    /// Sets the index of the selected option.
+    pub fn selected(mut self, index: usize) -> Self {
+        if let ElementKind::RadioGroup(props) = &mut self.0.kind {
+            props.selected = Some(index);
+        }
+        self
+    }
+
+    /// Sets the action dispatched whenever the selection changes.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+        if let ElementKind::RadioGroup(props) = &mut self.0.kind {
+            props.action = action.into();
+        }
+        self
+    }
+
+    /// Sets the space between two options in logical points.
+    pub fn spacing(mut self, spacing: impl IntoPoints) -> Self {
+        if let ElementKind::RadioGroup(props) = &mut self.0.kind {
+            props.spacing = spacing.into_points();
+        }
+        self
+    }
+}
+
+impl From<RadioGroup> for Element {
+    fn from(component: RadioGroup) -> Self {
+        component.0
+    }
+}
+
 /// A native slider.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Slider(pub(crate) Element);
@@ -1331,6 +1456,16 @@ impl Slider {
     pub fn max(mut self, max: f32) -> Self {
         if let ElementKind::Slider(props) = &mut self.0.kind {
             props.max = max;
+        }
+        self
+    }
+
+    /// Quantizes the slider to the given interval.
+    ///
+    /// A non-positive step restores continuous values.
+    pub fn step(mut self, step: f32) -> Self {
+        if let ElementKind::Slider(props) = &mut self.0.kind {
+            props.step = (step > 0.0).then_some(step);
         }
         self
     }
@@ -1363,17 +1498,24 @@ impl From<Slider> for Element {
 pub struct ProgressIndicator(pub(crate) Element);
 
 impl ProgressIndicator {
-    /// Creates a progress indicator with a fraction in `0.0..=1.0`.
+    /// Creates a determinate progress indicator with a fraction in `0.0..=1.0`.
     pub fn new(value: f32) -> Self {
         Self(Element::leaf(ElementKind::Progress(ProgressProps::new(
             value.clamp(0.0, 1.0),
         ))))
     }
 
-    /// Sets the ARGB color of the filled part.
+    /// Creates an indeterminate progress spinner.
+    pub fn indeterminate() -> Self {
+        Self(Element::leaf(ElementKind::Spinner(SpinnerProps::new())))
+    }
+
+    /// Sets the ARGB color of the filled part or spinner.
     pub fn color(mut self, color: u32) -> Self {
-        if let ElementKind::Progress(props) = &mut self.0.kind {
-            props.color = color;
+        match &mut self.0.kind {
+            ElementKind::Progress(props) => props.color = color,
+            ElementKind::Spinner(props) => props.color = color,
+            _ => {}
         }
         self
     }
@@ -1614,6 +1756,7 @@ impl Element {
             ElementKind::Button(props) => props.size = size,
             ElementKind::TextField(props) => props.size = size,
             ElementKind::Checkbox(props) | ElementKind::RadioButton(props) => props.size = size,
+            ElementKind::RadioGroup(props) => props.size = size,
             _ => {}
         }
     }
@@ -1624,6 +1767,7 @@ impl Element {
             ElementKind::Button(props) => props.color = color,
             ElementKind::TextField(props) => props.color = color,
             ElementKind::Checkbox(props) | ElementKind::RadioButton(props) => props.color = color,
+            ElementKind::RadioGroup(props) => props.color = color,
             _ => {}
         }
     }
@@ -1634,6 +1778,7 @@ impl Element {
             ElementKind::Button(props) => props.weight = weight,
             ElementKind::TextField(props) => props.weight = weight,
             ElementKind::Checkbox(props) | ElementKind::RadioButton(props) => props.weight = weight,
+            ElementKind::RadioGroup(props) => props.weight = weight,
             _ => {}
         }
     }
@@ -1648,6 +1793,7 @@ style_builder!(TextField);
 style_builder!(Switch);
 style_builder!(Checkbox);
 style_builder!(RadioButton);
+style_builder!(RadioGroup);
 style_builder!(Slider);
 style_builder!(ProgressIndicator);
 style_builder!(Image);
@@ -1657,6 +1803,7 @@ text_builder!(Button);
 text_builder!(TextField);
 text_builder!(Checkbox);
 text_builder!(RadioButton);
+text_builder!(RadioGroup);
 
 #[cfg(test)]
 mod tests {
@@ -1710,5 +1857,57 @@ mod tests {
         };
         assert!(props.checked);
         assert_eq!(props.action, "toggle");
+    }
+
+    #[test]
+    fn radio_group_keeps_options_and_selection() {
+        let element: Element = RadioGroup::new(["Small", "Medium", "Large"])
+            .selected(1)
+            .action("size")
+            .spacing(12)
+            .into();
+
+        let ElementKind::RadioGroup(props) = element.kind else {
+            panic!("expected radio group");
+        };
+        assert_eq!(props.options, ["Small", "Medium", "Large"]);
+        assert_eq!(props.selected, Some(1));
+        assert_eq!(props.action, "size");
+        assert_eq!(props.spacing, 12.0);
+    }
+
+    #[test]
+    fn slider_step_is_optional() {
+        let element: Element = Slider::new(0.5).step(0.25).into();
+        let ElementKind::Slider(props) = element.kind else {
+            panic!("expected slider");
+        };
+        assert_eq!(props.step, Some(0.25));
+
+        let element: Element = Slider::new(0.5).step(0.0).into();
+        let ElementKind::Slider(props) = element.kind else {
+            panic!("expected slider");
+        };
+        assert_eq!(props.step, None);
+    }
+
+    #[test]
+    fn slider_values_snap_to_the_step() {
+        assert_eq!(snap_slider_value(37.0, 0.0, 100.0, Some(10.0)), 40.0);
+        assert_eq!(snap_slider_value(34.0, 0.0, 100.0, Some(10.0)), 30.0);
+        assert_eq!(snap_slider_value(9.0, 1.0, 5.0, Some(1.0)), 5.0);
+        assert_eq!(snap_slider_value(0.5, 1.0, 5.0, Some(1.0)), 1.0);
+        assert_eq!(snap_slider_value(37.0, 0.0, 100.0, None), 37.0);
+        assert_eq!(snap_slider_value(-4.0, 0.0, 100.0, None), 0.0);
+        assert_eq!(snap_slider_value(140.0, 0.0, 100.0, None), 100.0);
+    }
+
+    #[test]
+    fn indeterminate_progress_is_a_spinner() {
+        let element: Element = ProgressIndicator::indeterminate().color(0xFF00_897B).into();
+        let ElementKind::Spinner(props) = element.kind else {
+            panic!("expected spinner");
+        };
+        assert_eq!(props.color, 0xFF00_897B);
     }
 }

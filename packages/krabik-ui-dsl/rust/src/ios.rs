@@ -24,12 +24,14 @@ use objc2_foundation::{
 use objc2_quartz_core::{CACornerMask, CAGradientLayer};
 use objc2_ui_kit::{
     NSIndexPathUIKitAdditions, NSLineBreakMode, NSObjectUIAccessibility, NSTextAlignment, UIAction,
-    UIButton, UIButtonType, UICollectionView, UICollectionViewCell, UICollectionViewDataSource,
-    UICollectionViewDelegate, UICollectionViewDelegateFlowLayout, UICollectionViewFlowLayout,
-    UICollectionViewLayout, UIColor, UIControl, UIControlContentHorizontalAlignment,
-    UIControlEvents, UIControlState, UIEdgeInsets, UIFont, UIImage, UIImageView, UIKeyboardType,
-    UILabel, UIProgressView, UIReturnKeyType, UIScrollView, UIScrollViewDelegate, UISlider,
-    UISwitch, UITextBorderStyle, UITextField, UITextInputTraits, UIView, UIViewContentMode,
+    UIActivityIndicatorView, UIActivityIndicatorViewStyle, UIButton, UIButtonType,
+    UICollectionView, UICollectionViewCell, UICollectionViewDataSource, UICollectionViewDelegate,
+    UICollectionViewDelegateFlowLayout, UICollectionViewFlowLayout, UICollectionViewLayout,
+    UIColor, UIControl, UIControlContentHorizontalAlignment, UIControlEvents, UIControlState,
+    UIEdgeInsets, UIFont, UIImage, UIImageView, UIKeyboardType, UILabel, UILayoutConstraintAxis,
+    UIProgressView, UIReturnKeyType, UIScrollView, UIScrollViewDelegate, UISlider, UIStackView,
+    UIStackViewAlignment, UIStackViewDistribution, UISwitch, UITextBorderStyle, UITextField,
+    UITextInputTraits, UIView, UIViewContentMode,
 };
 
 use crate::app::{App, Event};
@@ -41,8 +43,8 @@ use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
     Axis, ButtonProps, CheckProps, EdgeInsets, Element, FontWeight, GradientDirection, ImageProps,
-    ImageScale, ImageSource, ImeAction, KeyboardType, ProgressProps, SliderProps, TextAlign,
-    TextFieldProps, TextProps,
+    ImageScale, ImageSource, ImeAction, KeyboardType, ProgressProps, RadioGroupProps, SliderProps,
+    SpinnerProps, TextAlign, TextFieldProps, TextProps, snap_slider_value,
 };
 
 /// Measures text with an off-screen `UILabel`.
@@ -378,8 +380,14 @@ enum Content {
         button: Retained<UIButton>,
         radio: bool,
     },
+    RadioGroup {
+        stack: Retained<UIStackView>,
+        buttons: Vec<Retained<UIButton>>,
+        labels: Vec<String>,
+    },
     Slider(Retained<UISlider>),
     Progress(Retained<UIProgressView>),
+    Spinner(Retained<UIActivityIndicatorView>),
     Image(Retained<UIImageView>),
     Host(Retained<UIView>),
     Scroll {
@@ -468,7 +476,11 @@ struct RowAction {
     submit: Option<Cow<'static, str>>,
     focus: Option<Cow<'static, str>>,
     toggle: Option<Cow<'static, str>>,
+    selected: Option<Cow<'static, str>>,
     value: Option<Cow<'static, str>>,
+    value_min: f32,
+    value_max: f32,
+    value_step: Option<f32>,
 }
 
 /// One recycled row currently bound to a collection-view cell.
@@ -566,7 +578,7 @@ impl IosState {
             }
             Op::Update(node) => {
                 if let Some(handle) = views.get_mut(&node.id) {
-                    update_content(&handle.content, &node);
+                    update_content(&mut handle.content, &node, self.handle, mtm);
                     apply_style(&handle.view, &node, &mut handle.gradient);
                     apply_accessibility(&handle.view, &node, mtm);
                 }
@@ -679,6 +691,33 @@ impl IosState {
                     node,
                 )
             }
+            NodeKind::RadioGroup(props) => {
+                let stack = UIStackView::new(mtm);
+                stack.setAxis(UILayoutConstraintAxis::Vertical);
+                stack.setAlignment(UIStackViewAlignment::Fill);
+                stack.setDistribution(UIStackViewDistribution::FillEqually);
+                let mut buttons = Vec::new();
+                let mut labels = Vec::new();
+                update_radio_group(
+                    &stack,
+                    &mut buttons,
+                    &mut labels,
+                    props,
+                    self.handle,
+                    node.id,
+                    mtm,
+                );
+                let view = cast_view(stack.clone());
+                ViewHandle::new(
+                    view,
+                    Content::RadioGroup {
+                        stack,
+                        buttons,
+                        labels,
+                    },
+                    node,
+                )
+            }
             NodeKind::Slider(props) => {
                 let slider = UISlider::new(mtm);
                 update_slider(&slider, props);
@@ -691,6 +730,15 @@ impl IosState {
                 update_progress(&progress, props);
                 let view = cast_view(progress.clone());
                 ViewHandle::new(view, Content::Progress(progress), node)
+            }
+            NodeKind::Spinner(props) => {
+                let spinner = UIActivityIndicatorView::initWithActivityIndicatorStyle(
+                    UIActivityIndicatorView::alloc(mtm),
+                    UIActivityIndicatorViewStyle::Medium,
+                );
+                update_spinner(&spinner, props);
+                let view = cast_view(spinner.clone());
+                ViewHandle::new(view, Content::Spinner(spinner), node)
             }
             NodeKind::Image(props) => {
                 let image = UIImageView::new(mtm);
@@ -1106,8 +1154,15 @@ impl IosState {
                     action.toggle = Some(props.action.clone());
                     any = true;
                 }
+                NodeKind::RadioGroup(props) if !props.action.is_empty() => {
+                    action.selected = Some(props.action.clone());
+                    any = true;
+                }
                 NodeKind::Slider(props) if !props.action.is_empty() => {
                     action.value = Some(props.action.clone());
+                    action.value_min = props.min;
+                    action.value_max = props.max;
+                    action.value_step = props.step;
                     any = true;
                 }
                 NodeKind::TextField(props) => {
@@ -1173,7 +1228,7 @@ fn inset(size: CGSize, padding: EdgeInsets) -> CGRect {
     )
 }
 
-fn update_content(content: &Content, node: &RenderNode) {
+fn update_content(content: &mut Content, node: &RenderNode, handle: u64, mtm: MainThreadMarker) {
     match (content, &node.kind) {
         (Content::Label(label), NodeKind::Text(props)) => update_label(label, props),
         (Content::Field(field), NodeKind::TextField(props)) => update_field(field, props),
@@ -1185,13 +1240,67 @@ fn update_content(content: &Content, node: &RenderNode) {
         (Content::Check { button, radio }, NodeKind::RadioButton(props)) => {
             update_check(button, props, *radio);
         }
+        (
+            Content::RadioGroup {
+                stack,
+                buttons,
+                labels,
+            },
+            NodeKind::RadioGroup(props),
+        ) => update_radio_group(stack, buttons, labels, props, handle, node.id, mtm),
         (Content::Slider(slider), NodeKind::Slider(props)) => update_slider(slider, props),
         (Content::Progress(progress), NodeKind::Progress(props)) => {
             update_progress(progress, props);
         }
+        (Content::Spinner(spinner), NodeKind::Spinner(props)) => update_spinner(spinner, props),
         // Images are updated by `IosState::load_image`, which starts async
         // downloads and therefore needs the state itself.
         _ => {}
+    }
+}
+
+fn update_radio_group(
+    stack: &UIStackView,
+    buttons: &mut Vec<Retained<UIButton>>,
+    labels: &mut Vec<String>,
+    props: &RadioGroupProps,
+    handle: u64,
+    id: NodeId,
+    mtm: MainThreadMarker,
+) {
+    if *labels != props.options {
+        for button in buttons.iter() {
+            button.removeFromSuperview();
+        }
+        buttons.clear();
+        labels.clear();
+        for (index, label) in props.options.iter().enumerate() {
+            let button = UIButton::buttonWithType(UIButtonType::Custom, mtm);
+            wire_radio_group_item(&button, handle, id, index, mtm);
+            buttons.push(button);
+            labels.push(label.clone());
+        }
+        for button in buttons.iter() {
+            stack.addArrangedSubview(button);
+        }
+    }
+
+    stack.setSpacing(f64::from(props.spacing));
+    for (index, (button, label)) in buttons.iter().zip(props.options.iter()).enumerate() {
+        update_check(
+            button,
+            &CheckProps {
+                label: label.clone(),
+                checked: props.selected == Some(index),
+                action: Cow::Borrowed(""),
+                size: props.size,
+                color: props.color,
+                weight: props.weight,
+            },
+            true,
+        );
+        let accessibility = NSString::from_str(label);
+        button.setAccessibilityLabel(Some(&accessibility), mtm);
     }
 }
 
@@ -1263,7 +1372,7 @@ fn update_slider(slider: &UISlider, props: &SliderProps) {
     let max = props.max.max(props.min + 0.001);
     slider.setMinimumValue(props.min);
     slider.setMaximumValue(max);
-    let value = props.value.clamp(props.min, max);
+    let value = snap_slider_value(props.value, props.min, max, props.step);
     if (slider.value() - value).abs() > f32::EPSILON {
         slider.setValue(value);
     }
@@ -1275,6 +1384,13 @@ fn update_progress(progress: &UIProgressView, props: &ProgressProps) {
     progress.setProgress(props.value.clamp(0.0, 1.0));
     let tint = color(props.color);
     progress.setProgressTintColor(Some(&tint));
+}
+
+fn update_spinner(spinner: &UIActivityIndicatorView, props: &SpinnerProps) {
+    let tint = color(props.color);
+    // SAFETY: the color is retained by the view for as long as it is set.
+    unsafe { spinner.setColor(Some(&tint)) };
+    spinner.startAnimating();
 }
 
 fn update_field(field: &UITextField, props: &TextFieldProps) {
@@ -1469,8 +1585,10 @@ fn apply_style(view: &UIView, node: &RenderNode, gradient: &mut Option<Retained<
 fn apply_accessibility(view: &UIView, node: &RenderNode, mtm: MainThreadMarker) {
     if let Some(label) = &node.style.accessibility_label {
         let label = NSString::from_str(label);
-        view.setIsAccessibilityElement(true, mtm);
         view.setAccessibilityLabel(Some(&label), mtm);
+        // A radio group must stay a plain container so its options remain
+        // individually reachable by accessibility services.
+        view.setIsAccessibilityElement(!matches!(node.kind, NodeKind::RadioGroup(_)), mtm);
     } else {
         view.setAccessibilityLabel(None, mtm);
     }
@@ -1556,6 +1674,22 @@ fn wire_check(button: &UIButton, handle: u64, id: NodeId, mtm: MainThreadMarker)
                 .unwrap_or(false);
             schedule(move || dispatch_checked(handle, id, checked));
         },
+    );
+}
+
+fn wire_radio_group_item(
+    button: &UIButton,
+    handle: u64,
+    id: NodeId,
+    index: usize,
+    mtm: MainThreadMarker,
+) {
+    add_action(
+        button,
+        UIControlEvents::TouchUpInside,
+        "krabik.radio-group",
+        mtm,
+        move |_| schedule(move || dispatch_selected(handle, id, index)),
     );
 }
 
@@ -1807,10 +1941,41 @@ fn dispatch_value(handle: u64, id: NodeId, value: f64) {
                 .runtime
                 .slider_action(id)
                 .or_else(|| state.row_actions.get(&id).and_then(|row| row.value.clone()));
+            let config = state.runtime.slider_config(id).or_else(|| {
+                state
+                    .row_actions
+                    .get(&id)
+                    .map(|row| (row.value_min, row.value_max, row.value_step))
+            });
+            let value = match config {
+                Some((min, max, step)) => snap_slider_value(value as f32, min, max, step),
+                None => value as f32,
+            };
             if let Some(action) = action
                 && state.app.handle(Event::ValueChanged {
                     action: &action,
-                    value: value as f32,
+                    value,
+                })
+            {
+                state.render();
+            }
+        });
+    });
+}
+
+fn dispatch_selected(handle: u64, id: NodeId, index: usize) {
+    guard("radio group", || {
+        with_state(handle, |state| {
+            let action = state.runtime.radio_group_action(id).or_else(|| {
+                state
+                    .row_actions
+                    .get(&id)
+                    .and_then(|row| row.selected.clone())
+            });
+            if let Some(action) = action
+                && state.app.handle(Event::Selected {
+                    action: &action,
+                    index,
                 })
             {
                 state.render();
