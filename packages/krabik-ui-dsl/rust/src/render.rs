@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use crate::geometry::{Rect, Size};
 use crate::layout::LayoutResult;
 use crate::tree::{self, NodeId, NodeKind, UiNode};
-use crate::ui::Style;
+use crate::ui::{Animation, Style};
 
 /// The data the renderer needs to create or update a native widget.
 #[derive(Clone, Debug, PartialEq)]
@@ -65,6 +65,8 @@ pub enum Op {
         frame: Rect,
         /// The scrollable content size, for scroll containers only.
         content_size: Option<Size>,
+        /// Implicit animation to apply, when the node already had a frame.
+        animation: Option<Animation>,
     },
 }
 
@@ -178,13 +180,20 @@ pub fn diff_layout(
         .filter_map(|node| {
             let frame = *new_frames.get(&node.id)?;
             let content_size = new_layout.content_sizes.get(&node.id).copied();
-            let moved = old_frames.get(&node.id) != Some(&frame);
+            let previous = old_frames.get(&node.id);
+            let moved = previous != Some(&frame);
             let content_changed = old_layout.content_sizes.get(&node.id).copied() != content_size;
+            // New nodes appear at their final position; only nodes that already
+            // had a frame animate. Content-size-only changes are not visual.
+            let animation = (previous.is_some() && moved)
+                .then_some(node.style.animation)
+                .flatten();
 
             (moved || content_changed).then_some(Op::Layout {
                 id: node.id,
                 frame,
                 content_size,
+                animation,
             })
         })
         .collect()
@@ -450,6 +459,41 @@ mod tests {
     }
 
     #[test]
+    fn only_moved_existing_nodes_carry_their_animation() {
+        let tree = tree(Column::new().child(Text::new("a").animate(300)).into());
+        let native = tree.children[0].children[0].id;
+        let old_layout = LayoutResult {
+            frames: HashMap::from([(native, Rect::new(0.0, 0.0, 10.0, 10.0))]),
+            content_sizes: HashMap::new(),
+        };
+        let moved = LayoutResult {
+            frames: HashMap::from([(native, Rect::new(0.0, 20.0, 10.0, 10.0))]),
+            content_sizes: HashMap::new(),
+        };
+
+        let ops = diff_layout(&tree, &tree, &old_layout, &moved);
+        assert_eq!(ops.len(), 1, "{ops:?}");
+        assert!(matches!(
+            &ops[0],
+            Op::Layout {
+                animation: Some(animation),
+                ..
+            } if *animation == Animation::new(300)
+        ));
+
+        // A first appearance has no previous frame, so it must not animate.
+        let empty = LayoutResult::default();
+        let ops = diff_layout(&tree, &tree, &empty, &moved);
+        assert!(ops.iter().all(|op| matches!(
+            op,
+            Op::Layout {
+                animation: None,
+                ..
+            }
+        )));
+    }
+
+    #[test]
     fn layout_ops_only_cover_moved_native_nodes() {
         let tree = tree(
             Row::new()
@@ -488,6 +532,7 @@ mod tests {
                 id: native,
                 frame: Rect::new(5.0, 0.0, 10.0, 10.0),
                 content_size: None,
+                animation: None,
             }
         );
     }

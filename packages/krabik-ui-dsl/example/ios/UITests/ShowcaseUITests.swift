@@ -49,6 +49,14 @@ final class ShowcaseUITests: XCTestCase {
         )
         backToCatalog()
 
+        open("Animations")
+        XCTAssertTrue(app.staticTexts["Panel is open."].waitForExistence(timeout: 5))
+        tapButton("Hide panel")
+        XCTAssertTrue(app.staticTexts["Panel is closed."].waitForExistence(timeout: 5))
+        tapButton("Show panel")
+        XCTAssertTrue(app.staticTexts["Panel is open."].waitForExistence(timeout: 5))
+        backToCatalog()
+
         open("Progress")
         tapButton("Set 100%")
         XCTAssertTrue(app.staticTexts["100%"].waitForExistence(timeout: 5))

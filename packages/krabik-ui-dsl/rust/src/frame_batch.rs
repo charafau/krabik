@@ -9,12 +9,14 @@
 
 use crate::geometry::Rect;
 use crate::tree::NodeId;
+use crate::ui::Animation;
 
 /// Node ids and their frames, ready to hand to a batch API.
 #[derive(Clone, Debug, Default)]
 pub struct FrameBatch {
     ids: Vec<i64>,
     frames: Vec<i32>,
+    animations: Vec<i32>,
 }
 
 impl FrameBatch {
@@ -24,11 +26,20 @@ impl FrameBatch {
     }
 
     /// Adds one node frame, converting the logical points to pixels.
-    pub fn push(&mut self, id: NodeId, frame: Rect, density: f32) {
+    ///
+    /// The animation is packed as a duration and a curve code. A missing or
+    /// zero-duration animation tells the platform to apply the frame directly.
+    pub fn push(&mut self, id: NodeId, frame: Rect, density: f32, animation: Option<Animation>) {
         let pixels = frame.to_pixels(density);
         self.ids.push(id.0 as i64);
         self.frames
             .extend([pixels.x, pixels.y, pixels.width, pixels.height]);
+        self.animations.extend([
+            animation.map_or(0, |animation| {
+                animation.duration_ms.min(i32::MAX as u32) as i32
+            }),
+            animation.map_or(0, |animation| animation.curve.code()),
+        ]);
     }
 
     /// Whether any frame was added.
@@ -50,6 +61,11 @@ impl FrameBatch {
     pub fn frames(&self) -> &[i32] {
         &self.frames
     }
+
+    /// The animations, two integers per node in `duration, curve` order.
+    pub fn animations(&self) -> &[i32] {
+        &self.animations
+    }
 }
 
 #[cfg(test)]
@@ -69,7 +85,7 @@ mod tests {
     #[test]
     fn frames_are_packed_four_integers_per_node() {
         let mut batch = FrameBatch::new();
-        batch.push(NodeId(7), Rect::new(1.0, 2.0, 3.0, 4.0), 1.0);
+        batch.push(NodeId(7), Rect::new(1.0, 2.0, 3.0, 4.0), 1.0, None);
 
         assert_eq!(batch.len(), 1);
         assert_eq!(batch.ids(), &[7]);
@@ -79,9 +95,9 @@ mod tests {
     #[test]
     fn order_is_preserved_across_nodes() {
         let mut batch = FrameBatch::new();
-        batch.push(NodeId(3), Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);
-        batch.push(NodeId(1), Rect::new(0.0, 10.0, 10.0, 10.0), 1.0);
-        batch.push(NodeId(2), Rect::new(0.0, 20.0, 10.0, 10.0), 1.0);
+        batch.push(NodeId(3), Rect::new(0.0, 0.0, 10.0, 10.0), 1.0, None);
+        batch.push(NodeId(1), Rect::new(0.0, 10.0, 10.0, 10.0), 1.0, None);
+        batch.push(NodeId(2), Rect::new(0.0, 20.0, 10.0, 10.0), 1.0, None);
 
         assert_eq!(batch.ids(), &[3, 1, 2]);
         assert_eq!(batch.frames().len(), 12);
@@ -89,9 +105,23 @@ mod tests {
     }
 
     #[test]
+    fn animations_are_packed_two_integers_per_node() {
+        let mut batch = FrameBatch::new();
+        batch.push(
+            NodeId(1),
+            Rect::new(0.0, 0.0, 10.0, 10.0),
+            1.0,
+            Some(Animation::new(300).curve(crate::ui::AnimationCurve::EaseIn)),
+        );
+        batch.push(NodeId(2), Rect::new(0.0, 0.0, 10.0, 10.0), 1.0, None);
+
+        assert_eq!(batch.animations(), &[300, 2, 0, 0]);
+    }
+
+    #[test]
     fn density_is_applied_to_every_frame() {
         let mut batch = FrameBatch::new();
-        batch.push(NodeId(1), Rect::new(1.0, 2.0, 3.0, 4.0), 2.0);
+        batch.push(NodeId(1), Rect::new(1.0, 2.0, 3.0, 4.0), 2.0, None);
 
         assert_eq!(batch.frames(), &[2, 4, 6, 8]);
     }

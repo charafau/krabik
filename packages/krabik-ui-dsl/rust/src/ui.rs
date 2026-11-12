@@ -878,6 +878,66 @@ impl Gradient {
     }
 }
 
+/// A timing curve for implicit animations.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AnimationCurve {
+    /// Constant speed.
+    Linear,
+    /// Starts slowly and speeds up.
+    EaseIn,
+    /// Starts quickly and slows down.
+    EaseOut,
+    /// Starts and ends slowly.
+    #[default]
+    EaseInOut,
+}
+
+impl AnimationCurve {
+    /// The stable code shared with the native renderers.
+    pub(crate) const fn code(self) -> i32 {
+        match self {
+            Self::EaseInOut => 0,
+            Self::Linear => 1,
+            Self::EaseIn => 2,
+            Self::EaseOut => 3,
+        }
+    }
+}
+
+/// An implicit animation applied when a node's frame or opacity changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Animation {
+    /// Duration in milliseconds. Zero disables the animation.
+    pub duration_ms: u32,
+    /// The timing curve.
+    pub curve: AnimationCurve,
+}
+
+impl Animation {
+    /// The duration used when only a curve is chosen.
+    pub const DEFAULT_DURATION_MS: u32 = 250;
+
+    /// Creates an animation with the given duration and an ease-in-out curve.
+    pub const fn new(duration_ms: u32) -> Self {
+        Self {
+            duration_ms,
+            curve: AnimationCurve::EaseInOut,
+        }
+    }
+
+    /// Replaces the timing curve.
+    pub const fn curve(mut self, curve: AnimationCurve) -> Self {
+        self.curve = curve;
+        self
+    }
+}
+
+impl Default for Animation {
+    fn default() -> Self {
+        Self::new(Self::DEFAULT_DURATION_MS)
+    }
+}
+
 /// The layout and decoration properties shared by every component.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Style {
@@ -915,6 +975,8 @@ pub struct Style {
     pub elevation: f32,
     /// Whether the node accepts input. `None` leaves the platform default.
     pub enabled: Option<bool>,
+    /// Implicit animation for frame and opacity changes, if any.
+    pub animation: Option<Animation>,
     /// Accessibility label announced by screen readers, if any.
     pub accessibility_label: Option<String>,
 }
@@ -1160,6 +1222,27 @@ macro_rules! style_builder {
             /// Raises the node above its siblings with a native shadow.
             pub fn elevation(mut self, elevation: impl IntoPoints) -> Self {
                 self.0.style.elevation = elevation.into_points().max(0.0);
+                self
+            }
+
+            /// Animates this node's frame and opacity changes.
+            ///
+            /// A duration of zero makes subsequent changes snap.
+            pub fn animate(mut self, duration_ms: u32) -> Self {
+                self.0.style.animation = Some(Animation::new(duration_ms));
+                self
+            }
+
+            /// Sets the full implicit animation.
+            pub fn animation(mut self, animation: Animation) -> Self {
+                self.0.style.animation = Some(animation);
+                self
+            }
+
+            /// Replaces the timing curve, keeping the current duration.
+            pub fn animation_curve(mut self, curve: AnimationCurve) -> Self {
+                let animation = self.0.style.animation.unwrap_or_default().curve(curve);
+                self.0.style.animation = Some(animation);
                 self
             }
 
@@ -2396,6 +2479,26 @@ mod tests {
         assert_eq!(props.selected, 1);
         assert_eq!(props.action, "tab");
         assert!(matches!(element.children[1].kind, ElementKind::Text(_)));
+    }
+
+    #[test]
+    fn style_builders_store_animations() {
+        let element: Element = Button::new("Animate")
+            .animate(320)
+            .animation_curve(AnimationCurve::EaseOut)
+            .into();
+        assert_eq!(
+            element.style.animation,
+            Some(Animation::new(320).curve(AnimationCurve::EaseOut))
+        );
+
+        let element: Element = Text::new("Fade")
+            .animation_curve(AnimationCurve::Linear)
+            .into();
+        assert_eq!(
+            element.style.animation,
+            Some(Animation::new(Animation::DEFAULT_DURATION_MS).curve(AnimationCurve::Linear))
+        );
     }
 
     #[test]
