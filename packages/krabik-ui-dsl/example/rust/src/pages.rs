@@ -1,5 +1,6 @@
 //! One page per widget for the showcase app.
 
+use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::ui::{
     Align, Button, Checkbox, Column, DatePicker, DatePickerMode, EdgeInsets, Element, Gradient,
     Image, ImageScale, ImageSource, Justify, List, ProgressIndicator, RadioButton, RadioGroup, Row,
@@ -127,7 +128,13 @@ fn home() -> Element {
         ),
         (
             "Extras",
-            &[("Styling", "page:styling"), ("Checklist", "page:checklist")],
+            &[
+                ("Styling", "page:styling"),
+                ("Checklist", "page:checklist"),
+                ("Navigation", "nav:open"),
+                ("Dialog", "dialog:open"),
+                ("Bottom sheet", "sheet:open"),
+            ],
         ),
     ];
 
@@ -321,6 +328,73 @@ fn radio_group_page(app: &ShowcaseApp) -> Element {
             )),
         ],
     )
+}
+
+pub(crate) fn navigation_root(_app: &ShowcaseApp) -> Element {
+    screen_page(
+        "Navigation root",
+        "Rust owns the stack; the native controller owns the bar and transition.",
+        body![
+            Button::new("Open details").action("nav:push"),
+            Button::new("Close navigation").action("nav:close"),
+        ],
+    )
+}
+
+pub(crate) fn navigation_detail(_app: &ShowcaseApp) -> Element {
+    screen_page(
+        "Detail screen",
+        "The system back button and the native bar's back button both dispatch Event::Back.",
+        body![
+            Button::new("Pop to root").action("nav:pop"),
+            Button::new("Close navigation").action("nav:close"),
+        ],
+    )
+}
+
+fn screen_page(title: &str, subtitle: &str, body: Vec<Element>) -> Element {
+    let mut column = Column::new()
+        .padding(24)
+        .spacing(14)
+        .width_percent(1.0)
+        .height_percent(1.0)
+        .align_items(Align::Start)
+        .child(Text::new(title).size(28).bold().color(COLOR_TEXT))
+        .child(caption(subtitle));
+    for child in body {
+        column = column.child(child);
+    }
+    column.into()
+}
+
+pub(crate) fn dialog_view(_app: &ShowcaseApp) -> Element {
+    Dialog::new()
+        .child(Text::new("Delete task?").size(20).bold().color(COLOR_TEXT))
+        .child(
+            Text::new("This cannot be undone.")
+                .size(15)
+                .color(COLOR_MUTED),
+        )
+        .child(
+            Row::new()
+                .spacing(8)
+                .justify_content(Justify::End)
+                .child(Button::new("Cancel").action("dialog:close"))
+                .child(Button::new("Delete").action("dialog:close")),
+        )
+        .into()
+}
+
+pub(crate) fn sheet_view(_app: &ShowcaseApp) -> Element {
+    BottomSheet::new()
+        .child(Text::new("Filters").size(20).bold().color(COLOR_TEXT))
+        .child(
+            Text::new("The native sheet provides the drag handle and dismissal.")
+                .size(15)
+                .color(COLOR_MUTED),
+        )
+        .child(Button::new("Close").action("sheet:close"))
+        .into()
 }
 
 fn date_picker_page(app: &ShowcaseApp) -> Element {
