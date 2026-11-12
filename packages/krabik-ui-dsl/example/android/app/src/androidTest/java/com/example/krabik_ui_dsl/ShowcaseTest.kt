@@ -74,12 +74,32 @@ class ShowcaseTest {
                 .check(matches(isDisplayed()))
             tapBack()
 
-            openPage("Animations")
+            openPage("Frames & opacity")
             onView(withText("Panel is open.")).check(matches(isDisplayed()))
             onView(withText("Hide panel")).perform(click())
             onView(withText("Panel is closed.")).check(matches(isDisplayed()))
             onView(withText("Show panel")).perform(click())
             onView(withText("Panel is open.")).check(matches(isDisplayed()))
+            tapBack()
+
+            openPage("Decoration")
+            onView(withText("Warm card")).check(matches(isDisplayed()))
+            onView(withText("Cool palette")).perform(click())
+            onView(withText("Cool card")).check(matches(isDisplayed()))
+            tapBack()
+
+            openPage("Enter & exit")
+            onView(withText("2 cards")).check(matches(isDisplayed()))
+            onView(withText("Add card")).perform(click())
+            onView(withText("3 cards")).check(matches(isDisplayed()))
+            onView(withText("Remove card")).perform(click())
+            onView(withText("2 cards")).check(matches(isDisplayed()))
+            tapBack()
+
+            openPage("Curves & springs")
+            onView(withText("Target: narrow")).check(matches(isDisplayed()))
+            onView(withText("Run curves")).perform(click())
+            onView(withText("Target: wide")).check(matches(isDisplayed()))
             tapBack()
 
             openPage("Progress")

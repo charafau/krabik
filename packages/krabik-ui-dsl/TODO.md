@@ -223,9 +223,11 @@ renderer diff; nodes without an animation behave exactly as before.
   completion; Android already hit-tests against the live frame.
 - **Accessibility** — Android respects the system animator duration scale and
   iOS skips animations when Reduce Motion is enabled.
-- **Coverage** — the Animations page exercises a spring panel, a cubic caption,
-  decoration changes, and fade/scale enter/exit; Rust renderer/frame-batch
-  tests and both UI suites cover it.
+- **Coverage** — the Motion section has four pages: Frames & opacity,
+  Decoration, Enter & exit, and Curves & springs. They exercise spring frames,
+  a cubic caption, fill/border/radius/elevation changes, fade/scale
+  creation/removal and four timing curves; Rust renderer/frame-batch tests and
+  both UI suites cover them.
 
 ### 3b. Virtualized lists ✅
 

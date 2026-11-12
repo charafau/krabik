@@ -38,6 +38,9 @@ pub struct ShowcaseApp {
     radio_choice: usize,
     size_choice: usize,
     animations: bool,
+    decoration_alt: bool,
+    cards: usize,
+    curves_alt: bool,
     date: DateValue,
     inline_date: DateValue,
     time: TimeValue,
@@ -70,6 +73,9 @@ impl ShowcaseApp {
             radio_choice: 1,
             size_choice: 1,
             animations: true,
+            decoration_alt: true,
+            cards: 2,
+            curves_alt: false,
             date: DateValue::new(2026, 11, 12),
             inline_date: DateValue::new(2026, 11, 12),
             time: TimeValue::new(10, 30),
@@ -234,6 +240,28 @@ impl App for ShowcaseApp {
                 }
                 "demo:animate" => {
                     self.animations = !self.animations;
+                    true
+                }
+                "demo:decoration" => {
+                    self.decoration_alt = !self.decoration_alt;
+                    true
+                }
+                "demo:add-card" => {
+                    if self.cards >= 4 {
+                        return false;
+                    }
+                    self.cards += 1;
+                    true
+                }
+                "demo:remove-card" => {
+                    if self.cards == 0 {
+                        return false;
+                    }
+                    self.cards -= 1;
+                    true
+                }
+                "demo:curves" => {
+                    self.curves_alt = !self.curves_alt;
                     true
                 }
                 "dialog:open" => {
@@ -547,6 +575,36 @@ mod tests {
         assert!(!app.animations);
         assert!(app.handle(click("demo:animate")));
         assert!(app.animations);
+
+        assert!(app.decoration_alt);
+        assert!(app.handle(click("demo:decoration")));
+        assert!(!app.decoration_alt);
+
+        assert!(!app.curves_alt);
+        assert!(app.handle(click("demo:curves")));
+        assert!(app.curves_alt);
+
+        assert_eq!(app.cards, 2);
+        assert!(app.handle(click("demo:add-card")));
+        assert!(app.handle(click("demo:add-card")));
+        assert_eq!(app.cards, 4);
+        assert!(!app.handle(click("demo:add-card")));
+        assert!(app.handle(click("demo:remove-card")));
+        assert_eq!(app.cards, 3);
+    }
+
+    #[test]
+    fn animation_pages_are_registered() {
+        let app = app();
+        for key in [
+            "animations",
+            "animation-decoration",
+            "animation-enter-exit",
+            "animation-curves",
+        ] {
+            assert!(pages::screen(&app, key).is_some(), "missing page {key}");
+            assert!(pages::screen_key(&format!("page:{key}")).is_some());
+        }
     }
 
     #[test]

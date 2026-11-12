@@ -66,6 +66,9 @@ pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
         "date-picker" => "date-picker",
         "tabs" => "tabs",
         "animations" => "animations",
+        "animation-decoration" => "animation-decoration",
+        "animation-enter-exit" => "animation-enter-exit",
+        "animation-curves" => "animation-curves",
         "slider" => "slider",
         "progress" => "progress",
         "spinner" => "spinner",
@@ -93,7 +96,10 @@ pub(crate) fn title(key: &str) -> &'static str {
         "radio-group" => "Radio group",
         "date-picker" => "Date picker",
         "tabs" => "Tabs",
-        "animations" => "Animations",
+        "animations" => "Frames & opacity",
+        "animation-decoration" => "Decoration",
+        "animation-enter-exit" => "Enter & exit",
+        "animation-curves" => "Curves & springs",
         "slider" => "Slider",
         "progress" => "Progress",
         "spinner" => "Spinner",
@@ -122,6 +128,9 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element> {
         "date-picker" => date_picker_page(app),
         "tabs" => tabs_page(app),
         "animations" => animations_page(app),
+        "animation-decoration" => animation_decoration_page(app),
+        "animation-enter-exit" => animation_enter_exit_page(app),
+        "animation-curves" => animation_curves_page(app),
         "slider" => slider_page(app),
         "progress" => progress_page(app),
         "spinner" => spinner_page(),
@@ -141,7 +150,7 @@ fn page_button(label: &'static str, action: &'static str) -> Button {
 }
 
 pub(crate) fn home() -> Element {
-    let catalog: [(&str, &[(&str, &str)]); 6] = [
+    let catalog: [(&str, &[(&str, &str)]); 7] = [
         (
             "Text & layout",
             &[
@@ -149,6 +158,15 @@ pub(crate) fn home() -> Element {
                 ("Button", "page:button"),
                 ("Text field", "page:text-field"),
                 ("Layouts", "page:layouts"),
+            ],
+        ),
+        (
+            "Motion",
+            &[
+                ("Frames & opacity", "page:animations"),
+                ("Decoration", "page:animation-decoration"),
+                ("Enter & exit", "page:animation-enter-exit"),
+                ("Curves & springs", "page:animation-curves"),
             ],
         ),
         (
@@ -185,7 +203,6 @@ pub(crate) fn home() -> Element {
             "Extras",
             &[
                 ("Styling", "page:styling"),
-                ("Animations", "page:animations"),
                 ("Checklist", "page:checklist"),
                 ("Dialog", "dialog:open"),
                 ("Bottom sheet", "sheet:open"),
@@ -504,8 +521,8 @@ fn animations_page(app: &ShowcaseApp) -> Element {
         Spacer::new().height(0).into()
     };
     page(
-        "Animations",
-        "Frames, opacity, colors, curves and enter/exit transitions follow state updates.",
+        "Frames & opacity",
+        "Frame size, position and opacity follow state changes with a spring curve.",
         body![
             Button::new(if open { "Hide panel" } else { "Show panel" }).action("demo:animate"),
             Column::new()
@@ -540,6 +557,164 @@ fn animations_page(app: &ShowcaseApp) -> Element {
                 .opacity(if open { 1.0 } else { 0.25 })
                 .animate(320)
                 .animation_curve(AnimationCurve::spring(0.72, 0.35)),
+        ],
+    )
+}
+
+fn animation_decoration_page(app: &ShowcaseApp) -> Element {
+    let alt = app.decoration_alt;
+    page(
+        "Decoration",
+        "Fill, gradient, border, corners and elevation interpolate with one transition.",
+        body![
+            Button::new(if alt { "Cool palette" } else { "Warm palette" })
+                .action("demo:decoration"),
+            Column::new()
+                .animate(360)
+                .animation_curve(AnimationCurve::cubic_bezier(0.2, 0.8, 0.2, 1.0))
+                .background(if alt { 0xFFFF_F3E0 } else { 0xFFE3_F2FD })
+                .border(
+                    if alt { 1 } else { 3 },
+                    if alt { COLOR_AMBER } else { COLOR_BLUE },
+                )
+                .corner_radius(if alt { 10 } else { 30 })
+                .elevation(if alt { 2 } else { 12 })
+                .padding(20)
+                .spacing(8)
+                .width_percent(1.0)
+                .child(
+                    Text::new(if alt { "Warm card" } else { "Cool card" })
+                        .bold()
+                        .color(COLOR_TEXT),
+                )
+                .child(caption(
+                    "Background, border, corners and elevation animate together."
+                )),
+            Column::new()
+                .animate(360)
+                .animation_curve(AnimationCurve::cubic_bezier(0.2, 0.8, 0.2, 1.0))
+                .gradient(if alt {
+                    Gradient::vertical(0xFFF9_A825, 0xFFE6_5100)
+                } else {
+                    Gradient::horizontal(0xFF15_65C0, 0xFF6A_1B9A)
+                })
+                .corner_radius(if alt { 8 } else { 24 })
+                .height(90)
+                .width_percent(1.0)
+                .padding(16)
+                .justify_content(Justify::Center)
+                .child(
+                    Text::new(if alt {
+                        "Warm gradient"
+                    } else {
+                        "Cool gradient"
+                    })
+                    .bold()
+                    .color(0xFFFF_FFFF),
+                ),
+            caption("The gradient stops animate; changing orientation snaps."),
+        ],
+    )
+}
+
+fn animation_enter_exit_page(app: &ShowcaseApp) -> Element {
+    let mut cards = Column::new()
+        .animate(320)
+        .animation_curve(AnimationCurve::spring(0.75, 0.3))
+        .spacing(10)
+        .width_percent(1.0);
+    for index in 0..app.cards {
+        cards = cards.child(
+            Row::new()
+                .key(format!("card-{index}"))
+                .animate(280)
+                .animate_enter(220)
+                .enter_curve(AnimationCurve::spring(0.7, 0.3))
+                .animate_exit(160)
+                .exit_curve(AnimationCurve::EaseIn)
+                .background(if index % 2 == 0 {
+                    COLOR_SURFACE
+                } else {
+                    COLOR_DONE
+                })
+                .corner_radius(12)
+                .padding(14)
+                .width_percent(1.0)
+                .child(
+                    Text::new(format!("Card {}", index + 1))
+                        .bold()
+                        .color(COLOR_TEXT),
+                )
+                .child(Spacer::new())
+                .child(Text::new("fades and scales").color(COLOR_MUTED)),
+        );
+    }
+    page(
+        "Enter & exit",
+        "Created nodes fade and scale in; removed nodes animate out before detaching.",
+        body![
+            Row::new()
+                .spacing(10)
+                .child(
+                    Button::new("Add card")
+                        .action("demo:add-card")
+                        .enabled(app.cards < 4),
+                )
+                .child(
+                    Button::new("Remove card")
+                        .action("demo:remove-card")
+                        .enabled(app.cards > 0),
+                ),
+            Text::new(format!("{} cards", app.cards))
+                .size(18)
+                .color(COLOR_TEXT),
+            cards,
+            Text::new("This caption moves as cards are added or removed.")
+                .color(COLOR_MUTED)
+                .animate(320),
+        ],
+    )
+}
+
+fn animation_curves_page(app: &ShowcaseApp) -> Element {
+    let wide = app.curves_alt;
+    let bar = |label: &'static str, color: u32, curve: AnimationCurve| -> Element {
+        Column::new()
+            .spacing(6)
+            .width_percent(1.0)
+            .child(Text::new(label).color(COLOR_TEXT))
+            .child(
+                Spacer::new()
+                    .width(if wide { 280 } else { 56 })
+                    .height(22)
+                    .background(color)
+                    .corner_radius(11)
+                    .animate(520)
+                    .animation_curve(curve),
+            )
+            .into()
+    };
+    page(
+        "Curves & springs",
+        "Four bars run the same width change with different timing curves.",
+        body![
+            Button::new("Run curves").action("demo:curves"),
+            Text::new(if wide {
+                "Target: wide"
+            } else {
+                "Target: narrow"
+            })
+            .size(18)
+            .color(COLOR_TEXT),
+            bar("Linear", COLOR_BLUE, AnimationCurve::Linear),
+            bar(
+                "Cubic Bezier",
+                COLOR_ACCENT,
+                AnimationCurve::cubic_bezier(0.2, 0.9, 0.3, 1.0),
+            ),
+            bar("Spring", COLOR_PURPLE, AnimationCurve::spring(0.55, 0.45)),
+            bar("Ease out", COLOR_AMBER, AnimationCurve::EaseOut),
+            caption("Run it again to compare how each curve settles."),
         ],
     )
 }
