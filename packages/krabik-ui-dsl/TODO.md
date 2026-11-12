@@ -180,8 +180,8 @@ materialization; the rest of the section describes the windowed path.
   rebinds its attached rows, which is how application state changes reach a row
   the recycler already owns. Unchanged widgets are not touched, so focus and
   text survive the rebind. iOS diffs the visible cells in place for a
-  revision-only change and only reloads when the count or the height mode
-  changes.
+  revision-only change, applies count changes as insert/delete batches, and
+  invalidates the layout when row heights change.
 - Android's `onViewRecycled` and iOS's `didEndDisplayingCell` report the
   holder/cell back to Rust, which drops the cached row tree and its actions; a
   count change uses ranged insert/remove notifications on Android, and a rebind
@@ -191,9 +191,9 @@ materialization; the rest of the section describes the windowed path.
   the row is bound again the field regains focus (and the keyboard). A real
   user blur clears it. Android defers focus reports out of RecyclerView layout
   so a focus change cannot notify the adapter mid-layout.
-- Both recyclers apply their reloads outside the render lock: `reloadData` and
-  its data-source callbacks can run synchronously, and those callbacks acquire
-  the same state lock that produced the update.
+- Both recyclers apply their updates outside the render lock: batch updates and
+  their data-source callbacks can run synchronously, and those callbacks
+  acquire the same state lock that produced the update.
 - Android reports offsets from `KrabikScrollView` (coalesced to once per frame,
   pixels converted to points in `nativeOnScroll`).
 - iOS reports offsets from a `UIScrollViewDelegate` implemented in Rust; the
@@ -399,8 +399,6 @@ matters for large lists.
   tens of thousands of mixed-height rows become a target.
 - RecyclerView: payload-based partial row updates instead of a full
   `notifyItemRangeChanged` of the visible range on every render.
-- UICollectionView: batch updates with insert/remove ranges instead of
-  `reloadData` when only the item count changes.
 
 ### Platform-specific extensions
 
