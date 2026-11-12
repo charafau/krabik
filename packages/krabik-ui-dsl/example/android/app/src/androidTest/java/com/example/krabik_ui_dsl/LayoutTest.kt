@@ -130,7 +130,11 @@ class LayoutTest {
     }
 
     private fun findRustRoot(view: View): RustRootView? {
-        if (view is RustRootView) return view
+        // A navigation session also keeps the (hidden) main host alive; only
+        // the visible screen host owns the registered widgets.
+        if (view is RustRootView && view.isShown && view.registeredViewCount() > 0) {
+            return view
+        }
         if (view is ViewGroup) {
             for (index in 0 until view.childCount) {
                 findRustRoot(view.getChildAt(index))?.let { return it }

@@ -2387,9 +2387,11 @@ impl IosSession {
     }
 
     fn render_all(&mut self) {
+        let has_navigation = self.app.navigation().is_some();
         let mut elements = Vec::new();
         for (id, host) in &self.hosts {
             let element = match &host.kind {
+                IosHostKind::Main if has_navigation => None,
                 IosHostKind::Main => Some(self.app.view()),
                 IosHostKind::Screen(key) => self.app.screen(key),
                 IosHostKind::Modal => self.app.presentation_view(),

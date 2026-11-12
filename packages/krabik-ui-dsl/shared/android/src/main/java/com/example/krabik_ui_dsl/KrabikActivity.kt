@@ -123,7 +123,6 @@ abstract class KrabikActivity : FragmentActivity() {
             navContainer,
             root,
         )
-        controller.setRootVisible(true)
 
         // Route back through AndroidX so FragmentManager and predictive back
         // share one ordered pipeline. Rust gets the first chance to pop a

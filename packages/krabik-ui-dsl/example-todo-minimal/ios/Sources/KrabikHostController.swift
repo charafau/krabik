@@ -45,12 +45,14 @@ final class KrabikHostController: UIViewController {
         hostView.bind(session: session, host: UInt64(host))
         vc.view = hostView
         vc.title = title
-        vc.navigationItem.leftBarButtonItem = UIBarButtonItem(
-            title: "Back",
-            style: .plain,
-            target: self,
-            action: #selector(backTapped)
-        )
+        if navigation.viewControllers.count > 1 {
+            vc.navigationItem.leftBarButtonItem = UIBarButtonItem(
+                title: "Back",
+                style: .plain,
+                target: self,
+                action: #selector(backTapped)
+            )
+        }
         navigation.pushViewController(vc, animated: true)
         navigation.setNavigationBarHidden(false, animated: true)
     }
@@ -63,6 +65,7 @@ final class KrabikHostController: UIViewController {
     }
 
     @objc func krabikSetRootVisible(_ visible: Bool) {
+        mainHost.isHidden = !visible
         navigation.setNavigationBarHidden(visible, animated: true)
     }
 

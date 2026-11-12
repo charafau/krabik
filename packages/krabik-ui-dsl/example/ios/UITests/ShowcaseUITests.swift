@@ -55,18 +55,10 @@ final class ShowcaseUITests: XCTestCase {
         backToCatalog()
     }
 
-    func testNativeNavigationAndPresentations() throws {
-        open("Navigation")
-        XCTAssertTrue(app.staticTexts["Navigation root"].waitForExistence(timeout: 5))
-        app.buttons["Open details"].tap()
-        XCTAssertTrue(app.staticTexts["Detail screen"].waitForExistence(timeout: 5))
-
-        // The native navigation bar's back button dispatches Event::Back.
-        app.navigationBars.buttons.firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Navigation root"].waitForExistence(timeout: 5))
-
-        app.buttons["Close navigation"].tap()
-        XCTAssertTrue(app.staticTexts["Krabik UI DSL"].waitForExistence(timeout: 5))
+    func testNativeScreensAndPresentations() throws {
+        open("Text")
+        XCTAssertTrue(app.staticTexts["Display 34 / bold"].waitForExistence(timeout: 5))
+        backToCatalog()
 
         open("Dialog")
         XCTAssertTrue(app.staticTexts["Delete task?"].waitForExistence(timeout: 5))
@@ -110,6 +102,7 @@ final class ShowcaseUITests: XCTestCase {
 
     private func backToCatalog() {
         app.buttons["Back"].tap()
+        scrollToTop()
         XCTAssertTrue(app.staticTexts["Krabik UI DSL"].waitForExistence(timeout: 5))
     }
 

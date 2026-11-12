@@ -1536,9 +1536,11 @@ impl AndroidSession {
 
     /// Rebuilds every host and synchronizes the native presentations.
     fn render_all(&mut self, env: &mut Env<'_>) -> JniResult<()> {
+        let has_navigation = self.app.navigation().is_some();
         let mut elements = Vec::new();
         for (id, host) in &self.hosts {
             let element = match &host.kind {
+                HostKind::Main if has_navigation => None,
                 HostKind::Main => Some(self.app.view()),
                 HostKind::Screen(key) => self.app.screen(key),
                 HostKind::Modal => self.app.presentation_view(),
