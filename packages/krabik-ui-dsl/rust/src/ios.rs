@@ -234,10 +234,30 @@ const ROW_CELL_ID: &str = "KrabikRow";
 struct RecyclerIvars {
     handle: u64,
     id: NodeId,
+    /// The item count the collection view currently shows.
     count: AtomicU64,
+    /// The latest item count requested by the application.
+    target_count: AtomicU64,
     /// Fixed row height in points encoded as `f64` bits; `0` means automatic.
     item_height: AtomicU64,
     revision: AtomicU64,
+    /// A sync block is already scheduled.
+    pending: AtomicBool,
+    /// The count changed and needs one insert/delete batch.
+    needs_batch: AtomicBool,
+    /// A row-height change needs a layout invalidation.
+    needs_layout: AtomicBool,
+    /// A revision change needs the visible cells rebound.
+    needs_refresh: AtomicBool,
+}
+
+/// The changes one sync block should apply to a collection view.
+struct RecyclerChanges {
+    from: usize,
+    to: usize,
+    batch: bool,
+    layout: bool,
+    refresh: bool,
 }
 
 objc2::define_class!(
@@ -332,36 +352,79 @@ impl RecyclerDataSource {
             handle,
             id,
             count: AtomicU64::new(props.item_count as u64),
+            target_count: AtomicU64::new(props.item_count as u64),
             item_height: AtomicU64::new(props.item_height.map_or(0.0, f64::from).to_bits()),
             revision: AtomicU64::new(props.revision),
+            pending: AtomicBool::new(false),
+            needs_batch: AtomicBool::new(false),
+            needs_layout: AtomicBool::new(false),
+            needs_refresh: AtomicBool::new(false),
         });
         // SAFETY: `NSObject`'s initializer returns an initialized instance of
         // this class with the ivars already set.
         unsafe { objc2::msg_send![super(this), init] }
     }
 
-    /// Applies new list properties, asking UIKit to rebind when anything moved.
+    /// Records new list properties and schedules one coalesced sync.
+    ///
+    /// This runs while the state lock is held, so it only touches atomics.
+    /// The batch update itself is deferred: UIKit may ask the data source for
+    /// cells synchronously, and those callbacks acquire the state lock.
     fn update(&self, props: &RecyclerProps) {
         let count = props.item_count as u64;
         let height = props.item_height.map_or(0.0, f64::from).to_bits();
         let ivars = self.ivars();
-        let count_changed = ivars.count.swap(count, Ordering::Relaxed) != count;
+        let count_changed = ivars.target_count.swap(count, Ordering::Relaxed) != count;
         let height_changed = ivars.item_height.swap(height, Ordering::Relaxed) != height;
         let revision_changed =
             ivars.revision.swap(props.revision, Ordering::Relaxed) != props.revision;
-        if count_changed || height_changed {
-            // The layout needs new sizes and cells; reload after the lock that
-            // produced the update has been released.
-            let handle = ivars.handle;
-            let id = ivars.id;
-            schedule(move || reload_recycler(handle, id));
-        } else if revision_changed {
-            // Only the content changed: diff the visible cells in place so
-            // their widgets (and any focus) survive the update.
-            let handle = ivars.handle;
-            let id = ivars.id;
-            schedule(move || refresh_recycler(handle, id));
+        if count_changed {
+            ivars.needs_batch.store(true, Ordering::Release);
         }
+        if height_changed {
+            ivars.needs_layout.store(true, Ordering::Release);
+        }
+        if revision_changed {
+            ivars.needs_refresh.store(true, Ordering::Release);
+        }
+        if (count_changed || height_changed || revision_changed)
+            && !ivars.pending.swap(true, Ordering::AcqRel)
+        {
+            let handle = ivars.handle;
+            let id = ivars.id;
+            schedule(move || sync_recycler(handle, id));
+        }
+    }
+
+    /// Atomically takes the pending work for one sync block.
+    fn take_changes(&self) -> Option<RecyclerChanges> {
+        let ivars = self.ivars();
+        // Clear the scheduled flag first: if an update lands while the batch is
+        // running, it schedules another sync instead of being dropped.
+        ivars.pending.store(false, Ordering::Release);
+
+        let batch_flag = ivars.needs_batch.swap(false, Ordering::AcqRel);
+        let layout = ivars.needs_layout.swap(false, Ordering::AcqRel);
+        let refresh = ivars.needs_refresh.swap(false, Ordering::AcqRel);
+
+        let from = ivars.count.load(Ordering::Acquire) as usize;
+        let target = ivars.target_count.load(Ordering::Acquire) as usize;
+        let batch = batch_flag && from != target;
+        if batch {
+            // The data source must report the new count while the batch runs.
+            ivars.count.store(target as u64, Ordering::Release);
+        }
+
+        if !batch && !layout && !refresh {
+            return None;
+        }
+        Some(RecyclerChanges {
+            from,
+            to: target,
+            batch,
+            layout,
+            refresh,
+        })
     }
 }
 
@@ -944,12 +1007,23 @@ impl IosState {
             .map_or(0.0, |frame| frame.height.max(0.0))
     }
 
-    /// The collection view of a recycled list, for reloads outside the lock.
-    fn collection_for(&self, id: NodeId) -> Option<Retained<UICollectionView>> {
+    /// The collection view and data source of a recycled list.
+    fn recycler_for(
+        &self,
+        id: NodeId,
+    ) -> Option<(Retained<UICollectionView>, Retained<RecyclerDataSource>)> {
         match &self.views.get(&id)?.content {
-            Content::Recycler { collection, .. } => Some(collection.clone()),
+            Content::Recycler {
+                collection,
+                data_source,
+            } => Some((collection.clone(), data_source.clone())),
             _ => None,
         }
+    }
+
+    /// The collection view of a recycled list.
+    fn collection_for(&self, id: NodeId) -> Option<Retained<UICollectionView>> {
+        self.recycler_for(id).map(|(collection, _)| collection)
     }
 
     /// Diffs every visible cell in place after an application state change.
@@ -1758,11 +1832,60 @@ fn schedule(work: impl FnOnce() + Send + 'static) {
     DispatchQueue::main().exec_async(work);
 }
 
-/// Reloads a recycled list without holding the state lock.
+/// Applies pending count, height and content changes to a recycled list.
 ///
-/// UIKit may ask the data source for cells synchronously during `reloadData`;
-/// those callbacks acquire the state lock themselves, so the reload must run
+/// UIKit may ask the data source for cells synchronously during a batch
+/// update; those callbacks acquire the state lock themselves, so the sync runs
 /// after the lock that produced it has been released.
+fn sync_recycler(handle: u64, id: NodeId) {
+    guard("recycler", || {
+        let Some((collection, data_source)) =
+            with_state(handle, |state| state.recycler_for(id)).flatten()
+        else {
+            return;
+        };
+        let Some(changes) = data_source.take_changes() else {
+            return;
+        };
+
+        if changes.batch {
+            let paths: Vec<Retained<NSIndexPath>> = if changes.to > changes.from {
+                (changes.from..changes.to)
+                    .map(|index| NSIndexPath::indexPathForItem_inSection(index as isize, 0))
+                    .collect()
+            } else {
+                (changes.to..changes.from)
+                    .map(|index| NSIndexPath::indexPathForItem_inSection(index as isize, 0))
+                    .collect()
+            };
+            let array = NSArray::from_retained_slice(&paths);
+            let insert = changes.to > changes.from;
+            let updates_collection = collection.clone();
+            let updates = RcBlock::new(move || {
+                if insert {
+                    updates_collection.insertItemsAtIndexPaths(&array);
+                } else {
+                    updates_collection.deleteItemsAtIndexPaths(&array);
+                }
+            });
+            let batch_collection = collection.clone();
+            let batch = RcBlock::new(move || {
+                batch_collection.performBatchUpdates_completion(Some(&*updates), None);
+            });
+            // SAFETY: the sync block runs on the main queue.
+            let mtm = unsafe { MainThreadMarker::new_unchecked() };
+            UIView::performWithoutAnimation(&batch, mtm);
+        }
+
+        if changes.layout {
+            collection.collectionViewLayout().invalidateLayout();
+        }
+        if changes.refresh {
+            with_state(handle, |state| state.rebind_visible_rows(id));
+        }
+    });
+}
+
 fn focus_row_async(handle: u64, field: NodeId) {
     guard("focus", || {
         with_state(handle, |state| {
@@ -1778,22 +1901,6 @@ fn focus_row_async(handle: u64, field: NodeId) {
                     .set_row_focus(focus.list, focus.index, field, true);
             }
         });
-    });
-}
-
-fn reload_recycler(handle: u64, id: NodeId) {
-    guard("reload", || {
-        let collection = with_state(handle, |state| state.collection_for(id)).flatten();
-        if let Some(collection) = collection {
-            collection.reloadData();
-        }
-    });
-}
-
-/// Diffs the visible recycled rows without recreating their cells.
-fn refresh_recycler(handle: u64, id: NodeId) {
-    guard("refresh", || {
-        with_state(handle, |state| state.rebind_visible_rows(id));
     });
 }
 
