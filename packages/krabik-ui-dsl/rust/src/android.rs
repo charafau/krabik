@@ -503,23 +503,54 @@ impl AndroidState {
                     handle.parent = parent;
                 }
             }
-            Op::Remove { id } => {
-                if let Some(handle) = views.get(&id) {
-                    let host = match handle.parent.and_then(|id| views.get(&id)) {
-                        Some(parent) => parent.children_host.as_obj(),
-                        None => root_host,
-                    };
-                    jni_handles(env)?.remove_view.call_void(
-                        env,
-                        host,
-                        &[JValue::Object(handle.view.as_obj())],
-                    )?;
-                    if register {
-                        jni_handles(env)?.unregister_view.call_void(
+            Op::Remove { id, exit } => {
+                let (animated, view) = match views.get(&id) {
+                    Some(handle) => {
+                        let view = handle.view.as_obj();
+                        let animated =
+                            register && exit.as_ref().is_some_and(|exit| exit.duration_ms > 0);
+                        (animated, Some(jcall!(env, env.new_local_ref(view))?))
+                    }
+                    None => (false, None),
+                };
+                if let Some(view) = view {
+                    if animated {
+                        let exit = exit.as_ref().expect("checked above");
+                        let [kind, p1, p2, p3, p4] = exit.curve.packed();
+                        jni_handles(env)?.start_exit.call_void(
                             env,
                             self.root.as_obj(),
-                            &[JValue::Long(id.0 as jlong)],
+                            &[
+                                JValue::Long(id.0 as jlong),
+                                JValue::Object(&view),
+                                JValue::Int(exit.duration_ms.min(i32::MAX as u32) as jint),
+                                JValue::Int(kind),
+                                JValue::Int(p1),
+                                JValue::Int(p2),
+                                JValue::Int(p3),
+                                JValue::Int(p4),
+                            ],
                         )?;
+                    } else {
+                        let host = match views.get(&id).and_then(|handle| handle.parent) {
+                            Some(parent) => match views.get(&parent) {
+                                Some(parent) => parent.children_host.as_obj(),
+                                None => root_host,
+                            },
+                            None => root_host,
+                        };
+                        jni_handles(env)?.remove_view.call_void(
+                            env,
+                            host,
+                            &[JValue::Object(&view)],
+                        )?;
+                        if register {
+                            jni_handles(env)?.unregister_view.call_void(
+                                env,
+                                self.root.as_obj(),
+                                &[JValue::Long(id.0 as jlong)],
+                            )?;
+                        }
                     }
                 }
                 views.remove(&id);
@@ -532,7 +563,7 @@ impl AndroidState {
             } => {
                 if let Some(handle) = views.get(&id) {
                     if let Some(batch) = frames.as_mut() {
-                        batch.push(id, frame, self.density, animation);
+                        batch.push(id, frame, self.density, animation.as_ref());
                     } else {
                         apply_frame(
                             env,
@@ -740,6 +771,28 @@ impl AndroidState {
                 self.root.as_obj(),
                 &[JValue::Long(node.id.0 as jlong), JValue::Object(&view)],
             )?;
+            if let Some(enter) = node
+                .style
+                .enter
+                .as_ref()
+                .filter(|enter| enter.duration_ms > 0)
+            {
+                let [kind, p1, p2, p3, p4] = enter.curve.packed();
+                jni_handles(env)?.start_enter.call_void(
+                    env,
+                    self.root.as_obj(),
+                    &[
+                        JValue::Object(&view),
+                        JValue::Float(node.style.opacity.unwrap_or(1.0)),
+                        JValue::Int(enter.duration_ms.min(i32::MAX as u32) as jint),
+                        JValue::Int(kind),
+                        JValue::Int(p1),
+                        JValue::Int(p2),
+                        JValue::Int(p3),
+                        JValue::Int(p4),
+                    ],
+                )?;
+            }
         }
 
         Ok(view)
@@ -1449,9 +1502,10 @@ fn apply_style(
     let border = node.style.border;
     let ripple = matches!(node.kind, NodeKind::Button(_));
     let animation = animate
-        .then_some(node.style.animation)
+        .then_some(node.style.animation.as_ref())
         .flatten()
         .filter(|animation| animation.duration_ms > 0);
+    let [curve_kind, p1, p2, p3, p4] = animation.map_or([0; 5], |a| a.curve.packed());
 
     ids.apply_style.call_void(
         env,
@@ -1482,7 +1536,11 @@ fn apply_style(
             JValue::Int(animation.map_or(0, |animation| {
                 animation.duration_ms.min(i32::MAX as u32) as jint
             })),
-            JValue::Int(animation.map_or(0, |animation| animation.curve.code())),
+            JValue::Int(curve_kind),
+            JValue::Int(p1),
+            JValue::Int(p2),
+            JValue::Int(p3),
+            JValue::Int(p4),
         ],
     )?;
     Ok(())

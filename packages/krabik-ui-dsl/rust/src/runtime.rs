@@ -912,7 +912,7 @@ mod tests {
             .ops
             .iter()
             .filter_map(|op| match op {
-                Op::Layout { animation, .. } => Some(*animation),
+                Op::Layout { animation, .. } => Some(animation.clone()),
                 _ => None,
             })
             .collect();

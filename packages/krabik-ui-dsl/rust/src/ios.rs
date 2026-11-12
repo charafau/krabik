@@ -5,6 +5,7 @@
 //! and every event is handled here on native `UILabel`/`UIButton`/… instances.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr::NonNull;
@@ -16,25 +17,30 @@ use dispatch2::DispatchQueue;
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject, Sel};
 use objc2::{ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
-use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize, CGVector};
 use objc2_core_graphics::CGColor;
 use objc2_foundation::{
     NSArray, NSBundle, NSCalendar, NSCalendarUnit, NSData, NSDate, NSDateComponents, NSError,
-    NSIndexPath, NSString, NSURL, NSURLResponse, NSURLSession,
+    NSIndexPath, NSNumber, NSString, NSURL, NSURLResponse, NSURLSession,
 };
-use objc2_quartz_core::{CACornerMask, CAGradientLayer};
+use objc2_quartz_core::{
+    CABasicAnimation, CACornerMask, CAGradientLayer, CALayer, CAMediaTiming, CAMediaTimingFunction,
+    kCAMediaTimingFunctionEaseIn, kCAMediaTimingFunctionEaseInEaseOut,
+    kCAMediaTimingFunctionEaseOut, kCAMediaTimingFunctionLinear,
+};
 use objc2_ui_kit::{
     NSIndexPathUIKitAdditions, NSLineBreakMode, NSObjectUIAccessibility, NSTextAlignment,
     UIAccessibilityIsReduceMotionEnabled, UIAction, UIActivityIndicatorView,
     UIActivityIndicatorViewStyle, UIButton, UIButtonType, UICollectionView, UICollectionViewCell,
     UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDelegateFlowLayout,
     UICollectionViewFlowLayout, UICollectionViewLayout, UIColor, UIControl,
-    UIControlContentHorizontalAlignment, UIControlEvents, UIControlState, UIDatePicker,
-    UIDatePickerMode, UIDatePickerStyle, UIEdgeInsets, UIFont, UIImage, UIImageView,
+    UIControlContentHorizontalAlignment, UIControlEvents, UIControlState, UICubicTimingParameters,
+    UIDatePicker, UIDatePickerMode, UIDatePickerStyle, UIEdgeInsets, UIFont, UIImage, UIImageView,
     UIKeyboardType, UILabel, UILayoutConstraintAxis, UIProgressView, UIReturnKeyType, UIScrollView,
-    UIScrollViewDelegate, UISegmentedControl, UISlider, UIStackView, UIStackViewAlignment,
-    UIStackViewDistribution, UISwitch, UITextBorderStyle, UITextField, UITextInputTraits, UIView,
-    UIViewAnimationOptions, UIViewContentMode,
+    UIScrollViewDelegate, UISegmentedControl, UISlider, UISpringTimingParameters, UIStackView,
+    UIStackViewAlignment, UIStackViewDistribution, UISwitch, UITextBorderStyle, UITextField,
+    UITextInputTraits, UITimingCurveProvider, UIView, UIViewAnimating, UIViewAnimatingPosition,
+    UIViewAnimationCurve, UIViewContentMode, UIViewPropertyAnimator,
 };
 
 use crate::app::{App, Event};
@@ -591,7 +597,6 @@ enum IosHostKind {
     Modal,
 }
 
-/// The state of one host view in a session.
 /// The views and frames updated by one layout operation.
 ///
 /// The values are owned so the same work can run directly or inside a UIKit
@@ -635,40 +640,290 @@ impl LayoutFrames {
     }
 }
 
-/// Whether a node's implicit animation should run on this device.
-fn animation_is_enabled(animation: Animation) -> bool {
-    animation.duration_ms > 0 && !UIAccessibilityIsReduceMotionEnabled()
+/// Whether a transition with this duration should run on this device.
+fn animation_is_enabled(duration_ms: u32) -> bool {
+    duration_ms > 0 && !UIAccessibilityIsReduceMotionEnabled()
 }
 
-/// Maps a shared animation curve onto UIKit's animation options.
-fn animation_options(curve: AnimationCurve) -> UIViewAnimationOptions {
-    let curve = match curve {
-        AnimationCurve::Linear => UIViewAnimationOptions::CurveLinear,
-        AnimationCurve::EaseIn => UIViewAnimationOptions::CurveEaseIn,
-        AnimationCurve::EaseOut => UIViewAnimationOptions::CurveEaseOut,
-        AnimationCurve::EaseInOut => UIViewAnimationOptions::CurveEaseInOut,
-    };
-    UIViewAnimationOptions::BeginFromCurrentState | curve
+/// Builds UIKit timing parameters for one of the shared curves.
+fn timing_parameters(
+    curve: &AnimationCurve,
+    mtm: MainThreadMarker,
+) -> Retained<ProtocolObject<dyn UITimingCurveProvider>> {
+    match curve {
+        AnimationCurve::Linear => {
+            ProtocolObject::from_retained(UICubicTimingParameters::initWithAnimationCurve(
+                UICubicTimingParameters::alloc(mtm),
+                UIViewAnimationCurve::Linear,
+            ))
+        }
+        AnimationCurve::EaseIn => {
+            ProtocolObject::from_retained(UICubicTimingParameters::initWithAnimationCurve(
+                UICubicTimingParameters::alloc(mtm),
+                UIViewAnimationCurve::EaseIn,
+            ))
+        }
+        AnimationCurve::EaseOut => {
+            ProtocolObject::from_retained(UICubicTimingParameters::initWithAnimationCurve(
+                UICubicTimingParameters::alloc(mtm),
+                UIViewAnimationCurve::EaseOut,
+            ))
+        }
+        AnimationCurve::EaseInOut => {
+            ProtocolObject::from_retained(UICubicTimingParameters::initWithAnimationCurve(
+                UICubicTimingParameters::alloc(mtm),
+                UIViewAnimationCurve::EaseInOut,
+            ))
+        }
+        AnimationCurve::CubicBezier { x1, y1, x2, y2 } => ProtocolObject::from_retained(
+            UICubicTimingParameters::initWithControlPoint1_controlPoint2(
+                UICubicTimingParameters::alloc(mtm),
+                CGPoint::new(f64::from(*x1), f64::from(*y1)),
+                CGPoint::new(f64::from(*x2), f64::from(*y2)),
+            ),
+        ),
+        AnimationCurve::Spring { damping, response } => {
+            let response = f64::from(*response).max(0.01);
+            let stiffness = (2.0 * std::f64::consts::PI / response).powi(2);
+            let damping = 2.0 * f64::from(*damping) * stiffness.sqrt();
+            ProtocolObject::from_retained(
+                UISpringTimingParameters::initWithMass_stiffness_damping_initialVelocity(
+                    UISpringTimingParameters::alloc(mtm),
+                    1.0,
+                    stiffness,
+                    damping,
+                    CGVector::new(0.0, 0.0),
+                ),
+            )
+        }
+    }
 }
 
-fn animate_alpha(
-    view: &Retained<UIView>,
-    start: f64,
-    target: f64,
-    animation: Animation,
+/// Runs a UIKit property animation and optionally calls `completion`.
+fn run_animation(
+    duration_ms: u32,
+    curve: &AnimationCurve,
+    animations: RcBlock<dyn Fn()>,
+    completion: Option<RcBlock<dyn Fn(UIViewAnimatingPosition)>>,
     mtm: MainThreadMarker,
 ) {
-    view.setAlpha(start);
-    let view = view.clone();
-    let block = RcBlock::new(move || view.setAlpha(target));
-    UIView::animateWithDuration_delay_options_animations_completion(
-        f64::from(animation.duration_ms) / 1000.0,
-        0.0,
-        animation_options(animation.curve),
-        &block,
-        None,
-        mtm,
+    let parameters = timing_parameters(curve, mtm);
+    let animator = UIViewPropertyAnimator::initWithDuration_timingParameters(
+        UIViewPropertyAnimator::alloc(mtm),
+        f64::from(duration_ms) / 1000.0,
+        &parameters,
     );
+    animator.addAnimations(&animations);
+    if let Some(completion) = completion {
+        let block = RcBlock::new(move |position: UIViewAnimatingPosition| {
+            completion.call((position,));
+        });
+        animator.addCompletion(&block);
+    }
+    UIViewAnimating::startAnimation(&*animator);
+}
+
+/// The Core Animation timing function for a curve.
+fn timing_function(curve: &AnimationCurve) -> Retained<CAMediaTimingFunction> {
+    match curve {
+        AnimationCurve::Linear => {
+            CAMediaTimingFunction::functionWithName(unsafe { kCAMediaTimingFunctionLinear })
+        }
+        AnimationCurve::EaseIn => {
+            CAMediaTimingFunction::functionWithName(unsafe { kCAMediaTimingFunctionEaseIn })
+        }
+        AnimationCurve::EaseOut => {
+            CAMediaTimingFunction::functionWithName(unsafe { kCAMediaTimingFunctionEaseOut })
+        }
+        AnimationCurve::EaseInOut => {
+            CAMediaTimingFunction::functionWithName(unsafe { kCAMediaTimingFunctionEaseInEaseOut })
+        }
+        AnimationCurve::CubicBezier { x1, y1, x2, y2 } => {
+            CAMediaTimingFunction::functionWithControlPoints(*x1, *y1, *x2, *y2)
+        }
+        // Core Animation has no spring timing function in these bindings;
+        // layer-property changes fall back to the default ease.
+        AnimationCurve::Spring { .. } => {
+            CAMediaTimingFunction::functionWithName(unsafe { kCAMediaTimingFunctionEaseInEaseOut })
+        }
+    }
+}
+
+/// Adds a Core Animation interpolation from `from` to `to` on a layer key.
+fn add_layer_animation(
+    layer: &CALayer,
+    key_path: &str,
+    from: Option<&AnyObject>,
+    to: Option<&AnyObject>,
+    duration_ms: u32,
+    curve: &AnimationCurve,
+) {
+    let animation = CABasicAnimation::animationWithKeyPath(Some(&NSString::from_str(key_path)));
+    // SAFETY: the values are toll-free bridged or boxed objects matching the
+    // key path's value type.
+    unsafe {
+        animation.setFromValue(from);
+        animation.setToValue(to);
+    }
+    animation.setDuration(f64::from(duration_ms) / 1000.0);
+    animation.setTimingFunction(Some(&timing_function(curve)));
+    layer.addAnimation_forKey(&animation, Some(&NSString::from_str(key_path)));
+}
+
+struct StyleSnapshot {
+    background: Option<Retained<UIColor>>,
+    border_color: Option<Retained<CGColor>>,
+    border_width: f64,
+    corner_radius: f64,
+    gradient_colors: Option<Retained<NSArray>>,
+    alpha: f64,
+}
+
+fn style_snapshot(
+    view: &Retained<UIView>,
+    gradient: Option<&Retained<CAGradientLayer>>,
+) -> StyleSnapshot {
+    let layer = view.layer();
+    StyleSnapshot {
+        background: view.backgroundColor(),
+        border_color: layer.borderColor(),
+        border_width: layer.borderWidth(),
+        corner_radius: layer.cornerRadius(),
+        gradient_colors: gradient.and_then(|gradient| gradient.colors()),
+        alpha: view.alpha(),
+    }
+}
+
+/// Animates a style update: background and alpha through UIKit, layer
+/// properties through Core Animation.
+fn animate_style_change(
+    view: &Retained<UIView>,
+    gradient: Option<&Retained<CAGradientLayer>>,
+    node: &RenderNode,
+    snapshot: StyleSnapshot,
+    animation: &Animation,
+    mtm: MainThreadMarker,
+) {
+    let target_background = view.backgroundColor();
+    let target_alpha = f64::from(node.style.opacity.unwrap_or(1.0));
+
+    view.setBackgroundColor(snapshot.background.as_deref());
+    view.setAlpha(snapshot.alpha);
+
+    let view_for_block = view.clone();
+    let block = RcBlock::new(move || {
+        view_for_block.setBackgroundColor(target_background.as_deref());
+        view_for_block.setAlpha(target_alpha);
+    });
+    run_animation(animation.duration_ms, &animation.curve, block, None, mtm);
+
+    let layer = view.layer();
+
+    let from_color = snapshot
+        .border_color
+        .map(|color| unsafe { Retained::cast_unchecked(color) });
+    let to_color = layer
+        .borderColor()
+        .map(|color| unsafe { Retained::cast_unchecked(color) });
+    add_layer_animation(
+        &layer,
+        "borderColor",
+        from_color.as_deref(),
+        to_color.as_deref(),
+        animation.duration_ms,
+        &animation.curve,
+    );
+
+    let from_width: Retained<AnyObject> =
+        unsafe { Retained::cast_unchecked(NSNumber::numberWithDouble(snapshot.border_width)) };
+    let to_width: Retained<AnyObject> =
+        unsafe { Retained::cast_unchecked(NSNumber::numberWithDouble(layer.borderWidth())) };
+    add_layer_animation(
+        &layer,
+        "borderWidth",
+        Some(&from_width),
+        Some(&to_width),
+        animation.duration_ms,
+        &animation.curve,
+    );
+
+    let from_radius: Retained<AnyObject> =
+        unsafe { Retained::cast_unchecked(NSNumber::numberWithDouble(snapshot.corner_radius)) };
+    let to_radius: Retained<AnyObject> =
+        unsafe { Retained::cast_unchecked(NSNumber::numberWithDouble(layer.cornerRadius())) };
+    add_layer_animation(
+        &layer,
+        "cornerRadius",
+        Some(&from_radius),
+        Some(&to_radius),
+        animation.duration_ms,
+        &animation.curve,
+    );
+
+    if let (Some(from_colors), Some(gradient)) = (snapshot.gradient_colors, gradient)
+        && let Some(to_colors) = gradient.colors()
+    {
+        let from_colors: Retained<AnyObject> = unsafe { Retained::cast_unchecked(from_colors) };
+        let to_colors: Retained<AnyObject> = unsafe { Retained::cast_unchecked(to_colors) };
+        add_layer_animation(
+            gradient,
+            "colors",
+            Some(&from_colors),
+            Some(&to_colors),
+            animation.duration_ms,
+            &animation.curve,
+        );
+    }
+}
+
+struct InteractionLock {
+    view: Retained<UIView>,
+    depth: u32,
+    original: bool,
+}
+
+thread_local! {
+    static INTERACTION_LOCKS: RefCell<HashMap<usize, InteractionLock>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Disables interaction on a view for the duration of an animation.
+///
+/// UIKit hit-tests against the model layer, which is already at the final
+/// position while the presentation layer animates.
+fn begin_interaction_lock(view: &Retained<UIView>) {
+    let key = Retained::as_ptr(view) as usize;
+    INTERACTION_LOCKS.with(|locks| {
+        let mut locks = locks.borrow_mut();
+        if let Some(lock) = locks.get_mut(&key) {
+            lock.depth += 1;
+        } else {
+            locks.insert(
+                key,
+                InteractionLock {
+                    view: view.clone(),
+                    depth: 1,
+                    original: view.isUserInteractionEnabled(),
+                },
+            );
+            view.setUserInteractionEnabled(false);
+        }
+    });
+}
+
+fn end_interaction_lock(view: &Retained<UIView>) {
+    let key = Retained::as_ptr(view) as usize;
+    INTERACTION_LOCKS.with(|locks| {
+        let mut locks = locks.borrow_mut();
+        let Some(lock) = locks.get_mut(&key) else {
+            return;
+        };
+        lock.depth = lock.depth.saturating_sub(1);
+        if lock.depth == 0 {
+            let lock = locks.remove(&key).expect("checked above");
+            lock.view.setUserInteractionEnabled(lock.original);
+        }
+    });
 }
 
 struct IosState {
@@ -689,6 +944,8 @@ struct IosState {
     row_states: HashMap<usize, IosRowState>,
     /// The item each row node belongs to, for routing focus back to its row.
     row_nodes: HashMap<NodeId, (NodeId, usize)>,
+    /// Views animating out after their node was removed, by node id.
+    pending_exits: HashMap<NodeId, Retained<UIView>>,
     viewport: Size,
 }
 
@@ -717,6 +974,7 @@ impl IosState {
             row_action_ids: HashMap::new(),
             row_states: HashMap::new(),
             row_nodes: HashMap::new(),
+            pending_exits: HashMap::new(),
             viewport: Size::ZERO,
         }
     }
@@ -731,7 +989,7 @@ impl IosState {
         // row can apply its own operations without borrowing the state twice.
         let mut views = std::mem::take(&mut self.views);
         for op in update.ops {
-            self.apply_to(op, &mut views, &root);
+            self.apply_to(op, &mut views, &root, true);
         }
         self.views = views;
         self.prune_rows();
@@ -746,6 +1004,7 @@ impl IosState {
         op: Op,
         views: &mut HashMap<NodeId, ViewHandle>,
         root_host: &Retained<UIView>,
+        animate: bool,
     ) {
         // SAFETY: the runtime renders on the main thread, and every entry point
         // checks that before locking the state.
@@ -753,26 +1012,83 @@ impl IosState {
 
         match op {
             Op::Create(node) => {
+                // A deferred exit may still own this node id. Drop it before
+                // the replacement appears.
+                if let Some(old) = self.pending_exits.remove(&node.id) {
+                    old.layer().removeAllAnimations();
+                    old.removeFromSuperview();
+                }
+
                 let handle = self.create_handle(&node, mtm);
                 let host = parent_host_in(views, root_host, node.parent);
                 host.addSubview(&handle.view);
+                let view = handle.view.clone();
                 views.insert(node.id, handle);
+
+                if animate
+                    && let Some(enter) = node
+                        .style
+                        .enter
+                        .as_ref()
+                        .filter(|enter| animation_is_enabled(enter.duration_ms))
+                {
+                    let target_alpha = f64::from(node.style.opacity.unwrap_or(1.0));
+                    view.setAlpha(0.0);
+                    view.setTransform(CGAffineTransform {
+                        a: 0.96,
+                        b: 0.0,
+                        c: 0.0,
+                        d: 0.96,
+                        tx: 0.0,
+                        ty: 0.0,
+                    });
+                    begin_interaction_lock(&view);
+                    let view_for_block = view.clone();
+                    let block = RcBlock::new(move || {
+                        view_for_block.setAlpha(target_alpha);
+                        view_for_block.setTransform(CGAffineTransform {
+                            a: 1.0,
+                            b: 0.0,
+                            c: 0.0,
+                            d: 1.0,
+                            tx: 0.0,
+                            ty: 0.0,
+                        });
+                    });
+                    let view_for_completion = view.clone();
+                    let completion = RcBlock::new(move |_: UIViewAnimatingPosition| {
+                        end_interaction_lock(&view_for_completion);
+                    });
+                    run_animation(
+                        enter.duration_ms,
+                        &enter.curve,
+                        block,
+                        Some(completion),
+                        mtm,
+                    );
+                }
             }
             Op::Update(node) => {
                 if let Some(handle) = views.get_mut(&node.id) {
-                    let previous_alpha = handle.view.alpha();
+                    let animation = if animate {
+                        node.style
+                            .animation
+                            .as_ref()
+                            .filter(|animation| animation_is_enabled(animation.duration_ms))
+                    } else {
+                        None
+                    };
+                    let snapshot =
+                        animation.map(|_| style_snapshot(&handle.view, handle.gradient.as_ref()));
                     update_content(&mut handle.content, &node, self.handle, self.host, mtm);
                     apply_style(&handle.view, &node, &mut handle.gradient);
                     apply_accessibility(&handle.view, &node, mtm);
-                    if let Some(animation) = node
-                        .style
-                        .animation
-                        .filter(|animation| animation_is_enabled(*animation))
-                    {
-                        animate_alpha(
+                    if let (Some(animation), Some(snapshot)) = (animation, snapshot) {
+                        animate_style_change(
                             &handle.view,
-                            previous_alpha,
-                            f64::from(node.style.opacity.unwrap_or(1.0)),
+                            handle.gradient.as_ref(),
+                            &node,
+                            snapshot,
                             animation,
                             mtm,
                         );
@@ -813,10 +1129,54 @@ impl IosState {
                     }
                 }
             }
-            Op::Remove { id } => {
+            Op::Remove { id, exit } => {
                 self.images.expected.remove(&id);
                 if let Some(handle) = views.remove(&id) {
-                    handle.view.removeFromSuperview();
+                    if animate
+                        && let Some(exit) = exit
+                            .as_ref()
+                            .filter(|exit| animation_is_enabled(exit.duration_ms))
+                    {
+                        let view = handle.view.clone();
+                        self.pending_exits.insert(id, view.clone());
+                        begin_interaction_lock(&view);
+                        let remove = view.clone();
+                        let block = RcBlock::new(move || {
+                            remove.setAlpha(0.0);
+                            remove.setTransform(CGAffineTransform {
+                                a: 0.96,
+                                b: 0.0,
+                                c: 0.0,
+                                d: 0.96,
+                                tx: 0.0,
+                                ty: 0.0,
+                            });
+                        });
+                        let completion = {
+                            let view = view.clone();
+                            let token = Retained::as_ptr(&view) as usize;
+                            let handle = self.handle;
+                            let host = self.host;
+                            RcBlock::new(move |_: UIViewAnimatingPosition| {
+                                end_interaction_lock(&view);
+                                view.removeFromSuperview();
+                                schedule(move || {
+                                    with_session(handle, |session| {
+                                        if let Some(state) = session.hosts.get_mut(&host)
+                                            && state.pending_exits.get(&id).is_some_and(|view| {
+                                                Retained::as_ptr(view) as usize == token
+                                            })
+                                        {
+                                            state.pending_exits.remove(&id);
+                                        }
+                                    });
+                                });
+                            })
+                        };
+                        run_animation(exit.duration_ms, &exit.curve, block, Some(completion), mtm);
+                    } else {
+                        handle.view.removeFromSuperview();
+                    }
                 }
             }
             Op::Layout {
@@ -1091,14 +1451,21 @@ impl IosState {
             padding: handle.padding,
         };
 
-        if let Some(animation) = animation.filter(|animation| animation_is_enabled(*animation)) {
+        if let Some(animation) = animation
+            .as_ref()
+            .filter(|animation| animation_is_enabled(animation.duration_ms))
+        {
+            let view = frames.view.clone();
+            begin_interaction_lock(&view);
             let block = RcBlock::new(move || frames.apply());
-            UIView::animateWithDuration_delay_options_animations_completion(
-                f64::from(animation.duration_ms) / 1000.0,
-                0.0,
-                animation_options(animation.curve),
-                &block,
-                None,
+            let completion = RcBlock::new(move |_: UIViewAnimatingPosition| {
+                end_interaction_lock(&view);
+            });
+            run_animation(
+                animation.duration_ms,
+                &animation.curve,
+                block,
+                Some(completion),
                 mtm,
             );
         } else {
@@ -1236,7 +1603,7 @@ impl IosState {
         let mut ops = render::diff(&old_tree, &tree);
         ops.extend(render::diff_layout(&old_tree, &tree, &old_layout, &layout));
         for op in ops {
-            self.apply_to(op, &mut views, &content);
+            self.apply_to(op, &mut views, &content, false);
         }
 
         self.record_row_actions(list, index, &tree);

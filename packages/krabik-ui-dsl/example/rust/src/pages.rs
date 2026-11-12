@@ -493,22 +493,30 @@ fn tabs_page(app: &ShowcaseApp) -> Element {
 fn animations_page(app: &ShowcaseApp) -> Element {
     let open = app.animations;
     let extra: Element = if open {
-        Text::new("Extra animated content slides into place.")
-            .color(COLOR_MUTED)
+        Text::new("Entered with a fade and scale.")
+            .color(COLOR_ACCENT)
+            .animate_enter(220)
+            .enter_curve(AnimationCurve::spring(0.7, 0.3))
+            .animate_exit(160)
+            .exit_curve(AnimationCurve::EaseIn)
             .into()
     } else {
         Spacer::new().height(0).into()
     };
     page(
         "Animations",
-        "Implicit transitions animate frame and opacity changes when state updates.",
+        "Frames, opacity, colors, curves and enter/exit transitions follow state updates.",
         body![
             Button::new(if open { "Hide panel" } else { "Show panel" }).action("demo:animate"),
             Column::new()
-                .animate(280)
-                .animation_curve(AnimationCurve::EaseOut)
-                .background(COLOR_SURFACE)
-                .corner_radius(12)
+                .animate(320)
+                .animation_curve(AnimationCurve::spring(0.72, 0.35))
+                .background(if open { COLOR_DONE } else { COLOR_SURFACE })
+                .border(
+                    if open { 2 } else { 1 },
+                    if open { COLOR_ACCENT } else { COLOR_BORDER }
+                )
+                .corner_radius(if open { 18 } else { 8 })
                 .padding(16)
                 .spacing(8)
                 .width_percent(1.0)
@@ -522,15 +530,16 @@ fn animations_page(app: &ShowcaseApp) -> Element {
                     .color(COLOR_TEXT),
                 )
                 .child(extra),
-            Text::new("This caption moves as the panel resizes.")
+            Text::new("This caption follows a custom cubic Bezier curve.")
                 .color(COLOR_MUTED)
-                .animate(280),
-            Text::new("Opacity fades with the same transition.")
+                .animate(320)
+                .animation_curve(AnimationCurve::cubic_bezier(0.2, 0.9, 0.3, 1.0)),
+            Text::new("Opacity and decoration share the panel's spring.")
                 .size(18)
                 .color(COLOR_ACCENT)
                 .opacity(if open { 1.0 } else { 0.25 })
-                .animate(280)
-                .animation_curve(AnimationCurve::EaseInOut),
+                .animate(320)
+                .animation_curve(AnimationCurve::spring(0.72, 0.35)),
         ],
     )
 }

@@ -27,19 +27,19 @@ impl FrameBatch {
 
     /// Adds one node frame, converting the logical points to pixels.
     ///
-    /// The animation is packed as a duration and a curve code. A missing or
-    /// zero-duration animation tells the platform to apply the frame directly.
-    pub fn push(&mut self, id: NodeId, frame: Rect, density: f32, animation: Option<Animation>) {
+    /// The animation is packed as a duration and five curve integers. A
+    /// missing or zero-duration animation tells the platform to apply the
+    /// frame directly.
+    pub fn push(&mut self, id: NodeId, frame: Rect, density: f32, animation: Option<&Animation>) {
         let pixels = frame.to_pixels(density);
         self.ids.push(id.0 as i64);
         self.frames
             .extend([pixels.x, pixels.y, pixels.width, pixels.height]);
-        self.animations.extend([
-            animation.map_or(0, |animation| {
-                animation.duration_ms.min(i32::MAX as u32) as i32
-            }),
-            animation.map_or(0, |animation| animation.curve.code()),
-        ]);
+        self.animations.push(animation.map_or(0, |animation| {
+            animation.duration_ms.min(i32::MAX as u32) as i32
+        }));
+        self.animations
+            .extend(animation.map_or([0; 5], |animation| animation.curve.packed()));
     }
 
     /// Whether any frame was added.
@@ -62,7 +62,8 @@ impl FrameBatch {
         &self.frames
     }
 
-    /// The animations, two integers per node in `duration, curve` order.
+    /// The animations, six integers per node in `duration, curve kind, params`
+    /// order.
     pub fn animations(&self) -> &[i32] {
         &self.animations
     }
@@ -111,11 +112,26 @@ mod tests {
             NodeId(1),
             Rect::new(0.0, 0.0, 10.0, 10.0),
             1.0,
-            Some(Animation::new(300).curve(crate::ui::AnimationCurve::EaseIn)),
+            Some(&Animation::new(300).curve(crate::ui::AnimationCurve::EaseIn)),
         );
         batch.push(NodeId(2), Rect::new(0.0, 0.0, 10.0, 10.0), 1.0, None);
 
-        assert_eq!(batch.animations(), &[300, 2, 0, 0]);
+        assert_eq!(batch.animations(), &[300, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn custom_curves_use_fixed_point_parameters() {
+        let mut batch = FrameBatch::new();
+        let animation =
+            Animation::new(400).curve(crate::ui::AnimationCurve::cubic_bezier(0.1, 0.2, 0.3, 0.9));
+        batch.push(
+            NodeId(1),
+            Rect::new(0.0, 0.0, 10.0, 10.0),
+            1.0,
+            Some(&animation),
+        );
+
+        assert_eq!(batch.animations(), &[400, 1, 1_000, 2_000, 3_000, 9_000]);
     }
 
     #[test]
