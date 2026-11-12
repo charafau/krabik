@@ -7,7 +7,7 @@ use krabik_ui_dsl::ui::{
     ScrollView, Slider, Spacer, Switch, Text, TextAlign, TextField,
 };
 
-use crate::{Page, ShowcaseApp};
+use crate::ShowcaseApp;
 
 pub(crate) const COLOR_TEXT: u32 = 0xFF20_2125;
 pub(crate) const COLOR_MUTED: u32 = 0xFF66_6666;
@@ -24,11 +24,6 @@ pub(crate) fn caption(text: &str) -> Text {
     Text::new(text).size(14).color(COLOR_MUTED)
 }
 
-/// The control that returns from a widget page to the catalog.
-pub(crate) fn back_button() -> Button {
-    Button::new("Back").action("page:home")
-}
-
 /// Wraps page content in the standard scrolling frame.
 macro_rules! body {
     ($($item:expr),* $(,)?) => {
@@ -42,7 +37,6 @@ fn page(title: &str, subtitle: &str, body: Vec<Element>) -> Element {
         .spacing(14)
         .width_percent(1.0)
         .align_items(Align::Start)
-        .child(back_button())
         .child(Text::new(title).size(28).bold().color(COLOR_TEXT))
         .child(caption(subtitle));
 
@@ -57,36 +51,89 @@ fn page(title: &str, subtitle: &str, body: Vec<Element>) -> Element {
         .into()
 }
 
-/// Builds the page for the current [`Page`].
-pub(crate) fn view(app: &ShowcaseApp) -> Element {
-    match app.page {
-        Page::Home => home(),
-        Page::Text => text_page(),
-        Page::Button => button_page(app),
-        Page::TextField => text_field_page(app),
-        Page::Switch => switch_page(app),
-        Page::Checkbox => checkbox_page(app),
-        Page::RadioButtons => radio_buttons_page(app),
-        Page::RadioGroup => radio_group_page(app),
-        Page::DatePicker => date_picker_page(app),
-        Page::Slider => slider_page(app),
-        Page::Progress => progress_page(app),
-        Page::Spinner => spinner_page(),
-        Page::Image => image_page(),
-        Page::Scroll => scroll_page(),
-        Page::List => list_page(app),
-        Page::RecycledList => recycled_list_page(app),
-        Page::Layouts => layouts_page(),
-        Page::Styling => styling_page(),
-        Page::Checklist => app.checklist.view(),
+/// Maps a `page:*` action to a stable screen key.
+pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
+    Some(match action.strip_prefix("page:")? {
+        "home" => "home",
+        "text" => "text",
+        "button" => "button",
+        "text-field" => "text-field",
+        "switch" => "switch",
+        "checkbox" => "checkbox",
+        "radio-buttons" => "radio-buttons",
+        "radio-group" => "radio-group",
+        "date-picker" => "date-picker",
+        "slider" => "slider",
+        "progress" => "progress",
+        "spinner" => "spinner",
+        "image" => "image",
+        "scroll" => "scroll",
+        "list" => "list",
+        "recycled-list" => "recycled-list",
+        "layouts" => "layouts",
+        "styling" => "styling",
+        "checklist" => "checklist",
+        _ => return None,
+    })
+}
+
+/// The native navigation-bar title for one screen.
+pub(crate) fn title(key: &str) -> &'static str {
+    match key {
+        "home" => "Widgets",
+        "text" => "Text",
+        "button" => "Button",
+        "text-field" => "Text field",
+        "switch" => "Switch",
+        "checkbox" => "Checkbox",
+        "radio-buttons" => "Radio buttons",
+        "radio-group" => "Radio group",
+        "date-picker" => "Date picker",
+        "slider" => "Slider",
+        "progress" => "Progress",
+        "spinner" => "Spinner",
+        "image" => "Image",
+        "scroll" => "Scroll view",
+        "list" => "Windowed list",
+        "recycled-list" => "Recycled list",
+        "layouts" => "Layouts",
+        "styling" => "Styling",
+        "checklist" => "Checklist",
+        _ => "Krabik UI DSL",
     }
+}
+
+/// Builds the content for one navigation screen.
+pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element> {
+    Some(match key {
+        "home" => home(),
+        "text" => text_page(),
+        "button" => button_page(app),
+        "text-field" => text_field_page(app),
+        "switch" => switch_page(app),
+        "checkbox" => checkbox_page(app),
+        "radio-buttons" => radio_buttons_page(app),
+        "radio-group" => radio_group_page(app),
+        "date-picker" => date_picker_page(app),
+        "slider" => slider_page(app),
+        "progress" => progress_page(app),
+        "spinner" => spinner_page(),
+        "image" => image_page(),
+        "scroll" => scroll_page(),
+        "list" => list_page(app),
+        "recycled-list" => recycled_list_page(app),
+        "layouts" => layouts_page(),
+        "styling" => styling_page(),
+        "checklist" => app.checklist.view(),
+        _ => return None,
+    })
 }
 
 fn page_button(label: &'static str, action: &'static str) -> Button {
     Button::new(label).action(action).width_percent(1.0)
 }
 
-fn home() -> Element {
+pub(crate) fn home() -> Element {
     let catalog: [(&str, &[(&str, &str)]); 6] = [
         (
             "Text & layout",
@@ -131,7 +178,6 @@ fn home() -> Element {
             &[
                 ("Styling", "page:styling"),
                 ("Checklist", "page:checklist"),
-                ("Navigation", "nav:open"),
                 ("Dialog", "dialog:open"),
                 ("Bottom sheet", "sheet:open"),
             ],
@@ -328,43 +374,6 @@ fn radio_group_page(app: &ShowcaseApp) -> Element {
             )),
         ],
     )
-}
-
-pub(crate) fn navigation_root(_app: &ShowcaseApp) -> Element {
-    screen_page(
-        "Navigation root",
-        "Rust owns the stack; the native controller owns the bar and transition.",
-        body![
-            Button::new("Open details").action("nav:push"),
-            Button::new("Close navigation").action("nav:close"),
-        ],
-    )
-}
-
-pub(crate) fn navigation_detail(_app: &ShowcaseApp) -> Element {
-    screen_page(
-        "Detail screen",
-        "The system back button and the native bar's back button both dispatch Event::Back.",
-        body![
-            Button::new("Pop to root").action("nav:pop"),
-            Button::new("Close navigation").action("nav:close"),
-        ],
-    )
-}
-
-fn screen_page(title: &str, subtitle: &str, body: Vec<Element>) -> Element {
-    let mut column = Column::new()
-        .padding(24)
-        .spacing(14)
-        .width_percent(1.0)
-        .height_percent(1.0)
-        .align_items(Align::Start)
-        .child(Text::new(title).size(28).bold().color(COLOR_TEXT))
-        .child(caption(subtitle));
-    for child in body {
-        column = column.child(child);
-    }
-    column.into()
 }
 
 pub(crate) fn dialog_view(_app: &ShowcaseApp) -> Element {
@@ -572,7 +581,6 @@ fn list_page(app: &ShowcaseApp) -> Element {
         .width_percent(1.0)
         .height_percent(1.0)
         .align_items(Align::Start)
-        .child(back_button())
         .child(Text::new("Windowed list").size(28).bold().color(COLOR_TEXT))
         .child(caption(
             "Only the rows inside the window exist as native widgets.",
@@ -604,7 +612,6 @@ fn recycled_list_page(app: &ShowcaseApp) -> Element {
         .width_percent(1.0)
         .height_percent(1.0)
         .align_items(Align::Start)
-        .child(back_button())
         .child(Text::new("Recycled list").size(28).bold().color(COLOR_TEXT))
         .child(caption(
             "A native recycler builds and reuses rows on demand.",

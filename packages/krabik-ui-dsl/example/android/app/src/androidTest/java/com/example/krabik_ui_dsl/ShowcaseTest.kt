@@ -80,20 +80,11 @@ class ShowcaseTest {
     }
 
     @Test
-    fun navigationAndNativePresentations() {
+    fun nativeScreensAndPresentations() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            openPage("Navigation")
-            onView(withText("Navigation root")).check(matches(isDisplayed()))
-            onView(withText("Open details")).perform(click())
-            onView(withText("Detail screen")).check(matches(isDisplayed()))
-
-            androidx.test.espresso.Espresso.pressBack()
-            Thread.sleep(500)
-            onView(withText("Navigation root")).check(matches(isDisplayed()))
-
-            onView(withText("Close navigation")).perform(click())
-            Thread.sleep(800)
-            swipeToTop()
+            openPage("Text")
+            onView(withText("Display 34 / bold")).check(matches(isDisplayed()))
+            tapBack()
             onView(withText("Krabik UI DSL")).check(matches(isDisplayed()))
 
             openPage("Dialog")

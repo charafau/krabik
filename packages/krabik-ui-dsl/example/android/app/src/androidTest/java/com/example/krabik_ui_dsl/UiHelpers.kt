@@ -8,6 +8,7 @@ import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isCompletelyDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.espresso.matcher.ViewMatchers.withText
+import org.hamcrest.Matchers.allOf
 
 /**
  * Scrolls the catalog until [label] is displayed, then taps it.
@@ -18,7 +19,7 @@ import androidx.test.espresso.matcher.ViewMatchers.withText
  */
 internal fun openPage(label: String) {
     swipeTo(label)
-    onView(withText(label)).perform(click())
+    onView(allOf(withText(label), isCompletelyDisplayed())).perform(click())
     Thread.sleep(300)
 }
 
@@ -44,17 +45,10 @@ internal fun swipeToTop() {
     }
 }
 
-/** Taps the Back button of a widget page, scrolling to it if needed. */
+/** Uses the native back action to return to the catalog. */
 internal fun tapBack() {
-    repeat(12) {
-        if (isVisible("Back")) {
-            onView(withText("Back")).perform(click())
-            swipeToTop()
-            return
-        }
-        onView(isRoot()).perform(swipeDown())
-    }
-    onView(withText("Back")).perform(click())
+    androidx.test.espresso.Espresso.pressBack()
+    Thread.sleep(500)
     swipeToTop()
 }
 
