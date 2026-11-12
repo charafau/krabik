@@ -95,6 +95,9 @@ impl Runtime {
 
     /// Rebuilds the tree from `element` and returns the batch to apply.
     pub fn update(&mut self, element: &Element, viewport: Size) -> Update {
+        // A viewport change relayouts every node; animating that would make a
+        // rotation or split-screen resize look like a deliberate transition.
+        let suppress_animation = self.viewport != viewport;
         self.viewport = viewport;
 
         // Variable-height lists converge in a couple of passes: the first one
@@ -158,12 +161,15 @@ impl Runtime {
         };
 
         let mut ops = render::diff(&self.tree, &next);
-        ops.extend(render::diff_layout(
-            &self.tree,
-            &next,
-            &self.layout,
-            &layout,
-        ));
+        let mut layout_ops = render::diff_layout(&self.tree, &next, &self.layout, &layout);
+        if suppress_animation {
+            for op in &mut layout_ops {
+                if let render::Op::Layout { animation, .. } = op {
+                    *animation = None;
+                }
+            }
+        }
+        ops.extend(layout_ops);
 
         let size = layout
             .frames
@@ -889,6 +895,29 @@ mod tests {
         runtime.set_row_focus(list, 3, field, true);
         runtime.set_focus(NodeId(1), true);
         assert!(runtime.row_focus().is_none());
+    }
+
+    #[test]
+    fn a_viewport_change_suppresses_layout_animations() {
+        let element: Element = Text::new("animated")
+            .height_percent(0.5)
+            .animate(300)
+            .into();
+
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&element, Size::new(200.0, 500.0));
+        let update = runtime.update(&element, Size::new(200.0, 400.0));
+
+        let animations: Vec<_> = update
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::Layout { animation, .. } => Some(*animation),
+                _ => None,
+            })
+            .collect();
+        assert!(!animations.is_empty(), "{:?}", update.ops);
+        assert!(animations.iter().all(Option::is_none), "{animations:?}");
     }
 
     #[test]

@@ -199,6 +199,23 @@ It does not create a native tab controller or per-tab navigation stacks; the
 app decides which content to build for the current index. The widget showcase
 has a Tabs page covering both the composed container and a standalone bar.
 
+### 2h. Implicit animations ✅
+
+`Style` can opt into an implicit transition with `.animate(duration_ms)`,
+`.animation(Animation)`, or `.animation_curve(AnimationCurve)`. The animation
+metadata travels with layout operations from the renderer diff; nodes without
+an animation behave exactly as before.
+
+- **v1 scope** — frame changes and opacity. Android moves views with a
+  `ValueAnimator`, iOS uses `UIView.animate` with
+  `BeginFromCurrentState`.
+- **Snapping** — newly created nodes, viewport changes and a zero duration
+  apply their frame immediately, so startup and rotation do not animate.
+- **Accessibility** — Android respects the system animator duration scale and
+  iOS skips animations when Reduce Motion is enabled.
+- **Coverage** — the Animations showcase page toggles a resizing panel and an
+  opacity fade; Rust renderer/frame-batch tests and both UI suites cover it.
+
 ### 3b. Virtualized lists ✅
 
 [`List`](rust/src/ui.rs) (`List::new(items).item_height(..).buffer(..).key(..).row(..)`)
@@ -437,8 +454,11 @@ matters for large lists.
 
 ### Rendering & UX
 
-- Animations via native platform APIs (duration/curve properties on the
-  element description, applied from the renderer's operation diff).
+- Animation follow-ups after the v1 frame/opacity slice:
+  - Animate background colors, gradients, borders and corner radii.
+  - Enter/exit animations for node creation and removal.
+  - Spring and custom timing curves.
+  - Keep hit-testing in sync during in-flight frame animations.
 - Native intrinsic measurement for switches and images, so their intrinsic
   size comes from the platform rather than the hard-coded defaults.
 - Disabled-state styling for custom backgrounds (native text already dims).

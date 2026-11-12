@@ -495,7 +495,7 @@ impl Jni {
                 "(Landroid/view/View;IIII)V",
                 VOID
             ),
-            apply_layouts: method!(env, &rust_root_view, "applyLayouts", "([J[I)V", VOID),
+            apply_layouts: method!(env, &rust_root_view, "applyLayouts", "([J[I[I)V", VOID),
             register_view: method!(
                 env,
                 &rust_root_view,
@@ -567,7 +567,7 @@ impl Jni {
                 env,
                 &krabik_style,
                 "apply",
-                "(Landroid/view/View;IZIIZZFFFFFZFIZFZF)V",
+                "(Landroid/view/View;IZIIZZFFFFFZFIZFZFII)V",
                 VOID
             ),
             typeface_default: static_field!(

@@ -2,10 +2,10 @@
 
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::ui::{
-    Align, Button, Checkbox, Column, DatePicker, DatePickerMode, DateValue, EdgeInsets, Element,
-    Gradient, Image, ImageScale, ImageSource, Justify, List, ProgressIndicator, RadioButton,
-    RadioGroup, Row, ScrollView, Slider, Spacer, Switch, TabBar, Tabs, Text, TextAlign, TextField,
-    TimeValue,
+    Align, AnimationCurve, Button, Checkbox, Column, DatePicker, DatePickerMode, DateValue,
+    EdgeInsets, Element, Gradient, Image, ImageScale, ImageSource, Justify, List,
+    ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider, Spacer, Switch, TabBar,
+    Tabs, Text, TextAlign, TextField, TimeValue,
 };
 
 use crate::ShowcaseApp;
@@ -65,6 +65,7 @@ pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
         "radio-group" => "radio-group",
         "date-picker" => "date-picker",
         "tabs" => "tabs",
+        "animations" => "animations",
         "slider" => "slider",
         "progress" => "progress",
         "spinner" => "spinner",
@@ -92,6 +93,7 @@ pub(crate) fn title(key: &str) -> &'static str {
         "radio-group" => "Radio group",
         "date-picker" => "Date picker",
         "tabs" => "Tabs",
+        "animations" => "Animations",
         "slider" => "Slider",
         "progress" => "Progress",
         "spinner" => "Spinner",
@@ -119,6 +121,7 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element> {
         "radio-group" => radio_group_page(app),
         "date-picker" => date_picker_page(app),
         "tabs" => tabs_page(app),
+        "animations" => animations_page(app),
         "slider" => slider_page(app),
         "progress" => progress_page(app),
         "spinner" => spinner_page(),
@@ -182,6 +185,7 @@ pub(crate) fn home() -> Element {
             "Extras",
             &[
                 ("Styling", "page:styling"),
+                ("Animations", "page:animations"),
                 ("Checklist", "page:checklist"),
                 ("Dialog", "dialog:open"),
                 ("Bottom sheet", "sheet:open"),
@@ -482,6 +486,51 @@ fn tabs_page(app: &ShowcaseApp) -> Element {
                 .action("demo:tab")
                 .accessibility_label("Period")
                 .into(),
+        ],
+    )
+}
+
+fn animations_page(app: &ShowcaseApp) -> Element {
+    let open = app.animations;
+    let extra: Element = if open {
+        Text::new("Extra animated content slides into place.")
+            .color(COLOR_MUTED)
+            .into()
+    } else {
+        Spacer::new().height(0).into()
+    };
+    page(
+        "Animations",
+        "Implicit transitions animate frame and opacity changes when state updates.",
+        body![
+            Button::new(if open { "Hide panel" } else { "Show panel" }).action("demo:animate"),
+            Column::new()
+                .animate(280)
+                .animation_curve(AnimationCurve::EaseOut)
+                .background(COLOR_SURFACE)
+                .corner_radius(12)
+                .padding(16)
+                .spacing(8)
+                .width_percent(1.0)
+                .child(
+                    Text::new(if open {
+                        "Panel is open."
+                    } else {
+                        "Panel is closed."
+                    })
+                    .bold()
+                    .color(COLOR_TEXT),
+                )
+                .child(extra),
+            Text::new("This caption moves as the panel resizes.")
+                .color(COLOR_MUTED)
+                .animate(280),
+            Text::new("Opacity fades with the same transition.")
+                .size(18)
+                .color(COLOR_ACCENT)
+                .opacity(if open { 1.0 } else { 0.25 })
+                .animate(280)
+                .animation_curve(AnimationCurve::EaseInOut),
         ],
     )
 }
