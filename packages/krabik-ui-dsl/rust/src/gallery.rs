@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::app::{App, Event};
 use crate::ui::{
     Align, Button, Checkbox, Column, CornerRadii, EdgeInsets, Element, Gradient, Image, ImageScale,
-    ImageSource, ImeAction, Justify, KeyboardType, List, ProgressIndicator, RadioButton, Row,
+    ImageSource, ImeAction, Justify, KeyboardType, List, ProgressIndicator, RadioGroup, Row,
     ScrollView, Slider, Spacer, Switch, Text, TextAlign, TextField,
 };
 
@@ -60,6 +60,8 @@ pub struct GalleryApp {
     pub size_choice: usize,
     /// Slider value in the controls demo.
     pub volume: f32,
+    /// Stepped slider value in the controls demo.
+    pub stepped: f32,
     /// The thousand rows of the virtualized list demo, shared across rebuilds.
     pub list_items: Arc<Vec<String>>,
     /// Rows of mixed height for the measured-list demo.
@@ -90,6 +92,7 @@ impl Default for GalleryApp {
             wifi: true,
             size_choice: 1,
             volume: 40.0,
+            stepped: 30.0,
             list_items: Arc::new((1..=1000).map(|index| format!("Row {index}")).collect()),
             recycled_taps: 0,
             recycled_bumps: 0,
@@ -741,13 +744,11 @@ impl GalleryApp {
                     }))
                     .child(Text::new(format!("Size: {size}")).size(18))
                     .child(
-                        RadioButton::new("Small", self.size_choice == 0).action("controls:size:0"),
-                    )
-                    .child(
-                        RadioButton::new("Medium", self.size_choice == 1).action("controls:size:1"),
-                    )
-                    .child(
-                        RadioButton::new("Large", self.size_choice == 2).action("controls:size:2"),
+                        RadioGroup::new(["Small", "Medium", "Large"])
+                            .selected(self.size_choice)
+                            .action("controls:size")
+                            .accessibility_label("Size")
+                            .width_percent(1.0),
                     )
                     .child(Text::new(format!("Volume: {:.0}", self.volume)).size(18))
                     .child(
@@ -755,13 +756,33 @@ impl GalleryApp {
                             .min(0.0)
                             .max(100.0)
                             .action("controls:volume")
+                            .accessibility_label("Volume")
+                            .width_percent(1.0),
+                    )
+                    .child(Text::new(format!("Stepped: {:.0}", self.stepped)).size(18))
+                    .child(
+                        Slider::new(self.stepped)
+                            .min(0.0)
+                            .max(100.0)
+                            .step(10.0)
+                            .action("controls:stepped")
+                            .accessibility_label("Stepped")
                             .width_percent(1.0),
                     )
                     .child(Text::new("Progress").size(18))
                     .child(
                         ProgressIndicator::new(self.volume / 100.0)
                             .color(COLOR_TEAL)
+                            .accessibility_label("Progress bar")
                             .width_percent(1.0),
+                    )
+                    .child(Text::new("Loading").size(18))
+                    .child(
+                        ProgressIndicator::indeterminate()
+                            .color(COLOR_TEAL)
+                            .accessibility_label("Loading spinner")
+                            .width(24)
+                            .height(24),
                     ),
             )
             .into()
@@ -881,21 +902,18 @@ impl App for GalleryApp {
                 action: "controls:wifi",
                 checked,
             } => self.wifi = checked,
-            Event::Toggled { action, checked } => {
-                let Some(index) = action
-                    .strip_prefix("controls:size:")
-                    .and_then(|index| index.parse::<usize>().ok())
-                else {
-                    return false;
-                };
-                if checked {
-                    self.size_choice = index;
-                }
-            }
+            Event::Selected {
+                action: "controls:size",
+                index,
+            } => self.size_choice = index,
             Event::ValueChanged {
                 action: "controls:volume",
                 value,
             } => self.volume = value,
+            Event::ValueChanged {
+                action: "controls:stepped",
+                value,
+            } => self.stepped = value,
             Event::Click { action } => match action {
                 "back" => self.demo = Demo::Gallery,
                 "open:counter" => {
@@ -1000,9 +1018,9 @@ mod tests {
         }));
         assert!(!app.wifi);
 
-        assert!(app.handle(Event::Toggled {
-            action: "controls:size:2",
-            checked: true,
+        assert!(app.handle(Event::Selected {
+            action: "controls:size",
+            index: 2,
         }));
         assert_eq!(app.size_choice, 2);
 
@@ -1011,6 +1029,12 @@ mod tests {
             value: 75.0,
         }));
         assert_eq!(app.volume, 75.0);
+
+        assert!(app.handle(Event::ValueChanged {
+            action: "controls:stepped",
+            value: 70.0,
+        }));
+        assert_eq!(app.stepped, 70.0);
     }
 
     #[test]

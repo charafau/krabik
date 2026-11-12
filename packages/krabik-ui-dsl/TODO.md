@@ -120,6 +120,22 @@ The recycled list disables `RecyclerView.ItemAnimator`: every render revision
 calls `notifyItemRangeChanged`, and the default animator rebinds holders often
 enough to clear the per-row action map and flicker focused fields.
 
+### 2d. Widget showcase ✅
+
+[`example/`](example/) is now a one-page-per-widget catalog instead of only a
+checklist. The home page lists every widget, each entry opens a page that
+demonstrates it in isolation, and the checklist is preserved as a page.
+
+Navigation is application state: a `Page` enum and `page:*` actions. No
+navigation primitive was added to the DSL yet; this keeps the showcase
+independent of that future design.
+
+The catalog covers `Text`, `Button`, `TextField`, `Switch`, `Checkbox`,
+`RadioButton`, the new `RadioGroup`, continuous and stepped `Slider`, `Progress`,
+the new indeterminate `Spinner`, `Image`, `ScrollView`, windowed and recycled
+`List`, layouts and styling. `krabik.webp` is bundled in both shells for the
+image page.
+
 ### 3b. Virtualized lists ✅
 
 [`List`](rust/src/ui.rs) (`List::new(items).item_height(..).buffer(..).key(..).row(..)`)
@@ -213,16 +229,23 @@ All core widgets from SPEC.md §7.1 are implemented on Android and iOS.
 | `Switch` | [`update_switch()`](rust/src/android.rs) | Custom `KrabikSwitch` (`android.widget.Switch`) |
 | `Checkbox` | [`update_check()`](rust/src/android.rs) | Custom `KrabikCheckBox` (`CheckBox`) |
 | `RadioButton` | [`update_check()`](rust/src/android.rs) | Custom `KrabikRadioButton` (`RadioButton`) |
+| `RadioGroup` | [`update_radio_group()`](rust/src/android.rs) | Custom `KrabikRadioGroup` (`RadioGroup`) |
 | `Slider` | [`update_slider()`](rust/src/android.rs) | Custom `KrabikSeekBar` (`SeekBar`) |
 | `ProgressIndicator` | [`update_progress()`](rust/src/android.rs) | `ProgressBar` (horizontal) |
+| `ProgressIndicator::indeterminate()` | [`update_spinner()`](rust/src/android.rs) | Circular `ProgressBar` |
 | `Image` | [`update_image()`](rust/src/android.rs) | `ImageView` (assets + URLs) |
 | `ScrollView` | [`create_scroll()`](rust/src/android.rs) | Custom scroll container (vertical + horizontal) |
 
 iOS renders the controls as `UIButton` with SF Symbol images (checkbox and
-radio), `UISlider`, and `UIProgressView`. Checkbox and radio buttons dispatch
-the same `Toggled` event as a switch; a slider dispatches `ValueChanged`.
-Radio buttons are independent controls, so the application renders the selected
-one and enforces mutual exclusion.
+radio), `UISlider`, `UIProgressView`, and `UIActivityIndicatorView` for the
+spinner. Checkbox and radio buttons dispatch the same `Toggled` event as a
+switch; a slider dispatches `ValueChanged`; a radio group dispatches
+`Selected { index }`. Standalone radio buttons remain independent controls,
+while `RadioGroup` owns mutual exclusion (`UIStackView` on iOS, native
+`RadioGroup` on Android).
+
+Sliders accept an optional `step`; the runtime quantizes values centrally, so
+both platforms report the same multiples to the application.
 
 Full `Style` system (applied via [`apply_style()`](rust/src/android.rs)):
 - Background color & linear gradients
@@ -238,7 +261,8 @@ Additional capabilities:
 - Multiline, secure and keyboard-configured inputs
 - Submit and focus events for inputs
 - Aspect-ratio sizing
-- Controls demo with switches, checks, radio buttons, a slider and a progress indicator, covered by `ControlsTest` on Android and `testControls` on iOS
+- Stepped sliders and indeterminate spinners
+- Controls demo with switches, checks, a radio group, continuous and stepped sliders, a progress bar and a spinner, covered by `ControlsTest` on Android and `testControls` on iOS
 
 ### 5. Type-Safe State Management & Event Dispatch ✅
 
@@ -252,6 +276,7 @@ pub enum Event<'a> {
     FocusChanged { action: &'a str, focused: bool },
     Toggled { action: &'a str, checked: bool },
     ValueChanged { action: &'a str, value: f32 },
+    Selected { action: &'a str, index: usize },
 }
 ```
 

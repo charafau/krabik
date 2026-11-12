@@ -38,8 +38,8 @@ use super::{
     BUTTON_CLASS, CHECKBOX_CLASS, FRAME_LAYOUT_CLASS, FRAME_PARAMS_CLASS, IMAGE_VIEW_CLASS,
     KRABIK_IMAGES_CLASS, KRABIK_RECYCLERS_CLASS, KRABIK_STYLE_CLASS, KRABIK_VIEWS_CLASS,
     LAYOUT_PARAMS_CLASS, LONG_CLASS, MEASURE_SPEC_CLASS, PROGRESS_BAR_CLASS, RADIO_CLASS,
-    RUST_ROOT_VIEW_CLASS, SEEK_BAR_CLASS, SWITCH_CLASS, TEXT_INPUT_CLASS, TEXT_UTILS_CLASS,
-    TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
+    RADIO_GROUP_CLASS, RUST_ROOT_VIEW_CLASS, SEEK_BAR_CLASS, SWITCH_CLASS, TEXT_INPUT_CLASS,
+    TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
 };
 
 const VOID: JavaType = JavaType::Primitive(Primitive::Void);
@@ -207,9 +207,9 @@ pub(super) struct Jni {
     pub(super) switch: Global<JClass<'static>>,
     pub(super) checkbox: Global<JClass<'static>>,
     pub(super) radio_button: Global<JClass<'static>>,
+    pub(super) radio_group: Global<JClass<'static>>,
     pub(super) seek_bar: Global<JClass<'static>>,
-    /// Only keeps `ProgressBar` loaded for the cached factory signature.
-    pub(super) _progress_bar: Global<JClass<'static>>,
+    pub(super) progress_bar: Global<JClass<'static>>,
     pub(super) layout_params: Global<JClass<'static>>,
     pub(super) frame_params: Global<JClass<'static>>,
     pub(super) typeface: Global<JClass<'static>>,
@@ -263,6 +263,7 @@ pub(super) struct Jni {
     pub(super) set_checked_silently: Method,
     pub(super) checkbox_set_checked_silently: Method,
     pub(super) radio_set_checked_silently: Method,
+    pub(super) configure_radio_group: Method,
     pub(super) configure_seek_bar: Method,
     pub(super) seek_set_value_silently: Method,
 
@@ -283,6 +284,7 @@ pub(super) struct Jni {
     pub(super) update_recycler: StaticMethod,
     pub(super) create_progress: StaticMethod,
     pub(super) update_progress: StaticMethod,
+    pub(super) update_spinner: StaticMethod,
     pub(super) apply_style: StaticMethod,
     pub(super) typeface_default: StaticField,
     pub(super) typeface_default_bold: StaticField,
@@ -298,7 +300,9 @@ pub(super) struct Jni {
     pub(super) switch_ctor: Ctor,
     pub(super) checkbox_ctor: Ctor,
     pub(super) radio_ctor: Ctor,
+    pub(super) radio_group_ctor: Ctor,
     pub(super) seek_bar_ctor: Ctor,
+    pub(super) progress_bar_ctor: Ctor,
     pub(super) layout_params_ctor: Ctor,
     pub(super) frame_params_ctor: Ctor,
 }
@@ -315,6 +319,7 @@ impl Jni {
         let switch = class(env, SWITCH_CLASS)?;
         let checkbox = class(env, CHECKBOX_CLASS)?;
         let radio_button = class(env, RADIO_CLASS)?;
+        let radio_group = class(env, RADIO_GROUP_CLASS)?;
         let seek_bar = class(env, SEEK_BAR_CLASS)?;
         let progress_bar = class(env, PROGRESS_BAR_CLASS)?;
         let layout_params = class(env, LAYOUT_PARAMS_CLASS)?;
@@ -444,7 +449,14 @@ impl Jni {
                 "(Z)V",
                 VOID
             ),
-            configure_seek_bar: method!(env, &seek_bar, "configure", "(FFI)V", VOID),
+            configure_radio_group: method!(
+                env,
+                &radio_group,
+                "configure",
+                "([Ljava/lang/String;IFIFZ)V",
+                VOID
+            ),
+            configure_seek_bar: method!(env, &seek_bar, "configure", "(FFFI)V", VOID),
             seek_set_value_silently: method!(env, &seek_bar, "setValueSilently", "(F)V", VOID),
 
             apply_frame: method!(
@@ -515,6 +527,13 @@ impl Jni {
                 "(Landroid/widget/ProgressBar;FI)V",
                 VOID
             ),
+            update_spinner: static_method!(
+                env,
+                &krabik_views,
+                "updateSpinner",
+                "(Landroid/widget/ProgressBar;I)V",
+                VOID
+            ),
             apply_style: static_method!(
                 env,
                 &krabik_style,
@@ -569,11 +588,17 @@ impl Jni {
                 &radio_button,
                 "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
             ),
+            radio_group_ctor: ctor!(
+                env,
+                &radio_group,
+                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
+            ),
             seek_bar_ctor: ctor!(
                 env,
                 &seek_bar,
                 "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
             ),
+            progress_bar_ctor: ctor!(env, &progress_bar, "(Landroid/content/Context;)V"),
             layout_params_ctor: ctor!(env, &layout_params, "(II)V"),
             frame_params_ctor: ctor!(env, &frame_params, "(II)V"),
 
@@ -587,8 +612,9 @@ impl Jni {
             switch,
             checkbox,
             radio_button,
+            radio_group,
             seek_bar,
-            _progress_bar: progress_bar,
+            progress_bar,
             layout_params,
             frame_params,
             typeface,

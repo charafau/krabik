@@ -10,6 +10,8 @@ import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.action.ViewActions.typeText
+import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withHint
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -32,6 +34,7 @@ class LayoutTest {
     @Test
     fun framesAreAppliedToTheNativeViews() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            openChecklist()
             addNote("First note")
             addNote("Second note")
 
@@ -83,6 +86,11 @@ class LayoutTest {
         }
     }
 
+    private fun openChecklist() {
+        openPage("Checklist")
+        onView(withText("1 of 3 tasks done · 0 notes")).check(matches(isDisplayed()))
+    }
+
     private fun addNote(text: String) {
         onView(withHint("Add a note")).perform(
             scrollTo(),
@@ -100,6 +108,7 @@ class LayoutTest {
     @Test
     fun registryTracksCreatedAndRemovedViews() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            openChecklist()
             var baseline = 0
             scenario.onActivity { activity ->
                 baseline = findRustRoot(activity.window.decorView)!!.registeredViewCount()

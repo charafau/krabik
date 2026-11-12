@@ -27,8 +27,8 @@ use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
     Axis, CheckProps, EdgeInsets, FontWeight, GradientDirection, ImageProps, ImageScale,
-    ImageSource, ImeAction, KeyboardType, ProgressProps, SliderProps, SwitchProps, TextAlign,
-    TextFieldProps, TextProps,
+    ImageSource, ImeAction, KeyboardType, ProgressProps, RadioGroupProps, SliderProps, SwitchProps,
+    TextAlign, TextFieldProps, TextProps, snap_slider_value,
 };
 
 mod handles;
@@ -54,6 +54,7 @@ const TEXT_INPUT_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikText
 const SWITCH_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSwitch");
 const CHECKBOX_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikCheckBox");
 const RADIO_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioButton");
+const RADIO_GROUP_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioGroup");
 const SEEK_BAR_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSeekBar");
 const PROGRESS_BAR_CLASS: &JNIStr = jni_str!("android/widget/ProgressBar");
 const KRABIK_IMAGES_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikImages");
@@ -286,7 +287,11 @@ struct RowAction {
     submit: Option<Cow<'static, str>>,
     focus: Option<Cow<'static, str>>,
     toggle: Option<Cow<'static, str>>,
+    selected: Option<Cow<'static, str>>,
     value: Option<Cow<'static, str>>,
+    value_min: f32,
+    value_max: f32,
+    value_step: Option<f32>,
 }
 
 /// One recycled row currently bound to a holder.
@@ -617,6 +622,10 @@ impl AndroidState {
                     ids.radio_ctor
                         .construct(env, &ids.radio_button, &child_context)?
                 }
+                NodeKind::RadioGroup(_) => {
+                    ids.radio_group_ctor
+                        .construct(env, &ids.radio_group, &child_context)?
+                }
                 NodeKind::Slider(_) => {
                     ids.seek_bar_ctor
                         .construct(env, &ids.seek_bar, &child_context)?
@@ -629,6 +638,10 @@ impl AndroidState {
                         &[JValue::Object(self.context.as_obj())],
                     )?
                     .l()?,
+                NodeKind::Spinner(_) => {
+                    ids.progress_bar_ctor
+                        .construct(env, &ids.progress_bar, &context)?
+                }
                 NodeKind::Image(_) => {
                     ids.image_view_ctor
                         .construct(env, &ids.image_view, &context)?
@@ -660,10 +673,19 @@ impl AndroidState {
             update_check(env, &view, props, false)?;
         } else if let NodeKind::RadioButton(props) = &node.kind {
             update_check(env, &view, props, true)?;
+        } else if let NodeKind::RadioGroup(props) = &node.kind {
+            update_radio_group(env, &view, props)?;
         } else if let NodeKind::Slider(props) = &node.kind {
             update_slider(env, &view, props)?;
         } else if let NodeKind::Progress(props) = &node.kind {
             update_progress(env, &view, props)?;
+        } else if let NodeKind::Spinner(props) = &node.kind {
+            let ids = jni_handles(env)?;
+            ids.update_spinner.call_void(
+                env,
+                &ids.krabik_views,
+                &[JValue::Object(&view), JValue::Int(props.color as jint)],
+            )?;
         } else if let NodeKind::Image(props) = &node.kind {
             update_image(env, &view, props)?;
         } else {
@@ -822,8 +844,15 @@ impl AndroidState {
                     action.toggle = Some(props.action.clone());
                     any = true;
                 }
+                NodeKind::RadioGroup(props) if !props.action.is_empty() => {
+                    action.selected = Some(props.action.clone());
+                    any = true;
+                }
                 NodeKind::Slider(props) if !props.action.is_empty() => {
                     action.value = Some(props.action.clone());
+                    action.value_min = props.min;
+                    action.value_max = props.max;
+                    action.value_step = props.step;
                     any = true;
                 }
                 NodeKind::TextField(props) => {
@@ -1072,13 +1101,42 @@ fn update_slider(env: &mut Env<'_>, view: &JObject<'_>, props: &SliderProps) -> 
         &[
             JValue::Float(props.min),
             JValue::Float(max),
+            JValue::Float(props.step.unwrap_or(0.0)),
             JValue::Int(props.color as jint),
         ],
     )?;
-    ids.seek_set_value_silently.call_void(
+    let value = snap_slider_value(props.value, props.min, max, props.step);
+    ids.seek_set_value_silently
+        .call_void(env, view, &[JValue::Float(value)])
+}
+
+fn update_radio_group(
+    env: &mut Env<'_>,
+    view: &JObject<'_>,
+    props: &RadioGroupProps,
+) -> JniResult<()> {
+    let ids = jni_handles(env)?;
+    let labels = env.new_object_array(
+        props.options.len() as jint,
+        jni_str!("java/lang/String"),
+        JObject::null(),
+    )?;
+    for (index, option) in props.options.iter().enumerate() {
+        let label = jcall!(env, env.new_string(option))?;
+        let object: &JObject<'_> = label.as_ref();
+        labels.set_element(env, index, object)?;
+    }
+    ids.configure_radio_group.call_void(
         env,
         view,
-        &[JValue::Float(props.value.clamp(props.min, max))],
+        &[
+            JValue::Object(&labels),
+            JValue::Int(props.selected.map_or(-1, |index| index as jint)),
+            JValue::Float(props.size),
+            JValue::Int(props.color as jint),
+            JValue::Float(props.spacing),
+            JValue::Bool(matches!(props.weight, FontWeight::Bold)),
+        ],
     )
 }
 
@@ -1751,10 +1809,58 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSli
             .runtime
             .slider_action(id)
             .or_else(|| state.row_actions.get(&id).and_then(|row| row.value.clone()));
+        let config = state.runtime.slider_config(id).or_else(|| {
+            state
+                .row_actions
+                .get(&id)
+                .map(|row| (row.value_min, row.value_max, row.value_step))
+        });
+        let value = match config {
+            Some((min, max, step)) => snap_slider_value(value, min, max, step),
+            None => value,
+        };
         if let Some(action) = action
             && state.app.handle(Event::ValueChanged {
                 action: &action,
                 value,
+            })
+        {
+            state.render(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Dispatches a radio-group selection back into the Rust tree.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnRadioGroupSelected<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    node_id: jlong,
+    index: jint,
+) {
+    run(&mut unenv, "nativeOnRadioGroupSelected", |env| {
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        let Some(state) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+
+        let id = NodeId(node_id as u64);
+        let action = state.runtime.radio_group_action(id).or_else(|| {
+            state
+                .row_actions
+                .get(&id)
+                .and_then(|row| row.selected.clone())
+        });
+        if let Some(action) = action
+            && state.app.handle(Event::Selected {
+                action: &action,
+                index: index.max(0) as usize,
             })
         {
             state.render(env)?;

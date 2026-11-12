@@ -59,6 +59,15 @@ object KrabikViews {
         view.progressTintList = ColorStateList.valueOf(color)
     }
 
+    /** Configures a circular indeterminate spinner and its color. */
+    @JvmStatic
+    fun updateSpinner(view: ProgressBar, color: Int) {
+        if (!view.isIndeterminate) {
+            view.isIndeterminate = true
+        }
+        view.indeterminateTintList = ColorStateList.valueOf(color)
+    }
+
     private const val PROGRESS_STEPS = 1000
 }
 
