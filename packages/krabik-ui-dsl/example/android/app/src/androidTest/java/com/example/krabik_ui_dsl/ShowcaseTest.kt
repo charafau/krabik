@@ -80,6 +80,35 @@ class ShowcaseTest {
     }
 
     @Test
+    fun navigationAndNativePresentations() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openPage("Navigation")
+            onView(withText("Navigation root")).check(matches(isDisplayed()))
+            onView(withText("Open details")).perform(click())
+            onView(withText("Detail screen")).check(matches(isDisplayed()))
+
+            androidx.test.espresso.Espresso.pressBack()
+            Thread.sleep(500)
+            onView(withText("Navigation root")).check(matches(isDisplayed()))
+
+            onView(withText("Close navigation")).perform(click())
+            Thread.sleep(800)
+            swipeToTop()
+            onView(withText("Krabik UI DSL")).check(matches(isDisplayed()))
+
+            openPage("Dialog")
+            onView(withText("Delete task?")).check(matches(isDisplayed()))
+            onView(withText("Cancel")).perform(click())
+            onView(withText("Delete task?")).check(doesNotExist())
+
+            openPage("Bottom sheet")
+            onView(withText("Filters")).check(matches(isDisplayed()))
+            onView(withText("Close")).perform(click())
+            onView(withText("Filters")).check(doesNotExist())
+        }
+    }
+
+    @Test
     fun systemBackReturnsToTheCatalog() {
         ActivityScenario.launch(MainActivity::class.java).use {
             openPage("Spinner")

@@ -19,17 +19,34 @@ import java.lang.ref.WeakReference
  * statically includes it) before constructing this view; [KrabikActivity]
  * does that through its `loadNativeLibrary` hook.
  */
-class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener {
+class RustRootView(
+    context: Context,
+    sessionHandle: Long = 0L,
+    host: Long = 0L,
+) : ViewGroup(context), View.OnClickListener {
 
-    private var handle: Long = nativeCreate(
-        context,
-        resources.displayMetrics.density,
-    )
-    private var renderedWidth = -1
-    private var renderedHeight = -1
+    private val ownsSession = sessionHandle == 0L
+    private val hostId: Long = host
+
+    /** The session handle shared by every host in this Activity. */
+    val session: Long
+        get() = handle
+    private var handle: Long = if (ownsSession) {
+        nativeCreate(context, resources.displayMetrics.density)
+    } else {
+        sessionHandle
+    }
 
     /** Views by node id, so a layout batch can address them without an array of objects. */
     private val nodeViews = LongSparseArray<WeakReference<View>>()
+
+    init {
+        if (!ownsSession) {
+            nativeAttachHost(handle, hostId)
+        }
+    }
+    private var renderedWidth = -1
+    private var renderedHeight = -1
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
@@ -39,7 +56,7 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
         if (handle != 0L && width > 0 && height > 0 && (width != renderedWidth || height != renderedHeight)) {
             renderedWidth = width
             renderedHeight = height
-            nativeRender(handle, width, height)
+            nativeRender(handle, hostId, width, height)
         }
 
         for (index in 0 until childCount) {
@@ -77,13 +94,13 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
         if (handle != 0L && width > 0 && height > 0 && (width != renderedWidth || height != renderedHeight)) {
             renderedWidth = width
             renderedHeight = height
-            nativeRender(handle, width, height)
+            nativeRender(handle, hostId, width, height)
         }
     }
 
     override fun onClick(view: View) {
         val nodeId = view.tag as? Long ?: return
-        nativeOnClick(handle, nodeId)
+        nativeOnClick(handle, hostId, nodeId)
     }
 
     /**
@@ -151,28 +168,28 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     /** Forwards an edit of a native input back to Rust. */
     fun onTextChanged(nodeId: Long, text: String) {
         if (handle != 0L) {
-            nativeOnTextChanged(handle, nodeId, text)
+            nativeOnTextChanged(handle, hostId, nodeId, text)
         }
     }
 
     /** Forwards a keyboard submit of a native input back to Rust. */
     fun onSubmitted(nodeId: Long) {
         if (handle != 0L) {
-            nativeOnSubmitted(handle, nodeId)
+            nativeOnSubmitted(handle, hostId, nodeId)
         }
     }
 
     /** Forwards a focus change of a native input back to Rust. */
     fun onFocusChanged(nodeId: Long, focused: Boolean, attached: Boolean) {
         if (handle != 0L) {
-            nativeOnFocusChanged(handle, nodeId, focused, attached)
+            nativeOnFocusChanged(handle, hostId, nodeId, focused, attached)
         }
     }
 
     /** Restores focus after a recycled row with a logical focus is reattached. */
     fun restoreRowFocus(nodeId: Long, holderId: Long) {
         if (handle != 0L) {
-            nativeRestoreRowFocus(handle, nodeId, holderId)
+            nativeRestoreRowFocus(handle, hostId, nodeId, holderId)
         }
     }
 
@@ -186,35 +203,35 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     /** Forwards a toggle of a native switch back to Rust. */
     fun onCheckedChanged(nodeId: Long, checked: Boolean) {
         if (handle != 0L) {
-            nativeOnCheckedChanged(handle, nodeId, checked)
+            nativeOnCheckedChanged(handle, hostId, nodeId, checked)
         }
     }
 
     /** Forwards a slider value, in the slider's own range, back to Rust. */
     fun onSliderChanged(nodeId: Long, value: Float) {
         if (handle != 0L) {
-            nativeOnSliderChanged(handle, nodeId, value)
+            nativeOnSliderChanged(handle, hostId, nodeId, value)
         }
     }
 
     /** Forwards the selected index of a native radio group back to Rust. */
     fun onRadioGroupSelected(nodeId: Long, index: Int) {
         if (handle != 0L) {
-            nativeOnRadioGroupSelected(handle, nodeId, index)
+            nativeOnRadioGroupSelected(handle, hostId, nodeId, index)
         }
     }
 
     /** Forwards a date selected in a native date picker back to Rust. */
     fun onDateChanged(nodeId: Long, year: Int, month: Int, day: Int) {
         if (handle != 0L) {
-            nativeOnDateChanged(handle, nodeId, year, month, day)
+            nativeOnDateChanged(handle, hostId, nodeId, year, month, day)
         }
     }
 
     /** Asks Rust to build one recycled-list row into [host], at [width] pixels. */
     fun bindRow(nodeId: Long, index: Int, holderId: Long, host: ViewGroup, width: Int): Int =
         if (handle != 0L) {
-            nativeBindRow(handle, nodeId, index, holderId, host, width)
+            nativeBindRow(handle, hostId, nodeId, index, holderId, host, width)
         } else {
             0
         }
@@ -222,24 +239,42 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     /** Tells Rust that [holderId] no longer shows a row. */
     fun unbindRow(nodeId: Long, holderId: Long) {
         if (handle != 0L) {
-            nativeUnbindRow(handle, nodeId, holderId)
+            nativeUnbindRow(handle, hostId, nodeId, holderId)
         }
     }
 
     /** Forwards the scroll offset, in pixels, of a native scroll container. */
     fun onScrolled(nodeId: Long, offset: Int) {
         if (handle != 0L) {
-            nativeOnScroll(handle, nodeId, offset.toFloat())
+            nativeOnScroll(handle, hostId, nodeId, offset.toFloat())
         }
     }
 
     /** Dispatches the system back button to Rust; returns whether it was handled. */
     fun onBackPressed(): Boolean = if (handle != 0L) nativeOnBack(handle) else false
 
+    /** Registers the native navigation/modal controller with the session. */
+    fun setController(controller: Any) {
+        if (handle != 0L) {
+            nativeSetController(handle, controller)
+        }
+    }
+
+    /** Asks the application to close the presented modal. */
+    fun onModalDismiss() {
+        if (handle != 0L) {
+            nativeOnModalDismiss(handle)
+        }
+    }
+
     /** Releases the Rust state when the activity goes away. */
     fun destroy() {
         if (handle != 0L) {
-            nativeDestroy(handle)
+            if (ownsSession) {
+                nativeDestroy(handle)
+            } else {
+                nativeDestroyHost(handle, hostId)
+            }
             handle = 0L
         }
     }
@@ -249,51 +284,62 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
         density: Float,
     ): Long
 
-    private external fun nativeRender(handle: Long, widthPx: Int, heightPx: Int)
+    private external fun nativeRender(handle: Long, host: Long, widthPx: Int, heightPx: Int)
 
-    private external fun nativeOnClick(handle: Long, nodeId: Long)
+    private external fun nativeOnClick(handle: Long, host: Long, nodeId: Long)
 
-    private external fun nativeOnTextChanged(handle: Long, nodeId: Long, text: String)
+    private external fun nativeOnTextChanged(handle: Long, host: Long, nodeId: Long, text: String)
 
-    private external fun nativeOnSubmitted(handle: Long, nodeId: Long)
+    private external fun nativeOnSubmitted(handle: Long, host: Long, nodeId: Long)
 
     private external fun nativeOnFocusChanged(
         handle: Long,
+        host: Long,
         nodeId: Long,
         focused: Boolean,
         attached: Boolean,
     )
 
-    private external fun nativeRestoreRowFocus(handle: Long, nodeId: Long, holderId: Long)
+    private external fun nativeRestoreRowFocus(handle: Long, host: Long, nodeId: Long, holderId: Long)
 
-    private external fun nativeOnCheckedChanged(handle: Long, nodeId: Long, checked: Boolean)
+    private external fun nativeOnCheckedChanged(handle: Long, host: Long, nodeId: Long, checked: Boolean)
 
-    private external fun nativeOnSliderChanged(handle: Long, nodeId: Long, value: Float)
+    private external fun nativeOnSliderChanged(handle: Long, host: Long, nodeId: Long, value: Float)
 
-    private external fun nativeOnRadioGroupSelected(handle: Long, nodeId: Long, index: Int)
+    private external fun nativeOnRadioGroupSelected(handle: Long, host: Long, nodeId: Long, index: Int)
 
     private external fun nativeOnDateChanged(
         handle: Long,
+        host: Long,
         nodeId: Long,
         year: Int,
         month: Int,
         day: Int,
     )
 
-    private external fun nativeOnScroll(handle: Long, nodeId: Long, offset: Float)
+    private external fun nativeOnScroll(handle: Long, host: Long, nodeId: Long, offset: Float)
 
     private external fun nativeOnBack(handle: Long): Boolean
 
+    private external fun nativeSetController(handle: Long, controller: Any)
+
+    private external fun nativeOnModalDismiss(handle: Long)
+
     private external fun nativeBindRow(
         handle: Long,
+        host: Long,
         nodeId: Long,
         index: Int,
         holderId: Long,
-        host: ViewGroup,
+        holderHost: ViewGroup,
         width: Int,
     ): Int
 
-    private external fun nativeUnbindRow(handle: Long, nodeId: Long, holderId: Long)
+    private external fun nativeUnbindRow(handle: Long, host: Long, nodeId: Long, holderId: Long)
 
     private external fun nativeDestroy(handle: Long)
+
+    private external fun nativeAttachHost(handle: Long, host: Long)
+
+    private external fun nativeDestroyHost(handle: Long, host: Long)
 }

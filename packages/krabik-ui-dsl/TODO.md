@@ -150,6 +150,29 @@ Dates are converted through calendar components at local noon so daylight
 saving cannot shift the selected day. The controls demo and the widget showcase
 exercise both modes.
 
+### 2f. Native presentation and navigation ✅
+
+The runtime now supports multiple native hosts per application session:
+
+- **Session/host core** — one `App` instance, one `RustRootView`/host per main
+  screen, navigation screen and modal. Events carry a host id; each host owns
+  its runtime, scroll/focus and recycled-row state.
+- **Dialog and BottomSheet** — the DSL builds content; the native host owns the
+  presentation. Android uses `DialogFragment` and a Material
+  `BottomSheetDialogFragment`; iOS uses an over-full-screen `UIViewController`
+  and `UISheetPresentationController`.
+- **Navigation** — the app implements `navigation()` and `screen(key)`; Android
+  mirrors the stack with AndroidX fragments and a toolbar, iOS with
+  `UINavigationController`. Rust remains the source of truth for the stack.
+- **Back** — Android's system/toolbar back dispatches `Event::Back` through the
+  AndroidX `OnBackPressedDispatcher`; the app pops a screen, closes a modal or
+  returns to the catalog before the Activity exits. iOS navigation uses the
+  native bar's Back item.
+
+The showcase adds Navigation, Dialog and Bottom sheet entries. Android
+instrumented tests and iOS XCUITests cover push/pop, system back, dialog
+dismissal and sheet dismissal.
+
 ### 3b. Virtualized lists ✅
 
 [`List`](rust/src/ui.rs) (`List::new(items).item_height(..).buffer(..).key(..).row(..)`)
@@ -400,11 +423,8 @@ matters for large lists.
 
 ### Widgets
 
-- Larger design work (native hosting, presentation, back handling): Dialog,
-  BottomSheet, Navigation.
-- A radio-group container that owns mutual exclusion, instead of independent
-  radio buttons that the application coordinates.
-- Stepped sliders (quantized values) and indeterminate progress indicators.
+- Larger design work: DatePicker time mode, min/max ranges.
+- Tabs and other navigation containers.
 
 ### Lists & scaling
 

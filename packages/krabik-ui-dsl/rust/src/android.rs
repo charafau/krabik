@@ -311,10 +311,22 @@ struct RowState {
     views: HashMap<NodeId, ViewHandle>,
 }
 
-/// The state of one `RustRootView`.
+/// What one native host renders.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+enum HostKind {
+    /// The main application root.
+    Main,
+    /// One screen in the native navigation stack.
+    Screen(String),
+    /// The currently presented dialog or sheet.
+    Modal,
+}
+
+/// The state of one root view in a session.
 struct AndroidState {
     runtime: Runtime,
-    app: Box<dyn App>,
+    kind: HostKind,
     root: Global<JObject<'static>>,
     context: Global<JObject<'static>>,
     views: HashMap<NodeId, ViewHandle>,
@@ -336,6 +348,7 @@ impl AndroidState {
         context: &JObject<'_>,
         root: &JObject<'_>,
         density: f32,
+        kind: HostKind,
     ) -> JniResult<Self> {
         let vm = env.get_java_vm()?;
         let context_ref = env.new_global_ref(context)?;
@@ -343,7 +356,7 @@ impl AndroidState {
 
         Ok(Self {
             runtime: Runtime::new(Box::new(measure)),
-            app: crate::app::create_app(),
+            kind,
             root: env.new_global_ref(root)?,
             context: context_ref,
             views: HashMap::new(),
@@ -356,9 +369,8 @@ impl AndroidState {
         })
     }
 
-    fn render(&mut self, env: &mut Env<'_>) -> JniResult<()> {
-        let element = self.app.view();
-        let update = self.runtime.update(&element, self.viewport);
+    fn render(&mut self, env: &mut Env<'_>, element: &crate::ui::Element) -> JniResult<()> {
+        let update = self.runtime.update(element, self.viewport);
 
         // The main views are taken out while the operations run so the same
         // application routine can also update a recycled row's private view
@@ -1484,10 +1496,201 @@ fn apply_content_size(
     Ok(())
 }
 
-static STATES: OnceLock<Mutex<HashMap<jlong, AndroidState>>> = OnceLock::new();
+/// One application instance shared by every native host in an Activity.
+#[allow(dead_code)]
+struct AndroidSession {
+    app: Box<dyn App>,
+    hosts: HashMap<u64, AndroidState>,
+    /// Hosts the native controller is about to create, keyed by host id.
+    pending: HashMap<u64, HostKind>,
+    next_host: u64,
+    context: Global<JObject<'static>>,
+    density: f32,
+    controller: Option<Global<JObject<'static>>>,
+    navigation: Vec<crate::navigation::Screen>,
+    presentation: Option<crate::presentation::Presentation>,
+}
+
+impl AndroidSession {
+    fn new(
+        env: &mut Env<'_>,
+        context: &JObject<'_>,
+        root: &JObject<'_>,
+        density: f32,
+    ) -> JniResult<Self> {
+        let main = AndroidState::new(env, context, root, density, HostKind::Main)?;
+        let mut hosts = HashMap::new();
+        hosts.insert(0, main);
+        Ok(Self {
+            app: crate::app::create_app(),
+            hosts,
+            pending: HashMap::new(),
+            next_host: 1,
+            context: env.new_global_ref(context)?,
+            density,
+            controller: None,
+            navigation: Vec::new(),
+            presentation: None,
+        })
+    }
+
+    /// Rebuilds every host and synchronizes the native presentations.
+    fn render_all(&mut self, env: &mut Env<'_>) -> JniResult<()> {
+        let mut elements = Vec::new();
+        for (id, host) in &self.hosts {
+            let element = match &host.kind {
+                HostKind::Main => Some(self.app.view()),
+                HostKind::Screen(key) => self.app.screen(key),
+                HostKind::Modal => self.app.presentation_view(),
+            };
+            if let Some(element) = element {
+                elements.push((*id, element));
+            }
+        }
+        for (id, element) in elements {
+            if let Some(host) = self.hosts.get_mut(&id) {
+                host.render(env, &element)?;
+            }
+        }
+        self.sync(env)
+    }
+
+    /// Reconciles the Rust state with the native navigation/modal controller.
+    fn sync(&mut self, env: &mut Env<'_>) -> JniResult<()> {
+        if self.controller.is_none() {
+            return Ok(());
+        }
+        let navigation = self
+            .app
+            .navigation()
+            .map(|nav| nav.screens)
+            .unwrap_or_default();
+        if navigation != self.navigation {
+            self.sync_navigation(env, &navigation)?;
+            self.navigation = navigation;
+        }
+        let presentation = self.app.presentation();
+        if presentation != self.presentation {
+            self.sync_presentation(env, presentation.as_ref())?;
+            self.presentation = presentation;
+        }
+        Ok(())
+    }
+
+    fn sync_navigation(
+        &mut self,
+        env: &mut Env<'_>,
+        screens: &[crate::navigation::Screen],
+    ) -> JniResult<()> {
+        let controller = self.controller.as_ref().map(|c| c.as_obj());
+        let Some(controller) = controller else {
+            return Ok(());
+        };
+        let common = self
+            .navigation
+            .iter()
+            .zip(screens.iter())
+            .take_while(|(old, new)| old.key == new.key)
+            .count();
+
+        for screen in self.navigation.iter().skip(common).rev() {
+            env.call_method(controller, jni_str!("pop"), jni_sig!("()V"), &[])?;
+            if let Some(host) = self.screen_host(&screen.key) {
+                self.hosts.remove(&host);
+                self.pending.remove(&host);
+            }
+        }
+        for screen in screens.iter().skip(common) {
+            let host = self.next_host;
+            self.next_host += 1;
+            self.pending
+                .insert(host, HostKind::Screen(screen.key.clone()));
+            let title = env.new_string(&screen.title)?;
+            env.call_method(
+                controller,
+                jni_str!("push"),
+                jni_sig!("(JLjava/lang/String;)V"),
+                &[JValue::Long(host as jlong), JValue::Object(title.as_ref())],
+            )?;
+        }
+
+        let visible = screens.is_empty();
+        env.call_method(
+            controller,
+            jni_str!("setRootVisible"),
+            jni_sig!("(Z)V"),
+            &[JValue::Bool(visible)],
+        )?;
+        Ok(())
+    }
+
+    fn sync_presentation(
+        &mut self,
+        env: &mut Env<'_>,
+        presentation: Option<&crate::presentation::Presentation>,
+    ) -> JniResult<()> {
+        let controller = self.controller.as_ref().map(|c| c.as_obj());
+        let Some(controller) = controller else {
+            return Ok(());
+        };
+        if let Some(host) = self.modal_host() {
+            env.call_method(controller, jni_str!("dismiss"), jni_sig!("()V"), &[])?;
+            self.hosts.remove(&host);
+            self.pending.remove(&host);
+        }
+        if let Some(presentation) = presentation {
+            let host = self.next_host;
+            self.next_host += 1;
+            self.pending.insert(host, HostKind::Modal);
+            env.call_method(
+                controller,
+                jni_str!("present"),
+                jni_sig!("(JI)V"),
+                &[
+                    JValue::Long(host as jlong),
+                    JValue::Int(presentation.kind as jint),
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn screen_host(&self, key: &str) -> Option<u64> {
+        self.hosts.iter().find_map(|(id, host)| match &host.kind {
+            HostKind::Screen(screen) if screen == key => Some(*id),
+            _ => None,
+        })
+    }
+
+    fn modal_host(&self) -> Option<u64> {
+        self.hosts
+            .iter()
+            .find_map(|(id, host)| matches!(host.kind, HostKind::Modal).then_some(*id))
+    }
+
+    /// Attaches a native host view to the session.
+    fn attach_host(&mut self, env: &mut Env<'_>, host: u64, root: &JObject<'_>) -> JniResult<()> {
+        let context = self.context.as_obj();
+        // A screen fragment can recreate its view after a pop. Keep the host
+        // id and kind, but replace the state so it points at the new native
+        // root instead of the detached view.
+        let kind = if let Some(existing) = self.hosts.get(&host) {
+            existing.kind.clone()
+        } else if let Some(kind) = self.pending.remove(&host) {
+            kind
+        } else {
+            return Ok(());
+        };
+        let state = AndroidState::new(env, context, root, self.density, kind)?;
+        self.hosts.insert(host, state);
+        Ok(())
+    }
+}
+
+static STATES: OnceLock<Mutex<HashMap<jlong, AndroidSession>>> = OnceLock::new();
 static NEXT_HANDLE: AtomicI64 = AtomicI64::new(1);
 
-fn states() -> &'static Mutex<HashMap<jlong, AndroidState>> {
+fn states() -> &'static Mutex<HashMap<jlong, AndroidSession>> {
     STATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -1502,7 +1705,7 @@ fn states() -> &'static Mutex<HashMap<jlong, AndroidState>> {
 /// point on the same thread, and `std` mutexes are not re-entrant, so
 /// blocking on the lock would deadlock the UI. Such programmatic echoes are
 /// dropped.
-fn lock_states_for_event() -> Option<MutexGuard<'static, HashMap<jlong, AndroidState>>> {
+fn lock_states_for_event() -> Option<MutexGuard<'static, HashMap<jlong, AndroidSession>>> {
     states().try_lock().ok()
 }
 
@@ -1519,12 +1722,12 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeCreat
         // classes visible: `FindClass` uses the class loader of this entry
         // point, which is the app's.
         jni_handles(env)?;
-        let state = AndroidState::new(env, &context, &this, density)?;
+        let session = AndroidSession::new(env, &context, &this, density)?;
         let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
         states()
             .lock()
             .expect("android states")
-            .insert(handle, state);
+            .insert(handle, session);
         Ok(handle)
     })
 }
@@ -1535,20 +1738,26 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeRende
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     width_px: jint,
     height_px: jint,
 ) {
     run(&mut unenv, "nativeRender", |env| {
         let mut states = states().lock().expect("android states");
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
-
-        state.viewport = Size::new(
-            width_px.max(0) as f32 / state.density,
-            height_px.max(0) as f32 / state.density,
-        );
-        state.render(env)
+        let density = session.density;
+        {
+            let Some(host_state) = session.hosts.get_mut(&(host as u64)) else {
+                return Ok(());
+            };
+            host_state.viewport = Size::new(
+                width_px.max(0) as f32 / density,
+                height_px.max(0) as f32 / density,
+            );
+        }
+        session.render_all(env)
     });
 }
 
@@ -1558,25 +1767,28 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnCli
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     node_id: jlong,
 ) {
     run(&mut unenv, "nativeOnClick", |env| {
         let Some(mut states) = lock_states_for_event() else {
             return Ok(());
         };
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
 
         let id = NodeId(node_id as u64);
-        let action = state
-            .runtime
-            .click(id)
-            .or_else(|| state.row_actions.get(&id).and_then(|row| row.click.clone()));
+        let action = session.hosts.get(&(host as u64)).and_then(|state| {
+            state
+                .runtime
+                .click(id)
+                .or_else(|| state.row_actions.get(&id).and_then(|row| row.click.clone()))
+        });
         if let Some(action) = action
-            && state.app.handle(Event::Click { action: &action })
+            && session.app.handle(Event::Click { action: &action })
         {
-            state.render(env)?;
+            session.render_all(env)?;
         }
         Ok(())
     });
@@ -1590,6 +1802,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnTex
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     node_id: jlong,
     text: JString<'caller>,
 ) {
@@ -1598,22 +1811,24 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnTex
         let Some(mut states) = lock_states_for_event() else {
             return Ok(());
         };
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
 
         let id = NodeId(node_id as u64);
-        let action = state
-            .runtime
-            .text_field_action(id)
-            .or_else(|| state.row_actions.get(&id).and_then(|row| row.text.clone()));
+        let action = session.hosts.get(&(host as u64)).and_then(|state| {
+            state
+                .runtime
+                .text_field_action(id)
+                .or_else(|| state.row_actions.get(&id).and_then(|row| row.text.clone()))
+        });
         if let Some(action) = action
-            && state.app.handle(Event::TextChanged {
+            && session.app.handle(Event::TextChanged {
                 action: &action,
                 value: &value,
             })
         {
-            state.render(env)?;
+            session.render_all(env)?;
         }
         Ok(())
     });
@@ -1625,27 +1840,30 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSub
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     node_id: jlong,
 ) {
     run(&mut unenv, "nativeOnSubmitted", |env| {
         let Some(mut states) = lock_states_for_event() else {
             return Ok(());
         };
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
 
         let id = NodeId(node_id as u64);
-        let action = state.runtime.text_field_submit_action(id).or_else(|| {
-            state
-                .row_actions
-                .get(&id)
-                .and_then(|row| row.submit.clone())
+        let action = session.hosts.get(&(host as u64)).and_then(|state| {
+            state.runtime.text_field_submit_action(id).or_else(|| {
+                state
+                    .row_actions
+                    .get(&id)
+                    .and_then(|row| row.submit.clone())
+            })
         });
         if let Some(action) = action
-            && state.app.handle(Event::Submitted { action: &action })
+            && session.app.handle(Event::Submitted { action: &action })
         {
-            state.render(env)?;
+            session.render_all(env)?;
         }
         Ok(())
     });
@@ -1659,6 +1877,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFoc
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     node_id: jlong,
     focused: jboolean,
     attached: jboolean,
@@ -1667,54 +1886,60 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFoc
         let Some(mut states) = lock_states_for_event() else {
             return Ok(());
         };
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
 
         let id = NodeId(node_id as u64);
-        let row = state.row_nodes.get(&id).copied();
-        let is_row = row.is_some();
-        let focus_changed = if focused {
-            match row {
-                Some((list, index)) => state.runtime.set_row_focus(list, index, id, true),
-                None => state.runtime.set_focus(id, true),
-            }
-        } else if let Some((list, index)) = row {
-            if attached {
-                state.runtime.set_row_focus(list, index, id, false)
-            } else {
-                // The field is losing focus because its row is being torn
-                // down, not because the user moved on.
+        let (is_row, focus_changed, action) = {
+            let Some(state) = session.hosts.get_mut(&(host as u64)) else {
+                return Ok(());
+            };
+            let row = state.row_nodes.get(&id).copied();
+            let is_row = row.is_some();
+            let focus_changed = if focused {
+                match row {
+                    Some((list, index)) => state.runtime.set_row_focus(list, index, id, true),
+                    None => state.runtime.set_focus(id, true),
+                }
+            } else if let Some((list, index)) = row {
+                if attached {
+                    state.runtime.set_row_focus(list, index, id, false)
+                } else {
+                    // The field is losing focus because its row is being torn
+                    // down, not because the user moved on.
+                    state.runtime.park_row_focus(id);
+                    false
+                }
+            } else if state
+                .runtime
+                .row_focus()
+                .is_some_and(|focus| focus.field == id)
+            {
+                // The row was unbound before the deferred blur arrived.
                 state.runtime.park_row_focus(id);
                 false
-            }
-        } else if state
-            .runtime
-            .row_focus()
-            .is_some_and(|focus| focus.field == id)
-        {
-            // The row was unbound before the deferred blur arrived.
-            state.runtime.park_row_focus(id);
-            false
-        } else {
-            state.runtime.set_focus(id, false)
+            } else {
+                state.runtime.set_focus(id, false)
+            };
+            let action = state
+                .runtime
+                .text_field_focus_action(id)
+                .or_else(|| state.row_actions.get(&id).and_then(|row| row.focus.clone()));
+            (is_row, focus_changed, action)
         };
 
-        let handled = state
-            .runtime
-            .text_field_focus_action(id)
-            .or_else(|| state.row_actions.get(&id).and_then(|row| row.focus.clone()))
-            .is_some_and(|action| {
-                state.app.handle(Event::FocusChanged {
-                    action: &action,
-                    focused,
-                })
-            });
+        let handled = action.is_some_and(|action| {
+            session.app.handle(Event::FocusChanged {
+                action: &action,
+                focused,
+            })
+        });
         // Row focus is bookkeeping only; the visible widgets did not change, so
         // a render here would needlessly rebind the recycler and can feed back
         // into focus handling.
         if (!is_row && focus_changed) || handled {
-            state.render(env)?;
+            session.render_all(env)?;
         }
         Ok(())
     });
@@ -1728,6 +1953,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeResto
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     node_id: jlong,
     holder_id: jlong,
 ) {
@@ -1735,7 +1961,10 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeResto
         let Some(mut states) = lock_states_for_event() else {
             return Ok(());
         };
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+        let Some(state) = session.hosts.get_mut(&(host as u64)) else {
             return Ok(());
         };
         let list = NodeId(node_id as u64);
@@ -1788,6 +2017,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnChe
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     node_id: jlong,
     checked: jboolean,
 ) {
@@ -1795,24 +2025,26 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnChe
         let Some(mut states) = lock_states_for_event() else {
             return Ok(());
         };
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
 
         let id = NodeId(node_id as u64);
-        let action = state.runtime.toggle_action(id).or_else(|| {
-            state
-                .row_actions
-                .get(&id)
-                .and_then(|row| row.toggle.clone())
+        let action = session.hosts.get(&(host as u64)).and_then(|state| {
+            state.runtime.toggle_action(id).or_else(|| {
+                state
+                    .row_actions
+                    .get(&id)
+                    .and_then(|row| row.toggle.clone())
+            })
         });
         if let Some(action) = action
-            && state.app.handle(Event::Toggled {
+            && session.app.handle(Event::Toggled {
                 action: &action,
                 checked,
             })
         {
-            state.render(env)?;
+            session.render_all(env)?;
         }
         Ok(())
     });
@@ -1826,6 +2058,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSli
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     node_id: jlong,
     value: jfloat,
 ) {
@@ -1833,32 +2066,39 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSli
         let Some(mut states) = lock_states_for_event() else {
             return Ok(());
         };
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
 
         let id = NodeId(node_id as u64);
-        let action = state
-            .runtime
-            .slider_action(id)
-            .or_else(|| state.row_actions.get(&id).and_then(|row| row.value.clone()));
-        let config = state.runtime.slider_config(id).or_else(|| {
-            state
-                .row_actions
-                .get(&id)
-                .map(|row| (row.value_min, row.value_max, row.value_step))
-        });
+        let (action, config) = session
+            .hosts
+            .get(&(host as u64))
+            .map(|state| {
+                let action = state
+                    .runtime
+                    .slider_action(id)
+                    .or_else(|| state.row_actions.get(&id).and_then(|row| row.value.clone()));
+                let config = state.runtime.slider_config(id).or_else(|| {
+                    state
+                        .row_actions
+                        .get(&id)
+                        .map(|row| (row.value_min, row.value_max, row.value_step))
+                });
+                (action, config)
+            })
+            .unwrap_or((None, None));
         let value = match config {
             Some((min, max, step)) => snap_slider_value(value, min, max, step),
             None => value,
         };
         if let Some(action) = action
-            && state.app.handle(Event::ValueChanged {
+            && session.app.handle(Event::ValueChanged {
                 action: &action,
                 value,
             })
         {
-            state.render(env)?;
+            session.render_all(env)?;
         }
         Ok(())
     });
@@ -1872,6 +2112,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnDat
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     node_id: jlong,
     year: jint,
     month: jint,
@@ -1881,24 +2122,26 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnDat
         let Some(mut states) = lock_states_for_event() else {
             return Ok(());
         };
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
 
         let id = NodeId(node_id as u64);
-        let action = state
-            .runtime
-            .date_picker_action(id)
-            .or_else(|| state.row_actions.get(&id).and_then(|row| row.date.clone()));
+        let action = session.hosts.get(&(host as u64)).and_then(|state| {
+            state
+                .runtime
+                .date_picker_action(id)
+                .or_else(|| state.row_actions.get(&id).and_then(|row| row.date.clone()))
+        });
         let date =
             crate::ui::DateValue::new(year, month.clamp(0, 255) as u8, day.clamp(0, 255) as u8);
         if let Some(action) = action
-            && state.app.handle(Event::DateChanged {
+            && session.app.handle(Event::DateChanged {
                 action: &action,
                 date,
             })
         {
-            state.render(env)?;
+            session.render_all(env)?;
         }
         Ok(())
     });
@@ -1912,6 +2155,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnRad
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     node_id: jlong,
     index: jint,
 ) {
@@ -1919,24 +2163,26 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnRad
         let Some(mut states) = lock_states_for_event() else {
             return Ok(());
         };
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
 
         let id = NodeId(node_id as u64);
-        let action = state.runtime.radio_group_action(id).or_else(|| {
-            state
-                .row_actions
-                .get(&id)
-                .and_then(|row| row.selected.clone())
+        let action = session.hosts.get(&(host as u64)).and_then(|state| {
+            state.runtime.radio_group_action(id).or_else(|| {
+                state
+                    .row_actions
+                    .get(&id)
+                    .and_then(|row| row.selected.clone())
+            })
         });
         if let Some(action) = action
-            && state.app.handle(Event::Selected {
+            && session.app.handle(Event::Selected {
                 action: &action,
                 index: index.max(0) as usize,
             })
         {
-            state.render(env)?;
+            session.render_all(env)?;
         }
         Ok(())
     });
@@ -1952,6 +2198,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnScr
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     node_id: jlong,
     offset_px: jfloat,
 ) {
@@ -1959,13 +2206,18 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnScr
         let Some(mut states) = lock_states_for_event() else {
             return Ok(());
         };
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
 
-        let offset = offset_px.max(0.0) / state.density;
-        if state.runtime.scroll(NodeId(node_id as u64), offset) {
-            state.render(env)?;
+        let density = session.density;
+        let changed = session.hosts.get_mut(&(host as u64)).is_some_and(|state| {
+            state
+                .runtime
+                .scroll(NodeId(node_id as u64), offset_px.max(0.0) / density)
+        });
+        if changed {
+            session.render_all(env)?;
         }
         Ok(())
     });
@@ -1985,12 +2237,12 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnBac
         let Some(mut states) = lock_states_for_event() else {
             return Ok(false as jboolean);
         };
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
             return Ok(false as jboolean);
         };
-        let handled = state.app.handle(Event::Back);
+        let handled = session.app.handle(Event::Back);
         if handled {
-            state.render(env)?;
+            session.render_all(env)?;
         }
         Ok(handled as jboolean)
     })
@@ -2005,15 +2257,19 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeBindR
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     node_id: jlong,
     index: jint,
     holder_id: jlong,
-    host: JObject<'caller>,
+    holder_host: JObject<'caller>,
     width_px: jint,
 ) -> jint {
     run(&mut unenv, "nativeBindRow", |env| {
         let mut states = states().lock().expect("android states");
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
+            return Ok(0);
+        };
+        let Some(state) = session.hosts.get_mut(&(host as u64)) else {
             return Ok(0);
         };
         state.bind_row(
@@ -2021,7 +2277,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeBindR
             NodeId(node_id as u64),
             index.max(0) as usize,
             holder_id,
-            &host,
+            &holder_host,
             width_px,
         )
     })
@@ -2033,6 +2289,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeUnbin
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
+    host: jlong,
     node_id: jlong,
     holder_id: jlong,
 ) {
@@ -2043,10 +2300,12 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeUnbin
         let Some(mut states) = lock_states_for_event() else {
             return Ok(());
         };
-        let Some(state) = states.get_mut(&handle) else {
+        let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
-        state.unbind_row(NodeId(node_id as u64), holder_id);
+        if let Some(state) = session.hosts.get_mut(&(host as u64)) {
+            state.unbind_row(NodeId(node_id as u64), holder_id);
+        }
         Ok(())
     });
 }
@@ -2059,16 +2318,106 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeDestr
     handle: jlong,
 ) {
     run(&mut unenv, "nativeDestroy", |env| {
-        if let Some(state) = states().lock().expect("android states").remove(&handle) {
-            let _ = jcall!(
-                env,
-                env.call_method(
-                    state.root.as_obj(),
-                    jni_str!("removeAllViews"),
-                    jni_sig!("()V"),
-                    &[],
-                )
-            )?;
+        if let Some(session) = states().lock().expect("android states").remove(&handle) {
+            for host in session.hosts.values() {
+                let _ = jcall!(
+                    env,
+                    env.call_method(
+                        host.root.as_obj(),
+                        jni_str!("removeAllViews"),
+                        jni_sig!("()V"),
+                        &[],
+                    )
+                )?;
+            }
+        }
+        Ok(())
+    });
+}
+
+/// Attaches a newly created native host view to its session.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeAttachHost<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    this: JObject<'caller>,
+    handle: jlong,
+    host: jlong,
+) {
+    run(&mut unenv, "nativeAttachHost", |env| {
+        let mut states = states().lock().expect("android states");
+        let Some(session) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+        session.attach_host(env, host as u64, &this)?;
+        session.render_all(env)
+    });
+}
+
+/// Registers the native controller that owns navigation and modals.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeSetController<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    controller: JObject<'caller>,
+) {
+    run(&mut unenv, "nativeSetController", |env| {
+        let mut states = states().lock().expect("android states");
+        let Some(session) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+        session.controller = Some(env.new_global_ref(&controller)?);
+        session.render_all(env)
+    });
+}
+
+/// Dispatches the native dismissal of the presented dialog or sheet.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnModalDismiss<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+) {
+    run(&mut unenv, "nativeOnModalDismiss", |env| {
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        let Some(session) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+        let Some(action) = session
+            .app
+            .presentation()
+            .map(|presentation| presentation.dismiss_action)
+        else {
+            return Ok(());
+        };
+        if session.app.handle(Event::Click { action: &action }) {
+            session.render_all(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Drops one host after its native view is destroyed.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeDestroyHost<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    host: jlong,
+) {
+    run(&mut unenv, "nativeDestroyHost", |_env| {
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        if let Some(session) = states.get_mut(&handle) {
+            session.hosts.remove(&(host as u64));
+            session.pending.remove(&(host as u64));
         }
         Ok(())
     });

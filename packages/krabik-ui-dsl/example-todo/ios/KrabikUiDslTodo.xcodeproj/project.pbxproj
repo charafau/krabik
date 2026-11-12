@@ -11,6 +11,7 @@
 		5CE8E0033CAEC36956F8A9DB /* TodoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B0BE32F9908125C57BFDD1C /* TodoUITests.swift */; };
 		6F10E789C10DA25F54C72B81 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 409060E09B6C2FFC7B98F37D /* ContentView.swift */; };
 		C132D77579A262A5A7D63EE1 /* RustRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AAA2ECDFB461E8EB1E85CA /* RustRootView.swift */; };
+		D930CDABF105EFFA0E77E1EB /* KrabikHostController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F1239FC9C5EFA193D42B63 /* KrabikHostController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -29,6 +30,7 @@
 		7B0BE32F9908125C57BFDD1C /* TodoUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoUITests.swift; sourceTree = "<group>"; };
 		A15017F18E423BBD9056855B /* KrabikUiDslTodoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikUiDslTodoApp.swift; sourceTree = "<group>"; };
 		C1AAA2ECDFB461E8EB1E85CA /* RustRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustRootView.swift; sourceTree = "<group>"; };
+		C1F1239FC9C5EFA193D42B63 /* KrabikHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikHostController.swift; sourceTree = "<group>"; };
 		C7B7F5462AA6EB9DFA4C43EE /* KrabikUiDslTodoUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = KrabikUiDslTodoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CFF21142C60E2B95CC7C2C19 /* KrabikUiDslTodo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KrabikUiDslTodo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -64,6 +66,7 @@
 			isa = PBXGroup;
 			children = (
 				409060E09B6C2FFC7B98F37D /* ContentView.swift */,
+				C1F1239FC9C5EFA193D42B63 /* KrabikHostController.swift */,
 				24F7EA904233276E8253AEA1 /* KrabikIOS.h */,
 				A15017F18E423BBD9056855B /* KrabikUiDslTodoApp.swift */,
 				C1AAA2ECDFB461E8EB1E85CA /* RustRootView.swift */,
@@ -157,6 +160,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6F10E789C10DA25F54C72B81 /* ContentView.swift in Sources */,
+				D930CDABF105EFFA0E77E1EB /* KrabikHostController.swift in Sources */,
 				31E11950D56D2DBEAF64D82A /* KrabikUiDslTodoApp.swift in Sources */,
 				C132D77579A262A5A7D63EE1 /* RustRootView.swift in Sources */,
 			);

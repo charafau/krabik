@@ -1,12 +1,12 @@
 import UIKit
 
-/// The only UIView the Rust UI owns.
+/// One Rust-rendered host view.
 ///
-/// Rust creates every native widget as a subview, gives it an exact frame, and
-/// receives its events. No layout happens in Swift beyond forwarding the
-/// viewport size.
-final class RustRootView: UIView {
-    private var handle: UInt64 = 0
+/// The main host is created by `krabik_ios_create`; child hosts attach with a
+/// session/host pair and are used by navigation screens and modals.
+final class RustHostView: UIView {
+    private var session: UInt64 = 0
+    private var host: UInt64 = 0
     private var renderedSize: CGSize = .zero
     private var pendingRender = false
 
@@ -14,12 +14,31 @@ final class RustRootView: UIView {
         super.init(frame: frame)
         backgroundColor = .white
         clipsToBounds = true
-        handle = krabik_ios_create(
-            Unmanaged.passUnretained(self).toOpaque(),
-            Double(frame.width),
-            Double(frame.height)
-        )
-        renderedSize = frame.size
+    }
+
+    /// Binds the main host created by the session.
+    func bindMain(session: UInt64) {
+        self.session = session
+        self.host = 0
+        renderedSize = .zero
+        setNeedsLayout()
+    }
+
+    /// Binds a child host and attaches it to the session.
+    ///
+    /// The native controller creates hosts while Rust holds the session lock,
+    /// so the attach itself is deferred to the next main-queue turn.
+    func bind(session: UInt64, host: UInt64) {
+        self.session = session
+        self.host = host
+        renderedSize = .zero
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.session == session, self.host == host else {
+                return
+            }
+            krabik_ios_attach_host(session, host, Unmanaged.passUnretained(self).toOpaque())
+            self.setNeedsLayout()
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -29,7 +48,7 @@ final class RustRootView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
 
-        guard handle != 0, bounds.width > 0, bounds.height > 0 else {
+        guard session != 0, bounds.width > 0, bounds.height > 0 else {
             return
         }
         guard bounds.size != renderedSize, !pendingRender else {
@@ -42,7 +61,7 @@ final class RustRootView: UIView {
         // mutex, so coalesce and defer to the next main-queue turn.
         pendingRender = true
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.handle != 0 else {
+            guard let self, self.session != 0 else {
                 return
             }
             self.pendingRender = false
@@ -51,13 +70,18 @@ final class RustRootView: UIView {
                 return
             }
             self.renderedSize = size
-            krabik_ios_render(self.handle, Double(size.width), Double(size.height))
+            krabik_ios_render(
+                self.session,
+                self.host,
+                Double(size.width),
+                Double(size.height)
+            )
         }
     }
 
     deinit {
-        if handle != 0 {
-            krabik_ios_destroy(handle)
+        if session != 0 && host != 0 {
+            krabik_ios_destroy_host(session, host)
         }
     }
 }
