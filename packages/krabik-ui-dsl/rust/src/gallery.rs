@@ -7,9 +7,10 @@ use std::sync::Arc;
 
 use crate::app::{App, Event};
 use crate::ui::{
-    Align, Button, Checkbox, Column, CornerRadii, EdgeInsets, Element, Gradient, Image, ImageScale,
-    ImageSource, ImeAction, Justify, KeyboardType, List, ProgressIndicator, RadioGroup, Row,
-    ScrollView, Slider, Spacer, Switch, Text, TextAlign, TextField,
+    Align, Button, Checkbox, Column, CornerRadii, DatePicker, DateValue, EdgeInsets, Element,
+    Gradient, Image, ImageScale, ImageSource, ImeAction, Justify, KeyboardType, List,
+    ProgressIndicator, RadioGroup, Row, ScrollView, Slider, Spacer, Switch, Text, TextAlign,
+    TextField,
 };
 
 pub const COLOR_MUTED: u32 = 0xFF66_6666;
@@ -62,6 +63,8 @@ pub struct GalleryApp {
     pub volume: f32,
     /// Stepped slider value in the controls demo.
     pub stepped: f32,
+    /// Date selected in the controls demo.
+    pub date: DateValue,
     /// The thousand rows of the virtualized list demo, shared across rebuilds.
     pub list_items: Arc<Vec<String>>,
     /// Rows of mixed height for the measured-list demo.
@@ -93,6 +96,7 @@ impl Default for GalleryApp {
             size_choice: 1,
             volume: 40.0,
             stepped: 30.0,
+            date: DateValue::new(2026, 11, 12),
             list_items: Arc::new((1..=1000).map(|index| format!("Row {index}")).collect()),
             recycled_taps: 0,
             recycled_bumps: 0,
@@ -784,6 +788,12 @@ impl GalleryApp {
                             .accessibility_label("Loading spinner")
                             .width(24)
                             .height(24),
+                    )
+                    .child(Text::new(format!("Date: {}", self.date)).size(18))
+                    .child(
+                        DatePicker::new(self.date)
+                            .action("controls:date")
+                            .accessibility_label("Date"),
                     ),
             )
             .into()
@@ -915,6 +925,10 @@ impl App for GalleryApp {
                 action: "controls:stepped",
                 value,
             } => self.stepped = value,
+            Event::DateChanged {
+                action: "controls:date",
+                date,
+            } => self.date = date,
             Event::Click { action } => match action {
                 "back" => self.demo = Demo::Gallery,
                 "open:counter" => {
@@ -1036,6 +1050,12 @@ mod tests {
             value: 70.0,
         }));
         assert_eq!(app.stepped, 70.0);
+
+        assert!(app.handle(Event::DateChanged {
+            action: "controls:date",
+            date: DateValue::new(2027, 1, 2),
+        }));
+        assert_eq!(app.date, DateValue::new(2027, 1, 2));
     }
 
     #[test]

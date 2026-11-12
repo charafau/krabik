@@ -48,6 +48,9 @@ final class GalleryUITests: XCTestCase {
         stepped.adjust(toNormalizedSliderPosition: 1.0)
         XCTAssertTrue(app.staticTexts["Stepped: 100"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.activityIndicators.firstMatch.exists)
+
+        XCTAssertTrue(app.staticTexts["Date: 2026-11-12"].waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(app.datePickers.count, 1)
         capture("16-controls")
     }
 
