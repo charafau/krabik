@@ -54,9 +54,9 @@ pub enum Event<'a> {
         /// The new value.
         value: f32,
     },
-    /// The selection of a radio group changed.
+    /// The selection of a radio group or tab bar changed.
     Selected {
-        /// The action configured on the radio group.
+        /// The action configured on the radio group or tab bar.
         action: &'a str,
         /// The index of the newly selected option.
         index: usize,
@@ -67,6 +67,22 @@ pub enum Event<'a> {
         action: &'a str,
         /// The newly selected date.
         date: crate::ui::DateValue,
+    },
+    /// The time of a time picker changed.
+    TimeChanged {
+        /// The action configured on the time picker.
+        action: &'a str,
+        /// The newly selected time.
+        time: crate::ui::TimeValue,
+    },
+    /// The date and time of a date-and-time picker changed.
+    DateTimeChanged {
+        /// The action configured on the picker.
+        action: &'a str,
+        /// The newly selected date.
+        date: crate::ui::DateValue,
+        /// The newly selected time.
+        time: crate::ui::TimeValue,
     },
     /// The user asked to go back, usually from Android's system back button.
     Back,
@@ -83,7 +99,9 @@ impl Event<'_> {
             | Self::Toggled { action, .. }
             | Self::ValueChanged { action, .. }
             | Self::Selected { action, .. }
-            | Self::DateChanged { action, .. } => action,
+            | Self::DateChanged { action, .. }
+            | Self::TimeChanged { action, .. }
+            | Self::DateTimeChanged { action, .. } => action,
             Self::Back => "",
         }
     }

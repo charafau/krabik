@@ -8,9 +8,11 @@ import androidx.test.espresso.action.GeneralSwipeAction
 import androidx.test.espresso.action.Press
 import androidx.test.espresso.action.Swipe
 import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.action.ViewActions.swipeUp
 import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -51,6 +53,24 @@ class ShowcaseTest {
             onView(withText("Compact: 2026-11-12")).check(matches(isDisplayed()))
             onView(withContentDescription("Inline date"))
                 .perform(androidx.test.espresso.action.ViewActions.scrollTo())
+                .check(matches(isDisplayed()))
+            onView(withText("Time: 10:30")).perform(
+                androidx.test.espresso.action.ViewActions.scrollTo(),
+            )
+            onView(withText("10:30")).perform(click())
+            onView(withText("OK")).perform(click())
+            onView(withText("Time: 10:30")).check(matches(isDisplayed()))
+            onView(isRoot()).perform(swipeUp())
+            onView(withContentDescription("Date and time")).check(matches(isDisplayed()))
+            onView(withContentDescription("Bounded date")).check(matches(isDisplayed()))
+            onView(withText("Bounded: 2026-06-15")).check(matches(isDisplayed()))
+            tapBack()
+
+            openPage("Tabs")
+            onView(withText("Overview: the first tab is selected by default."))
+                .check(matches(isDisplayed()))
+            onView(withText("Settings")).perform(click())
+            onView(withText("Settings: tapping a tab reports Event::Selected."))
                 .check(matches(isDisplayed()))
             tapBack()
 
