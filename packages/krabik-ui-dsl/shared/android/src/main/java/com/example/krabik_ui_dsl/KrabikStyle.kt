@@ -6,6 +6,11 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.Interpolator
+import android.view.animation.LinearInterpolator
 import java.util.WeakHashMap
 
 /**
@@ -38,6 +43,8 @@ object KrabikStyle {
         opacity: Float,
         ripple: Boolean,
         elevation: Float,
+        animationDuration: Int,
+        animationCurve: Int,
     ) {
         val density = view.resources.displayMetrics.density
         val borderPx = borderWidth * density
@@ -98,8 +105,27 @@ object KrabikStyle {
         }
 
         view.clipToOutline = radii.any { it > 0f }
-        view.alpha = opacity.coerceIn(0f, 1f)
         view.elevation = (elevation * density).coerceAtLeast(0f)
+
+        val targetAlpha = opacity.coerceIn(0f, 1f)
+        if (animationDuration > 0) {
+            view.animate()
+                .setDuration(animationDuration.toLong())
+                .setInterpolator(interpolator(animationCurve))
+                .alpha(targetAlpha)
+        } else {
+            view.animate().cancel()
+            view.alpha = targetAlpha
+        }
+    }
+
+    /** The native interpolator for a shared animation curve code. */
+    @JvmStatic
+    fun interpolator(curve: Int): Interpolator = when (curve) {
+        1 -> LinearInterpolator()
+        2 -> AccelerateInterpolator()
+        3 -> DecelerateInterpolator()
+        else -> AccelerateDecelerateInterpolator()
     }
 
     /**

@@ -139,11 +139,12 @@ The Rust tests cover navigation, presentation and widget state, plus the checkli
 UI tests drive the catalog and the native hosts:
 
 - **Android** (`ShowcaseTest`, `ChecklistTest`, `LayoutTest`) opens the radio group, slider,
-  date picker, progress, spinner, image and recycled-list pages, checks the indeterminate spinner,
-  the windowed list and system back, then dismisses a dialog and a bottom sheet, runs the
-  checklist flow and the frame-registry checks.
+  date picker, tabs, animations, progress, spinner, image and recycled-list pages, checks the
+  indeterminate spinner, the windowed list and system back, then dismisses a dialog and a bottom
+  sheet, runs the checklist flow and the frame-registry checks.
 - **iOS** (`ShowcaseUITests`, `ChecklistUITests`) runs the same flow through XCUITest, including
-  the radio-group selection, stepped slider, spinner and windowed list.
+  the radio-group selection, stepped slider, date picker kinds, tab selection, animated panel,
+  spinner and windowed list.
 
 Both platforms include the checklist page, so the tests still cover per-row actions built at
 runtime and in-place text updates.

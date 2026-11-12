@@ -37,6 +37,7 @@ pub struct ShowcaseApp {
     bluetooth: bool,
     radio_choice: usize,
     size_choice: usize,
+    animations: bool,
     date: DateValue,
     inline_date: DateValue,
     time: TimeValue,
@@ -68,6 +69,7 @@ impl ShowcaseApp {
             bluetooth: false,
             radio_choice: 1,
             size_choice: 1,
+            animations: true,
             date: DateValue::new(2026, 11, 12),
             inline_date: DateValue::new(2026, 11, 12),
             time: TimeValue::new(10, 30),
@@ -228,6 +230,10 @@ impl App for ShowcaseApp {
                 }
                 "demo:recycled-tap" => {
                     self.recycled_taps += 1;
+                    true
+                }
+                "demo:animate" => {
+                    self.animations = !self.animations;
                     true
                 }
                 "dialog:open" => {
@@ -531,6 +537,16 @@ mod tests {
             action: "demo:tab",
             index: 9,
         }));
+    }
+
+    #[test]
+    fn animations_toggle() {
+        let mut app = app();
+        assert!(app.animations);
+        assert!(app.handle(click("demo:animate")));
+        assert!(!app.animations);
+        assert!(app.handle(click("demo:animate")));
+        assert!(app.animations);
     }
 
     #[test]

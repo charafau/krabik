@@ -528,10 +528,11 @@ impl AndroidState {
                 id,
                 frame,
                 content_size,
+                animation,
             } => {
                 if let Some(handle) = views.get(&id) {
                     if let Some(batch) = frames.as_mut() {
-                        batch.push(id, frame, self.density);
+                        batch.push(id, frame, self.density, animation);
                     } else {
                         apply_frame(
                             env,
@@ -730,7 +731,7 @@ impl AndroidState {
             )?;
         }
         apply_padding(env, &view, node.style.padding, self.density)?;
-        apply_style(env, &view, node)?;
+        apply_style(env, &view, node, false)?;
         apply_accessibility(env, &view, node)?;
         set_tag(env, &view, node.id.0 as jlong)?;
         if register {
@@ -1018,7 +1019,7 @@ fn update_view(
         update_text(env, view, &node.kind)?;
     }
     apply_padding(env, view, node.style.padding, density)?;
-    apply_style(env, view, node)?;
+    apply_style(env, view, node, true)?;
     apply_accessibility(env, view, node)
 }
 
@@ -1435,13 +1436,22 @@ fn apply_padding(
     Ok(())
 }
 
-fn apply_style(env: &mut Env<'_>, view: &JObject<'_>, node: &RenderNode) -> JniResult<()> {
+fn apply_style(
+    env: &mut Env<'_>,
+    view: &JObject<'_>,
+    node: &RenderNode,
+    animate: bool,
+) -> JniResult<()> {
     let ids = jni_handles(env)?;
     let background = node.style.background;
     let gradient = node.style.gradient;
     let radii = node.style.corner_radii();
     let border = node.style.border;
     let ripple = matches!(node.kind, NodeKind::Button(_));
+    let animation = animate
+        .then_some(node.style.animation)
+        .flatten()
+        .filter(|animation| animation.duration_ms > 0);
 
     ids.apply_style.call_void(
         env,
@@ -1469,6 +1479,10 @@ fn apply_style(env: &mut Env<'_>, view: &JObject<'_>, node: &RenderNode) -> JniR
             JValue::Float(node.style.opacity.unwrap_or(1.0)),
             JValue::Bool(ripple),
             JValue::Float(node.style.elevation),
+            JValue::Int(animation.map_or(0, |animation| {
+                animation.duration_ms.min(i32::MAX as u32) as jint
+            })),
+            JValue::Int(animation.map_or(0, |animation| animation.curve.code())),
         ],
     )?;
     Ok(())
@@ -1536,15 +1550,21 @@ fn apply_frame(
 
 /// Applies a batch of node frames with one call into `RustRootView`.
 fn apply_layouts(env: &mut Env<'_>, root: &JObject<'_>, frames: &FrameBatch) -> JniResult<()> {
-    let ids = env.new_long_array(frames.len())?;
-    ids.set_region(env, 0, frames.ids())?;
+    let node_ids = env.new_long_array(frames.len())?;
+    node_ids.set_region(env, 0, frames.ids())?;
     let values = env.new_int_array(frames.frames().len())?;
     values.set_region(env, 0, frames.frames())?;
+    let animations = env.new_int_array(frames.animations().len())?;
+    animations.set_region(env, 0, frames.animations())?;
 
     jni_handles(env)?.apply_layouts.call_void(
         env,
         root,
-        &[JValue::Object(&ids), JValue::Object(&values)],
+        &[
+            JValue::Object(&node_ids),
+            JValue::Object(&values),
+            JValue::Object(&animations),
+        ],
     )
 }
 

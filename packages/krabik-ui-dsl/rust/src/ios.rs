@@ -24,16 +24,17 @@ use objc2_foundation::{
 };
 use objc2_quartz_core::{CACornerMask, CAGradientLayer};
 use objc2_ui_kit::{
-    NSIndexPathUIKitAdditions, NSLineBreakMode, NSObjectUIAccessibility, NSTextAlignment, UIAction,
-    UIActivityIndicatorView, UIActivityIndicatorViewStyle, UIButton, UIButtonType,
-    UICollectionView, UICollectionViewCell, UICollectionViewDataSource, UICollectionViewDelegate,
-    UICollectionViewDelegateFlowLayout, UICollectionViewFlowLayout, UICollectionViewLayout,
-    UIColor, UIControl, UIControlContentHorizontalAlignment, UIControlEvents, UIControlState,
-    UIDatePicker, UIDatePickerMode, UIDatePickerStyle, UIEdgeInsets, UIFont, UIImage, UIImageView,
+    NSIndexPathUIKitAdditions, NSLineBreakMode, NSObjectUIAccessibility, NSTextAlignment,
+    UIAccessibilityIsReduceMotionEnabled, UIAction, UIActivityIndicatorView,
+    UIActivityIndicatorViewStyle, UIButton, UIButtonType, UICollectionView, UICollectionViewCell,
+    UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDelegateFlowLayout,
+    UICollectionViewFlowLayout, UICollectionViewLayout, UIColor, UIControl,
+    UIControlContentHorizontalAlignment, UIControlEvents, UIControlState, UIDatePicker,
+    UIDatePickerMode, UIDatePickerStyle, UIEdgeInsets, UIFont, UIImage, UIImageView,
     UIKeyboardType, UILabel, UILayoutConstraintAxis, UIProgressView, UIReturnKeyType, UIScrollView,
     UIScrollViewDelegate, UISegmentedControl, UISlider, UIStackView, UIStackViewAlignment,
     UIStackViewDistribution, UISwitch, UITextBorderStyle, UITextField, UITextInputTraits, UIView,
-    UIViewContentMode,
+    UIViewAnimationOptions, UIViewContentMode,
 };
 
 use crate::app::{App, Event};
@@ -44,10 +45,10 @@ use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Axis, ButtonProps, CheckProps, DatePickerMode, DatePickerProps, DatePickerValue, DateValue,
-    EdgeInsets, Element, FontWeight, GradientDirection, ImageProps, ImageScale, ImageSource,
-    ImeAction, KeyboardType, ProgressProps, RadioGroupProps, SliderProps, SpinnerProps,
-    TabBarProps, TextAlign, TextFieldProps, TextProps, TimeValue, snap_slider_value,
+    Animation, AnimationCurve, Axis, ButtonProps, CheckProps, DatePickerMode, DatePickerProps,
+    DatePickerValue, DateValue, EdgeInsets, Element, FontWeight, GradientDirection, ImageProps,
+    ImageScale, ImageSource, ImeAction, KeyboardType, ProgressProps, RadioGroupProps, SliderProps,
+    SpinnerProps, TabBarProps, TextAlign, TextFieldProps, TextProps, TimeValue, snap_slider_value,
 };
 
 /// Measures text with an off-screen `UILabel`.
@@ -486,10 +487,11 @@ enum Content {
 }
 
 impl Content {
-    fn inset_view(&self) -> Option<&UIView> {
+    /// A retained handle to the content view inset inside its wrapper.
+    fn inset_handle(&self) -> Option<Retained<UIView>> {
         match self {
-            Self::Label(view) => Some(view),
-            Self::Field(view) => Some(view),
+            Self::Label(view) => Some(cast_view(view.clone())),
+            Self::Field(view) => Some(cast_view(view.clone())),
             _ => None,
         }
     }
@@ -590,6 +592,85 @@ enum IosHostKind {
 }
 
 /// The state of one host view in a session.
+/// The views and frames updated by one layout operation.
+///
+/// The values are owned so the same work can run directly or inside a UIKit
+/// animation block.
+struct LayoutFrames {
+    view: Retained<UIView>,
+    inset: Option<Retained<UIView>>,
+    host: Option<Retained<UIView>>,
+    scroll: Option<(Retained<UIScrollView>, Retained<UIView>, Size)>,
+    gradient: Option<Retained<CAGradientLayer>>,
+    rect: CGRect,
+    padding: EdgeInsets,
+}
+
+impl LayoutFrames {
+    fn apply(&self) {
+        self.view.setFrame(self.rect);
+
+        if let Some(content) = &self.inset {
+            content.setFrame(inset(self.rect.size, self.padding));
+        }
+        if let Some(host) = &self.host {
+            host.setFrame(inset(self.rect.size, self.padding));
+        }
+        if let Some((scroll, host, size)) = &self.scroll {
+            host.setFrame(CGRect::new(
+                CGPoint::new(f64::from(self.padding.left), f64::from(self.padding.top)),
+                CGSize::new(
+                    f64::from(size.width.max(0.0)),
+                    f64::from(size.height.max(0.0)),
+                ),
+            ));
+            scroll.setContentSize(CGSize::new(
+                f64::from(self.padding.left + size.width + self.padding.right),
+                f64::from(self.padding.top + size.height + self.padding.bottom),
+            ));
+        }
+        if let Some(gradient) = &self.gradient {
+            gradient.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), self.rect.size));
+        }
+    }
+}
+
+/// Whether a node's implicit animation should run on this device.
+fn animation_is_enabled(animation: Animation) -> bool {
+    animation.duration_ms > 0 && !UIAccessibilityIsReduceMotionEnabled()
+}
+
+/// Maps a shared animation curve onto UIKit's animation options.
+fn animation_options(curve: AnimationCurve) -> UIViewAnimationOptions {
+    let curve = match curve {
+        AnimationCurve::Linear => UIViewAnimationOptions::CurveLinear,
+        AnimationCurve::EaseIn => UIViewAnimationOptions::CurveEaseIn,
+        AnimationCurve::EaseOut => UIViewAnimationOptions::CurveEaseOut,
+        AnimationCurve::EaseInOut => UIViewAnimationOptions::CurveEaseInOut,
+    };
+    UIViewAnimationOptions::BeginFromCurrentState | curve
+}
+
+fn animate_alpha(
+    view: &Retained<UIView>,
+    start: f64,
+    target: f64,
+    animation: Animation,
+    mtm: MainThreadMarker,
+) {
+    view.setAlpha(start);
+    let view = view.clone();
+    let block = RcBlock::new(move || view.setAlpha(target));
+    UIView::animateWithDuration_delay_options_animations_completion(
+        f64::from(animation.duration_ms) / 1000.0,
+        0.0,
+        animation_options(animation.curve),
+        &block,
+        None,
+        mtm,
+    );
+}
+
 struct IosState {
     handle: u64,
     host: u64,
@@ -679,9 +760,23 @@ impl IosState {
             }
             Op::Update(node) => {
                 if let Some(handle) = views.get_mut(&node.id) {
+                    let previous_alpha = handle.view.alpha();
                     update_content(&mut handle.content, &node, self.handle, self.host, mtm);
                     apply_style(&handle.view, &node, &mut handle.gradient);
                     apply_accessibility(&handle.view, &node, mtm);
+                    if let Some(animation) = node
+                        .style
+                        .animation
+                        .filter(|animation| animation_is_enabled(*animation))
+                    {
+                        animate_alpha(
+                            &handle.view,
+                            previous_alpha,
+                            f64::from(node.style.opacity.unwrap_or(1.0)),
+                            animation,
+                            mtm,
+                        );
+                    }
                 }
                 // Image updates can start downloads, which needs the state
                 // itself, so they are handled separately from `update_content`.
@@ -728,7 +823,8 @@ impl IosState {
                 id,
                 frame,
                 content_size,
-            } => IosState::apply_layout(views, id, frame, content_size),
+                animation,
+            } => IosState::apply_layout(views, id, frame, content_size, animation, mtm),
         }
     }
 
@@ -959,6 +1055,8 @@ impl IosState {
         id: NodeId,
         frame: Rect,
         content_size: Option<Size>,
+        animation: Option<Animation>,
+        mtm: MainThreadMarker,
     ) {
         let Some(handle) = views.get_mut(&id) else {
             return;
@@ -971,37 +1069,40 @@ impl IosState {
                 f64::from(frame.height.max(0.0)),
             ),
         );
-        handle.view.setFrame(rect);
         handle.frame = Some(frame);
 
-        if let Some(content) = handle.content.inset_view() {
-            content.setFrame(inset(rect.size, handle.padding));
-        }
+        let frames = LayoutFrames {
+            view: handle.view.clone(),
+            inset: handle.content.inset_handle(),
+            host: match &handle.content {
+                Content::Host(host) => Some(host.clone()),
+                _ => None,
+            },
+            scroll: match &handle.content {
+                Content::Scroll { scroll, host, .. } => Some((
+                    scroll.clone(),
+                    host.clone(),
+                    content_size.unwrap_or(Size::ZERO),
+                )),
+                _ => None,
+            },
+            gradient: handle.gradient.clone(),
+            rect,
+            padding: handle.padding,
+        };
 
-        match &handle.content {
-            Content::Host(host) => host.setFrame(inset(rect.size, handle.padding)),
-            Content::Scroll { scroll, host, .. } => {
-                let size = content_size.unwrap_or(Size::ZERO);
-                host.setFrame(CGRect::new(
-                    CGPoint::new(
-                        f64::from(handle.padding.left),
-                        f64::from(handle.padding.top),
-                    ),
-                    CGSize::new(
-                        f64::from(size.width.max(0.0)),
-                        f64::from(size.height.max(0.0)),
-                    ),
-                ));
-                scroll.setContentSize(CGSize::new(
-                    f64::from(handle.padding.left + size.width + handle.padding.right),
-                    f64::from(handle.padding.top + size.height + handle.padding.bottom),
-                ));
-            }
-            _ => {}
-        }
-
-        if let Some(gradient) = &handle.gradient {
-            gradient.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), rect.size));
+        if let Some(animation) = animation.filter(|animation| animation_is_enabled(*animation)) {
+            let block = RcBlock::new(move || frames.apply());
+            UIView::animateWithDuration_delay_options_animations_completion(
+                f64::from(animation.duration_ms) / 1000.0,
+                0.0,
+                animation_options(animation.curve),
+                &block,
+                None,
+                mtm,
+            );
+        } else {
+            frames.apply();
         }
     }
 

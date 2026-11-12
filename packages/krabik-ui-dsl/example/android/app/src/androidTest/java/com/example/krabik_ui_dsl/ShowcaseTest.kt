@@ -74,6 +74,14 @@ class ShowcaseTest {
                 .check(matches(isDisplayed()))
             tapBack()
 
+            openPage("Animations")
+            onView(withText("Panel is open.")).check(matches(isDisplayed()))
+            onView(withText("Hide panel")).perform(click())
+            onView(withText("Panel is closed.")).check(matches(isDisplayed()))
+            onView(withText("Show panel")).perform(click())
+            onView(withText("Panel is open.")).check(matches(isDisplayed()))
+            tapBack()
+
             openPage("Progress")
             onView(withText("Set 100%")).perform(click())
             onView(withText("100%")).check(matches(isDisplayed()))

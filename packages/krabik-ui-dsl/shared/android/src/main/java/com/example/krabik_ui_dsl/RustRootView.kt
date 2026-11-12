@@ -1,5 +1,6 @@
 package com.example.krabik_ui_dsl
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.util.LongSparseArray
 import android.view.View
@@ -7,6 +8,8 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import java.lang.ref.WeakReference
+import java.util.WeakHashMap
+import kotlin.math.roundToInt
 
 /**
  * The only Android widget the Rust UI owns.
@@ -39,6 +42,9 @@ class RustRootView(
 
     /** Views by node id, so a layout batch can address them without an array of objects. */
     private val nodeViews = LongSparseArray<WeakReference<View>>()
+
+    /** Running frame animations, so a newer frame cancels the previous one. */
+    private val frameAnimators = WeakHashMap<View, ValueAnimator>()
 
     init {
         if (!ownsSession) {
@@ -112,18 +118,21 @@ class RustRootView(
      * another layout pass.
      */
     fun applyFrame(view: View, x: Int, y: Int, width: Int, height: Int) {
-        applyFrameInternal(view, x, y, width, height)
+        applyFrameInternal(view, x, y, width, height, 0, 0)
     }
 
     /**
      * Applies a batch of frames.
      *
      * [ids] holds one node id per frame and [frames] four integers per id in
-     * `x, y, width, height` order. Unknown ids are skipped, which can only
-     * happen for a node whose view was already removed.
+     * `x, y, width, height` order. [animations] holds two integers per id in
+     * `duration, curve` order; zero means the frame moves immediately.
+     * Unknown ids are skipped, which can only happen for a node whose view was
+     * already removed.
      */
-    fun applyLayouts(ids: LongArray, frames: IntArray) {
+    fun applyLayouts(ids: LongArray, frames: IntArray, animations: IntArray) {
         var offset = 0
+        var index = 0
         for (id in ids) {
             val view = nodeViews.get(id)?.get()
             if (view != null) {
@@ -133,9 +142,12 @@ class RustRootView(
                     frames[offset + 1],
                     frames[offset + 2],
                     frames[offset + 3],
+                    animations[index * 2],
+                    animations[index * 2 + 1],
                 )
             }
             offset += 4
+            index += 1
         }
     }
 
@@ -146,13 +158,67 @@ class RustRootView(
 
     /** Forgets a node's view after Rust removed it. */
     fun unregisterView(nodeId: Long) {
+        val view = nodeViews.get(nodeId)?.get()
         nodeViews.remove(nodeId)
+        if (view != null) {
+            frameAnimators.remove(view)?.cancel()
+        }
     }
 
     /** The number of registered views, for tests. */
     fun registeredViewCount(): Int = nodeViews.size()
 
-    private fun applyFrameInternal(view: View, x: Int, y: Int, width: Int, height: Int) {
+    private fun applyFrameInternal(
+        view: View,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        duration: Int,
+        curve: Int,
+    ) {
+        frameAnimators.remove(view)?.cancel()
+
+        if (duration <= 0) {
+            setFrame(view, x, y, width, height)
+            return
+        }
+
+        val startX = view.translationX
+        val startY = view.translationY
+        val startWidth = if (view.width > 0) view.width else width
+        val startHeight = if (view.height > 0) view.height else height
+
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            this.duration = duration.toLong()
+            interpolator = KrabikStyle.interpolator(curve)
+            addUpdateListener { animation ->
+                val fraction = animation.animatedValue as Float
+                view.translationX = startX + (x - startX) * fraction
+                view.translationY = startY + (y - startY) * fraction
+                setFrame(
+                    view,
+                    x = 0,
+                    y = 0,
+                    width = lerp(startWidth, width, fraction),
+                    height = lerp(startHeight, height, fraction),
+                    move = false,
+                )
+            }
+        }
+        frameAnimators[view] = animator
+        animator.start()
+    }
+
+    /** Applies a frame directly. Set [move] to false when only the size changes. */
+    private fun setFrame(
+        view: View,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        move: Boolean = true,
+    ) {
         val params = view.layoutParams
         if (params == null) {
             view.layoutParams = FrameLayout.LayoutParams(width, height)
@@ -161,9 +227,14 @@ class RustRootView(
             params.height = height
             view.layoutParams = params
         }
-        view.translationX = x.toFloat()
-        view.translationY = y.toFloat()
+        if (move) {
+            view.translationX = x.toFloat()
+            view.translationY = y.toFloat()
+        }
     }
+
+    private fun lerp(start: Int, end: Int, fraction: Float): Int =
+        (start + (end - start) * fraction).roundToInt()
 
     /** Forwards an edit of a native input back to Rust. */
     fun onTextChanged(nodeId: Long, text: String) {
