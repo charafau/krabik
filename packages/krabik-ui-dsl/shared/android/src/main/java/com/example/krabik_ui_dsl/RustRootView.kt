@@ -233,6 +233,9 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
         }
     }
 
+    /** Dispatches the system back button to Rust; returns whether it was handled. */
+    fun onBackPressed(): Boolean = if (handle != 0L) nativeOnBack(handle) else false
+
     /** Releases the Rust state when the activity goes away. */
     fun destroy() {
         if (handle != 0L) {
@@ -278,6 +281,8 @@ class RustRootView(context: Context) : ViewGroup(context), View.OnClickListener 
     )
 
     private external fun nativeOnScroll(handle: Long, nodeId: Long, offset: Float)
+
+    private external fun nativeOnBack(handle: Long): Boolean
 
     private external fun nativeBindRow(
         handle: Long,

@@ -80,6 +80,15 @@ class ShowcaseTest {
     }
 
     @Test
+    fun systemBackReturnsToTheCatalog() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openPage("Spinner")
+            androidx.test.espresso.Espresso.pressBack()
+            onView(withText("Krabik UI DSL")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
     fun windowedListMaterializesRows() {
         ActivityScenario.launch(MainActivity::class.java).use {
             openPage("Windowed list")

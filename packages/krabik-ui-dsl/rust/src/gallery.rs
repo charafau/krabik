@@ -905,6 +905,12 @@ impl App for GalleryApp {
                 action: "form:bio-focus",
                 focused,
             } => self.bio_focused = focused,
+            Event::Back => {
+                if self.demo == Demo::Gallery {
+                    return false;
+                }
+                self.demo = Demo::Gallery;
+            }
             Event::Toggled {
                 action: "controls:notifications",
                 checked,
@@ -1076,6 +1082,11 @@ mod tests {
         assert_eq!(app.count, 0);
 
         assert!(app.handle(click("back")));
+        assert_eq!(app.demo, Demo::Gallery);
+
+        assert!(!app.handle(Event::Back));
+        assert!(app.handle(click("open:counter")));
+        assert!(app.handle(Event::Back));
         assert_eq!(app.demo, Demo::Gallery);
 
         assert!(app.handle(click("open:layouts")));

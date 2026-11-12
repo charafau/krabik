@@ -68,6 +68,8 @@ pub enum Event<'a> {
         /// The newly selected date.
         date: crate::ui::DateValue,
     },
+    /// The user asked to go back, usually from Android's system back button.
+    Back,
 }
 
 impl Event<'_> {
@@ -82,6 +84,7 @@ impl Event<'_> {
             | Self::ValueChanged { action, .. }
             | Self::Selected { action, .. }
             | Self::DateChanged { action, .. } => action,
+            Self::Back => "",
         }
     }
 }
@@ -95,6 +98,32 @@ pub trait App: Send + 'static {
     ///
     /// Returns `true` if the state changed and the UI should be re-rendered.
     fn handle(&mut self, event: Event<'_>) -> bool;
+
+    /// The native navigation stack, when the app uses one.
+    ///
+    /// The application owns this state; the runtime mirrors it with native
+    /// navigation controllers. Defaults to no navigation.
+    fn navigation(&self) -> Option<crate::navigation::Navigation> {
+        None
+    }
+
+    /// Builds the content of one navigation screen.
+    ///
+    /// Called once per screen host. The default returns `None`, which is only
+    /// valid when [`App::navigation`] is also `None`.
+    fn screen(&self, _key: &str) -> Option<Element> {
+        None
+    }
+
+    /// The native dialog or bottom sheet currently presented, if any.
+    fn presentation(&self) -> Option<crate::presentation::Presentation> {
+        None
+    }
+
+    /// Builds the content of the currently presented modal.
+    fn presentation_view(&self) -> Option<Element> {
+        None
+    }
 }
 
 type AppFactory = Box<dyn Fn() -> Box<dyn App> + Send + Sync>;

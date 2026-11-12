@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowInsets
 import android.widget.FrameLayout
+import android.window.OnBackInvokedDispatcher
 
 /**
  * Hosts a [RustRootView] full screen and keeps it inside the system bars.
@@ -73,6 +74,25 @@ abstract class KrabikActivity : Activity() {
         }
 
         setContentView(container)
+
+        // Android 13+ routes back through the predictive-back dispatcher by
+        // default; keep the older onBackPressed path as the fallback.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+            ) {
+                if (!root.onBackPressed()) {
+                    finish()
+                }
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        if (!root.onBackPressed()) {
+            super.onBackPressed()
+        }
     }
 
     override fun onDestroy() {
