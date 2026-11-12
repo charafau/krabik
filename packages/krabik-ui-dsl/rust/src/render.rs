@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use crate::geometry::{Rect, Size};
 use crate::layout::LayoutResult;
 use crate::tree::{self, NodeId, NodeKind, UiNode};
-use crate::ui::{Animation, Style};
+use crate::ui::{Animation, Style, Transition};
 
 /// The data the renderer needs to create or update a native widget.
 #[derive(Clone, Debug, PartialEq)]
@@ -56,6 +56,8 @@ pub enum Op {
     Remove {
         /// The node to remove.
         id: NodeId,
+        /// Exit transition declared by the node, if any.
+        exit: Option<Transition>,
     },
     /// Move the native widget of a node to its calculated frame.
     Layout {
@@ -122,7 +124,10 @@ pub fn diff(old: &UiNode, new: &UiNode) -> Vec<Op> {
             Some(previous)
                 if std::mem::discriminant(&previous.kind) != std::mem::discriminant(&node.kind) =>
             {
-                ops.push(Op::Remove { id: node.id });
+                ops.push(Op::Remove {
+                    id: node.id,
+                    exit: previous.style.exit.clone(),
+                });
                 ops.push(Op::Create(RenderNode::new(node, parent)));
                 replaced.push(node.id);
             }
@@ -153,7 +158,8 @@ pub fn diff(old: &UiNode, new: &UiNode) -> Vec<Op> {
     removals.reverse();
     for id in removals {
         if !replaced.contains(&id) {
-            ops.push(Op::Remove { id });
+            let exit = previous.get(&id).and_then(|node| node.style.exit.clone());
+            ops.push(Op::Remove { id, exit });
         }
     }
 
@@ -185,9 +191,11 @@ pub fn diff_layout(
             let content_changed = old_layout.content_sizes.get(&node.id).copied() != content_size;
             // New nodes appear at their final position; only nodes that already
             // had a frame animate. Content-size-only changes are not visual.
-            let animation = (previous.is_some() && moved)
-                .then_some(node.style.animation)
-                .flatten();
+            let animation = if previous.is_some() && moved {
+                node.style.animation.clone()
+            } else {
+                None
+            };
 
             (moved || content_changed).then_some(Op::Layout {
                 id: node.id,
@@ -323,7 +331,7 @@ mod tests {
 
         let ops = diff(&old, &new);
         assert_eq!(ops.len(), 1);
-        assert!(matches!(&ops[0], Op::Remove { id } if *id == old.children[0].children[1].id));
+        assert!(matches!(&ops[0], Op::Remove { id, .. } if *id == old.children[0].children[1].id));
     }
 
     #[test]
@@ -406,7 +414,7 @@ mod tests {
             "{ops:?}"
         );
         assert!(
-            matches!(&ops[1], Op::Remove { id } if *id == column),
+            matches!(&ops[1], Op::Remove { id, .. } if *id == column),
             "{ops:?}"
         );
     }
@@ -456,6 +464,30 @@ mod tests {
                 ..
             } if *size == Size::new(100.0, 240.0)
         ));
+    }
+
+    #[test]
+    fn removals_carry_their_exit_transition() {
+        let old = tree(
+            Column::new()
+                .child(Text::new("leave").animate_exit(180))
+                .into(),
+        );
+        let new = tree(Column::new().into());
+        let leaving = old.children[0].children[0].id;
+
+        let ops = diff(&old, &new);
+        assert!(matches!(
+            &ops[0],
+            Op::Remove {
+                id,
+                exit: Some(exit),
+            } if *id == leaving && exit.duration_ms == 180
+        ));
+
+        let old = tree(Column::new().child(Text::new("leave")).into());
+        let ops = diff(&old, &new);
+        assert!(matches!(&ops[0], Op::Remove { exit: None, .. }));
     }
 
     #[test]

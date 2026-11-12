@@ -202,19 +202,30 @@ has a Tabs page covering both the composed container and a standalone bar.
 ### 2h. Implicit animations ✅
 
 `Style` can opt into an implicit transition with `.animate(duration_ms)`,
-`.animation(Animation)`, or `.animation_curve(AnimationCurve)`. The animation
-metadata travels with layout operations from the renderer diff; nodes without
-an animation behave exactly as before.
+`.animation(Animation)`, or `.animation_curve(AnimationCurve)`. Entry and exit
+use `.animate_enter(ms)` / `.animate_exit(ms)` with the same curve builders.
+Animation metadata travels with layout operations and removals from the
+renderer diff; nodes without an animation behave exactly as before.
 
-- **v1 scope** — frame changes and opacity. Android moves views with a
-  `ValueAnimator`, iOS uses `UIView.animate` with
-  `BeginFromCurrentState`.
-- **Snapping** — newly created nodes, viewport changes and a zero duration
-  apply their frame immediately, so startup and rotation do not animate.
+- **Frames and opacity** — Android moves views with a `ValueAnimator`, iOS
+  uses `UIViewPropertyAnimator`.
+- **Decoration** — background, gradient stops, border color/width and corner
+  radii interpolate. Android also animates elevation; iOS animates the backing
+  layer with `CABasicAnimation`.
+- **Curves** — linear, ease-in, ease-out, ease-in-out, custom cubic Bezier and
+  damped springs. iOS uses native timing parameters; Android maps springs to a
+  damped-spring interpolator.
+- **Enter/exit** — created nodes fade and scale in; removed nodes animate out
+  before the platform detaches them. A recreated node cancels a pending exit.
+- **Snapping** — viewport changes, recycled-row rebinds and zero durations
+  apply immediately, so startup and rotation do not animate.
+- **Hit-testing** — iOS disables interaction on an animating view until its
+  completion; Android already hit-tests against the live frame.
 - **Accessibility** — Android respects the system animator duration scale and
   iOS skips animations when Reduce Motion is enabled.
-- **Coverage** — the Animations showcase page toggles a resizing panel and an
-  opacity fade; Rust renderer/frame-batch tests and both UI suites cover it.
+- **Coverage** — the Animations page exercises a spring panel, a cubic caption,
+  decoration changes, and fade/scale enter/exit; Rust renderer/frame-batch
+  tests and both UI suites cover it.
 
 ### 3b. Virtualized lists ✅
 
@@ -454,11 +465,12 @@ matters for large lists.
 
 ### Rendering & UX
 
-- Animation follow-ups after the v1 frame/opacity slice:
-  - Animate background colors, gradients, borders and corner radii.
-  - Enter/exit animations for node creation and removal.
-  - Spring and custom timing curves.
-  - Keep hit-testing in sync during in-flight frame animations.
+- Animation follow-ups:
+  - Animate iOS shadow opacity/radius/offset and gradient orientation changes.
+  - Exact presentation-layer hit-testing on iOS instead of briefly disabling
+    interaction.
+  - Animated `Create`/`Remove` for recycled-row content without delaying the
+    holder's reuse.
 - Native intrinsic measurement for switches and images, so their intrinsic
   size comes from the platform rather than the hard-coded defaults.
 - Disabled-state styling for custom backgrounds (native text already dims).
