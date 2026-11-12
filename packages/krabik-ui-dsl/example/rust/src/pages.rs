@@ -2,9 +2,10 @@
 
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::ui::{
-    Align, Button, Checkbox, Column, DatePicker, DatePickerMode, EdgeInsets, Element, Gradient,
-    Image, ImageScale, ImageSource, Justify, List, ProgressIndicator, RadioButton, RadioGroup, Row,
-    ScrollView, Slider, Spacer, Switch, Text, TextAlign, TextField,
+    Align, Button, Checkbox, Column, DatePicker, DatePickerMode, DateValue, EdgeInsets, Element,
+    Gradient, Image, ImageScale, ImageSource, Justify, List, ProgressIndicator, RadioButton,
+    RadioGroup, Row, ScrollView, Slider, Spacer, Switch, TabBar, Tabs, Text, TextAlign, TextField,
+    TimeValue,
 };
 
 use crate::ShowcaseApp;
@@ -63,6 +64,7 @@ pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
         "radio-buttons" => "radio-buttons",
         "radio-group" => "radio-group",
         "date-picker" => "date-picker",
+        "tabs" => "tabs",
         "slider" => "slider",
         "progress" => "progress",
         "spinner" => "spinner",
@@ -89,6 +91,7 @@ pub(crate) fn title(key: &str) -> &'static str {
         "radio-buttons" => "Radio buttons",
         "radio-group" => "Radio group",
         "date-picker" => "Date picker",
+        "tabs" => "Tabs",
         "slider" => "Slider",
         "progress" => "Progress",
         "spinner" => "Spinner",
@@ -115,6 +118,7 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element> {
         "radio-buttons" => radio_buttons_page(app),
         "radio-group" => radio_group_page(app),
         "date-picker" => date_picker_page(app),
+        "tabs" => tabs_page(app),
         "slider" => slider_page(app),
         "progress" => progress_page(app),
         "spinner" => spinner_page(),
@@ -152,6 +156,7 @@ pub(crate) fn home() -> Element {
                 ("Radio buttons", "page:radio-buttons"),
                 ("Radio group", "page:radio-group"),
                 ("Date picker", "page:date-picker"),
+                ("Tabs", "page:tabs"),
             ],
         ),
         (
@@ -426,6 +431,57 @@ fn date_picker_page(app: &ShowcaseApp) -> Element {
                 .action("demo:date-inline")
                 .accessibility_label("Inline date"),
             caption("The inline calendar reports every selected day."),
+            Text::new(format!("Time: {}", app.time))
+                .size(18)
+                .color(COLOR_TEXT),
+            DatePicker::time(app.time)
+                .time_range(TimeValue::new(8, 0), TimeValue::new(18, 0))
+                .action("demo:time")
+                .accessibility_label("Time"),
+            caption("Time pickers use the same widget; values are bounded to 08:00-18:00."),
+            Text::new(format!(
+                "Date and time: {} {}",
+                app.date_time_date, app.date_time
+            ))
+            .size(18)
+            .color(COLOR_TEXT),
+            DatePicker::date_time(app.date_time_date, app.date_time)
+                .action("demo:date-time")
+                .accessibility_label("Date and time"),
+            caption("Date-and-time pickers report both components together."),
+            Text::new(format!("Bounded: {}", app.range_date))
+                .size(18)
+                .color(COLOR_TEXT),
+            DatePicker::new(app.range_date)
+                .range(DateValue::new(2026, 1, 1), DateValue::new(2026, 12, 31))
+                .action("demo:date-range")
+                .accessibility_label("Bounded date"),
+            caption("Dates outside 2026 are clamped to the nearest bound."),
+        ],
+    )
+}
+
+fn tabs_page(app: &ShowcaseApp) -> Element {
+    let content = match app.tab {
+        0 => "Overview: the first tab is selected by default.",
+        1 => "Details: the app owns the selected index.",
+        _ => "Settings: tapping a tab reports Event::Selected.",
+    };
+    page(
+        "Tabs",
+        "A tab bar reports the tapped index; the app owns the selected content.",
+        vec![
+            Tabs::new(["Overview", "Details", "Settings"])
+                .selected(app.tab)
+                .action("demo:tab")
+                .child(Text::new(content).size(18).color(COLOR_TEXT).padding(16))
+                .into(),
+            caption("Tabs composes a TabBar above application-owned content.").into(),
+            TabBar::new(["Day", "Week", "Month"])
+                .selected(app.tab.min(2))
+                .action("demo:tab")
+                .accessibility_label("Period")
+                .into(),
         ],
     )
 }

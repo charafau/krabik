@@ -138,17 +138,29 @@ image page.
 
 ### 2e. Date picker ✅
 
-`DatePicker` uses a platform-independent `DateValue` and reports changes through
-`Event::DateChanged { action, date }`. Two modes are available:
+`DatePicker` uses platform-independent `DateValue`, `TimeValue` and
+`DatePickerValue` types. One widget covers three value kinds:
 
-- **Compact** — a date field; Android opens the native `DatePickerDialog`, iOS
-  uses a compact `UIDatePicker`.
-- **Inline** — an always-visible calendar (`DatePicker` on Android, inline
-  `UIDatePicker` on iOS).
+- **Date** — `DatePicker::new(date)` reports `Event::DateChanged { action, date }`.
+- **Time** — `DatePicker::time(time)` reports `Event::TimeChanged { action, time }`.
+- **Date and time** — `DatePicker::date_time(date, time)` reports
+  `Event::DateTimeChanged { action, date, time }`.
+
+Two presentation modes are available:
+
+- **Compact** — a field; Android opens the native date/time dialog, iOS uses a
+  compact `UIDatePicker`.
+- **Inline** — an always-visible picker (`DatePicker`/`TimePicker` on Android,
+  inline `UIDatePicker` on iOS).
+
+`.range(min, max)` and `.time_range(min, max)` set inclusive bounds. Android
+applies them to the native pickers and clamps values; iOS maps dates to
+`minimumDate`/`maximumDate` and the runtime clamps every reported value, so a
+date-and-time value also respects the time bound on the first and last day.
 
 Dates are converted through calendar components at local noon so daylight
-saving cannot shift the selected day. The controls demo and the widget showcase
-exercise both modes.
+saving cannot shift the selected day; time-only values use the reference date
+2000-01-01. The controls demo and the widget showcase exercise every kind.
 
 ### 2f. Native presentation and navigation ✅
 
@@ -173,6 +185,19 @@ The widget showcase itself is now a native navigation stack: every widget page
 is a screen, Dialog and Bottom sheet are modal hosts. Android instrumented
 tests and iOS XCUITests cover push/pop, system back, dialog dismissal and sheet
 dismissal.
+
+### 2g. Tabs ✅
+
+`TabBar` is a native tab selector: Android uses a horizontal custom
+`KrabikTabBar` built from weighted `TextView`s, iOS uses
+`UISegmentedControl`. Tapping a tab reports
+`Event::Selected { action, index }`; the application owns the index and passes
+it back with `.selected(index)`.
+
+`Tabs` is a plain composition of a `TabBar` above one application-owned child.
+It does not create a native tab controller or per-tab navigation stacks; the
+app decides which content to build for the current index. The widget showcase
+has a Tabs page covering both the composed container and a standalone bar.
 
 ### 3b. Virtualized lists ✅
 
@@ -271,7 +296,8 @@ All core widgets from SPEC.md §7.1 are implemented on Android and iOS.
 | `Slider` | [`update_slider()`](rust/src/android.rs) | Custom `KrabikSeekBar` (`SeekBar`) |
 | `ProgressIndicator` | [`update_progress()`](rust/src/android.rs) | `ProgressBar` (horizontal) |
 | `ProgressIndicator::indeterminate()` | [`update_spinner()`](rust/src/android.rs) | Circular `ProgressBar` |
-| `DatePicker` | [`update_date_picker()`](rust/src/android.rs) | Custom `KrabikDatePicker` (`DatePickerDialog` / `DatePicker`) |
+| `DatePicker` (date/time/date-time) | [`update_date_picker()`](rust/src/android.rs) | Custom `KrabikDatePicker` (`DatePickerDialog`, `TimePickerDialog`, inline `DatePicker`/`TimePicker`) |
+| `TabBar` | [`update_tab_bar()`](rust/src/android.rs) | Custom `KrabikTabBar` (horizontal `LinearLayout`) |
 | `Image` | [`update_image()`](rust/src/android.rs) | `ImageView` (assets + URLs) |
 | `ScrollView` | [`create_scroll()`](rust/src/android.rs) | Custom scroll container (vertical + horizontal) |
 
@@ -279,8 +305,9 @@ iOS renders the controls as `UIButton` with SF Symbol images (checkbox and
 radio), `UISlider`, `UIProgressView`, and `UIActivityIndicatorView` for the
 spinner. Checkbox and radio buttons dispatch the same `Toggled` event as a
 switch; a slider dispatches `ValueChanged`; a radio group dispatches
-`Selected { index }`. Standalone radio buttons remain independent controls,
-while `RadioGroup` owns mutual exclusion (`UIStackView` on iOS, native
+`Selected { index }`; a tab bar dispatches the same event from
+`UISegmentedControl` on iOS. Standalone radio buttons remain independent
+controls, while `RadioGroup` owns mutual exclusion (`UIStackView` on iOS, native
 `RadioGroup` on Android).
 
 Sliders accept an optional `step`; the runtime quantizes values centrally, so
@@ -424,8 +451,9 @@ matters for large lists.
 
 ### Widgets
 
-- Larger design work: DatePicker time mode, min/max ranges.
-- Tabs and other navigation containers.
+- Native tab containers: per-tab navigation stacks and retention, beyond the
+  current `TabBar`/`Tabs` composition.
+- DatePicker seconds, timezone pickers and non-clamping disabled dates.
 
 ### Lists & scaling
 

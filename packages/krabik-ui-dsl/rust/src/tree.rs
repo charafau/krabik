@@ -12,7 +12,7 @@ use crate::geometry::Size;
 use crate::ui::{
     Axis, ButtonProps, CheckProps, DatePickerProps, Element, ElementKind, ImageProps, Length,
     ListMode, ListProps, ProgressProps, RadioGroupProps, ScrollProps, SliderProps, SpinnerProps,
-    Style, SwitchProps, TextFieldProps, TextProps,
+    Style, SwitchProps, TabBarProps, TextFieldProps, TextProps,
 };
 
 /// The identifier of the synthetic root node.
@@ -47,6 +47,8 @@ pub enum NodeKind {
     RadioButton(CheckProps),
     /// A native group of mutually exclusive radio buttons.
     RadioGroup(RadioGroupProps),
+    /// A native tab bar.
+    TabBar(TabBarProps),
     /// A native date picker.
     DatePicker(DatePickerProps),
     /// A native slider.
@@ -75,6 +77,7 @@ impl NodeKind {
                 | Self::Checkbox(_)
                 | Self::RadioButton(_)
                 | Self::RadioGroup(_)
+                | Self::TabBar(_)
                 | Self::DatePicker(_)
                 | Self::Slider(_)
                 | Self::Progress(_)
@@ -440,6 +443,7 @@ fn build_node(element: &Element, parent: NodeId, index: usize, cx: &mut BuildCon
         ElementKind::Checkbox(props) => NodeKind::Checkbox(props.clone()),
         ElementKind::RadioButton(props) => NodeKind::RadioButton(props.clone()),
         ElementKind::RadioGroup(props) => NodeKind::RadioGroup(props.clone()),
+        ElementKind::TabBar(props) => NodeKind::TabBar(props.clone()),
         ElementKind::DatePicker(props) => NodeKind::DatePicker(props.clone()),
         ElementKind::Slider(props) => NodeKind::Slider(props.clone()),
         ElementKind::Progress(props) => NodeKind::Progress(props.clone()),
@@ -870,7 +874,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::ui::{Button, Column, Switch, Text};
+    use crate::ui::{Button, Column, Switch, TabBar, Text};
 
     fn sample() -> Element {
         Column::new()
@@ -1255,6 +1259,17 @@ mod tests {
         assert!(matches!(
             tree.children[0].children[0].kind,
             NodeKind::Switch(_)
+        ));
+        assert!(tree.children[0].children[0].kind.is_native());
+    }
+
+    #[test]
+    fn a_tab_bar_is_native() {
+        let tree = build(&Column::new().child(TabBar::new(["One", "Two"])).into());
+
+        assert!(matches!(
+            tree.children[0].children[0].kind,
+            NodeKind::TabBar(_)
         ));
         assert!(tree.children[0].children[0].kind.is_native());
     }

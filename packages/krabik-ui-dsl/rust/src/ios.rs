@@ -31,8 +31,9 @@ use objc2_ui_kit::{
     UIColor, UIControl, UIControlContentHorizontalAlignment, UIControlEvents, UIControlState,
     UIDatePicker, UIDatePickerMode, UIDatePickerStyle, UIEdgeInsets, UIFont, UIImage, UIImageView,
     UIKeyboardType, UILabel, UILayoutConstraintAxis, UIProgressView, UIReturnKeyType, UIScrollView,
-    UIScrollViewDelegate, UISlider, UIStackView, UIStackViewAlignment, UIStackViewDistribution,
-    UISwitch, UITextBorderStyle, UITextField, UITextInputTraits, UIView, UIViewContentMode,
+    UIScrollViewDelegate, UISegmentedControl, UISlider, UIStackView, UIStackViewAlignment,
+    UIStackViewDistribution, UISwitch, UITextBorderStyle, UITextField, UITextInputTraits, UIView,
+    UIViewContentMode,
 };
 
 use crate::app::{App, Event};
@@ -43,10 +44,10 @@ use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Axis, ButtonProps, CheckProps, DatePickerMode, DatePickerProps, DateValue, EdgeInsets, Element,
-    FontWeight, GradientDirection, ImageProps, ImageScale, ImageSource, ImeAction, KeyboardType,
-    ProgressProps, RadioGroupProps, SliderProps, SpinnerProps, TextAlign, TextFieldProps,
-    TextProps, snap_slider_value,
+    Axis, ButtonProps, CheckProps, DatePickerMode, DatePickerProps, DatePickerValue, DateValue,
+    EdgeInsets, Element, FontWeight, GradientDirection, ImageProps, ImageScale, ImageSource,
+    ImeAction, KeyboardType, ProgressProps, RadioGroupProps, SliderProps, SpinnerProps,
+    TabBarProps, TextAlign, TextFieldProps, TextProps, TimeValue, snap_slider_value,
 };
 
 /// Measures text with an off-screen `UILabel`.
@@ -465,6 +466,7 @@ enum Content {
         labels: Vec<String>,
     },
     DatePicker(Retained<UIDatePicker>),
+    TabBar(Retained<UISegmentedControl>),
     Slider(Retained<UISlider>),
     Progress(Retained<UIProgressView>),
     Spinner(Retained<UIActivityIndicatorView>),
@@ -558,6 +560,8 @@ struct RowAction {
     toggle: Option<Cow<'static, str>>,
     selected: Option<Cow<'static, str>>,
     date: Option<Cow<'static, str>>,
+    date_range: Option<(crate::ui::DateValue, crate::ui::DateValue)>,
+    time_range: Option<(crate::ui::TimeValue, crate::ui::TimeValue)>,
     value: Option<Cow<'static, str>>,
     value_min: f32,
     value_max: f32,
@@ -822,6 +826,13 @@ impl IosState {
                 wire_date_picker(&picker, self.handle, self.host, node.id, mtm);
                 let view = cast_view(picker.clone());
                 ViewHandle::new(view, Content::DatePicker(picker), node)
+            }
+            NodeKind::TabBar(props) => {
+                let control = UISegmentedControl::new(mtm);
+                update_tab_bar(&control, props);
+                wire_tab_bar(&control, self.handle, self.host, node.id, mtm);
+                let view = cast_view(control.clone());
+                ViewHandle::new(view, Content::TabBar(control), node)
             }
             NodeKind::Slider(props) => {
                 let slider = UISlider::new(mtm);
@@ -1281,8 +1292,14 @@ impl IosState {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
+                NodeKind::TabBar(props) if !props.action.is_empty() => {
+                    action.selected = Some(props.action.clone());
+                    any = true;
+                }
                 NodeKind::DatePicker(props) if !props.action.is_empty() => {
                     action.date = Some(props.action.clone());
+                    action.date_range = props.date_range;
+                    action.time_range = props.time_range;
                     any = true;
                 }
                 NodeKind::Slider(props) if !props.action.is_empty() => {
@@ -1384,6 +1401,7 @@ fn update_content(
         (Content::DatePicker(picker), NodeKind::DatePicker(props)) => {
             update_date_picker(picker, props);
         }
+        (Content::TabBar(control), NodeKind::TabBar(props)) => update_tab_bar(control, props),
         (Content::Slider(slider), NodeKind::Slider(props)) => update_slider(slider, props),
         (Content::Progress(progress), NodeKind::Progress(props)) => {
             update_progress(progress, props);
@@ -1506,19 +1524,88 @@ fn update_check(button: &UIButton, props: &CheckProps, radio: bool) {
     unsafe { button.setTintColor(Some(&text_color)) };
 }
 
+fn update_tab_bar(control: &UISegmentedControl, props: &TabBarProps) {
+    let current: Vec<String> = (0..control.numberOfSegments())
+        .filter_map(|index| {
+            control
+                .titleForSegmentAtIndex(index)
+                .map(|title| title.to_string())
+        })
+        .collect();
+    if current != props.tabs {
+        control.removeAllSegments();
+        for (index, tab) in props.tabs.iter().enumerate() {
+            let title = NSString::from_str(tab);
+            control.insertSegmentWithTitle_atIndex_animated(Some(&title), index, false);
+        }
+    }
+    let selected = if props.tabs.is_empty() {
+        -1
+    } else {
+        props.selected.min(props.tabs.len() - 1) as isize
+    };
+    if control.selectedSegmentIndex() != selected {
+        control.setSelectedSegmentIndex(selected);
+    }
+    // SAFETY: the color is a valid `UIColor` for the lifetime of the call.
+    unsafe { control.setTintColor(Some(&color(props.color))) };
+}
+
 fn update_date_picker(picker: &UIDatePicker, props: &DatePickerProps) {
-    picker.setDatePickerMode(UIDatePickerMode::Date);
+    let mode = match props.value {
+        DatePickerValue::Date(_) => UIDatePickerMode::Date,
+        DatePickerValue::Time(_) => UIDatePickerMode::Time,
+        DatePickerValue::DateTime { .. } => UIDatePickerMode::DateAndTime,
+    };
+    picker.setDatePickerMode(mode);
     picker.setPreferredDatePickerStyle(match props.mode {
         DatePickerMode::Compact => UIDatePickerStyle::Compact,
         DatePickerMode::Inline => UIDatePickerStyle::Inline,
     });
 
-    let current = date_value_from_nsdate(&picker.date());
+    let current = picker_value_from_nsdate(&picker.date(), mode);
     if current != Some(props.value)
-        && let Some(date) = nsdate_from_date_value(props.value)
+        && let Some(date) = nsdate_from_picker_value(props.value)
     {
         picker.setDate(&date);
     }
+
+    // A date picker bounds whole days, so local noon keeps the calendar day
+    // stable. A date-and-time picker bounds the exact instants: the start of
+    // the first day and the end of the last day unless a time range narrows it.
+    let (minimum, maximum) = match props.value {
+        DatePickerValue::Date(_) => (
+            props
+                .date_range
+                .and_then(|(min, _)| nsdate_from_date_value(min)),
+            props
+                .date_range
+                .and_then(|(_, max)| nsdate_from_date_value(max)),
+        ),
+        DatePickerValue::DateTime { .. } => (
+            props
+                .date_range
+                .map(|(min, _)| DatePickerValue::DateTime {
+                    date: min,
+                    time: props
+                        .time_range
+                        .map_or(TimeValue::new(0, 0), |(min, _)| min),
+                })
+                .and_then(nsdate_from_picker_value),
+            props
+                .date_range
+                .map(|(_, max)| DatePickerValue::DateTime {
+                    date: max,
+                    time: props
+                        .time_range
+                        .map_or(TimeValue::new(23, 59), |(_, max)| max),
+                })
+                .and_then(nsdate_from_picker_value),
+        ),
+        DatePickerValue::Time(_) => (None, None),
+    };
+    picker.setMinimumDate(minimum.as_deref());
+    picker.setMaximumDate(maximum.as_deref());
 }
 
 /// Builds a `Date` at local noon so DST transitions cannot shift the calendar day.
@@ -1531,14 +1618,53 @@ fn nsdate_from_date_value(value: DateValue) -> Option<Retained<NSDate>> {
     NSCalendar::currentCalendar().dateFromComponents(&components)
 }
 
-fn date_value_from_nsdate(date: &NSDate) -> Option<DateValue> {
-    let units = NSCalendarUnit::Year | NSCalendarUnit::Month | NSCalendarUnit::Day;
+fn nsdate_from_picker_value(value: DatePickerValue) -> Option<Retained<NSDate>> {
+    let components = NSDateComponents::new();
+    match value {
+        DatePickerValue::Date(date) => {
+            components.setYear(date.year as isize);
+            components.setMonth(date.month as isize);
+            components.setDay(date.day as isize);
+            components.setHour(12);
+        }
+        DatePickerValue::Time(time) => {
+            components.setYear(2000);
+            components.setMonth(1);
+            components.setDay(1);
+            components.setHour(time.hour as isize);
+            components.setMinute(time.minute as isize);
+        }
+        DatePickerValue::DateTime { date, time } => {
+            components.setYear(date.year as isize);
+            components.setMonth(date.month as isize);
+            components.setDay(date.day as isize);
+            components.setHour(time.hour as isize);
+            components.setMinute(time.minute as isize);
+        }
+    }
+    NSCalendar::currentCalendar().dateFromComponents(&components)
+}
+
+fn picker_value_from_nsdate(date: &NSDate, mode: UIDatePickerMode) -> Option<DatePickerValue> {
+    let units = NSCalendarUnit::Year
+        | NSCalendarUnit::Month
+        | NSCalendarUnit::Day
+        | NSCalendarUnit::Hour
+        | NSCalendarUnit::Minute;
     let components = NSCalendar::currentCalendar().components_fromDate(units, date);
-    Some(DateValue::new(
+    let date = DateValue::new(
         components.year() as i32,
         components.month() as u8,
         components.day() as u8,
-    ))
+    );
+    let time = TimeValue::new(components.hour() as u8, components.minute() as u8);
+    if mode == UIDatePickerMode::Time {
+        Some(DatePickerValue::Time(time))
+    } else if mode == UIDatePickerMode::DateAndTime {
+        Some(DatePickerValue::DateTime { date, time })
+    } else {
+        Some(DatePickerValue::Date(date))
+    }
 }
 
 fn update_slider(slider: &UISlider, props: &SliderProps) {
@@ -1761,7 +1887,10 @@ fn apply_accessibility(view: &UIView, node: &RenderNode, mtm: MainThreadMarker) 
         view.setAccessibilityLabel(Some(&label), mtm);
         // A radio group must stay a plain container so its options remain
         // individually reachable by accessibility services.
-        view.setIsAccessibilityElement(!matches!(node.kind, NodeKind::RadioGroup(_)), mtm);
+        view.setIsAccessibilityElement(
+            !matches!(node.kind, NodeKind::RadioGroup(_) | NodeKind::TabBar(_)),
+            mtm,
+        );
     } else {
         view.setAccessibilityLabel(None, mtm);
     }
@@ -1867,6 +1996,32 @@ fn wire_radio_group_item(
     );
 }
 
+fn wire_tab_bar(
+    control: &UISegmentedControl,
+    handle: u64,
+    host: u64,
+    id: NodeId,
+    mtm: MainThreadMarker,
+) {
+    add_action(
+        control,
+        UIControlEvents::ValueChanged,
+        "krabik.tab-bar",
+        mtm,
+        move |action| {
+            let index = action
+                .sender()
+                .and_then(|sender| sender.downcast::<UISegmentedControl>().ok())
+                .map(|control| control.selectedSegmentIndex());
+            if let Some(index) = index
+                && index >= 0
+            {
+                schedule(move || dispatch_selected(handle, host, id, index as usize));
+            }
+        },
+    );
+}
+
 fn wire_date_picker(
     picker: &UIDatePicker,
     handle: u64,
@@ -1877,15 +2032,17 @@ fn wire_date_picker(
     add_action(
         picker,
         UIControlEvents::ValueChanged,
-        "krabik.date",
+        "krabik.picker",
         mtm,
         move |action| {
             let value = action
                 .sender()
                 .and_then(|sender| sender.downcast::<UIDatePicker>().ok())
-                .and_then(|picker| date_value_from_nsdate(&picker.date()));
+                .and_then(|picker| {
+                    picker_value_from_nsdate(&picker.date(), picker.datePickerMode())
+                });
             if let Some(value) = value {
-                schedule(move || dispatch_date(handle, host, id, value));
+                schedule(move || dispatch_picker(handle, host, id, value));
             }
         },
     );
@@ -2220,21 +2377,40 @@ fn dispatch_value(handle: u64, host: u64, id: NodeId, value: f64) {
     });
 }
 
-fn dispatch_date(handle: u64, host: u64, id: NodeId, date: DateValue) {
-    guard("date", || {
+fn dispatch_picker(handle: u64, host: u64, id: NodeId, value: DatePickerValue) {
+    guard("picker", || {
         with_session(handle, |session| {
-            let action = session.hosts.get(&host).and_then(|state| {
-                state
-                    .runtime
-                    .date_picker_action(id)
-                    .or_else(|| state.row_actions.get(&id).and_then(|row| row.date.clone()))
+            let config = session.hosts.get(&host).and_then(|state| {
+                state.runtime.date_picker_config(id).or_else(|| {
+                    state.row_actions.get(&id).and_then(|row| {
+                        row.date
+                            .clone()
+                            .map(|action| (action, row.date_range, row.time_range))
+                    })
+                })
             });
-            if let Some(action) = action
-                && session.app.handle(Event::DateChanged {
+            let Some((action, date_range, time_range)) = config else {
+                return;
+            };
+            let value = value.clamped(date_range, time_range);
+            let handled = match value {
+                DatePickerValue::Date(date) => session.app.handle(Event::DateChanged {
                     action: &action,
                     date,
-                })
-            {
+                }),
+                DatePickerValue::Time(time) => session.app.handle(Event::TimeChanged {
+                    action: &action,
+                    time,
+                }),
+                DatePickerValue::DateTime { date, time } => {
+                    session.app.handle(Event::DateTimeChanged {
+                        action: &action,
+                        date,
+                        time,
+                    })
+                }
+            };
+            if handled {
                 session.render_all();
             }
         });
@@ -2242,15 +2418,19 @@ fn dispatch_date(handle: u64, host: u64, id: NodeId, date: DateValue) {
 }
 
 fn dispatch_selected(handle: u64, host: u64, id: NodeId, index: usize) {
-    guard("radio group", || {
+    guard("selection", || {
         with_session(handle, |session| {
             let action = session.hosts.get(&host).and_then(|state| {
-                state.runtime.radio_group_action(id).or_else(|| {
-                    state
-                        .row_actions
-                        .get(&id)
-                        .and_then(|row| row.selected.clone())
-                })
+                state
+                    .runtime
+                    .tab_bar_action(id)
+                    .or_else(|| state.runtime.radio_group_action(id))
+                    .or_else(|| {
+                        state
+                            .row_actions
+                            .get(&id)
+                            .and_then(|row| row.selected.clone())
+                    })
             });
             if let Some(action) = action
                 && session.app.handle(Event::Selected {

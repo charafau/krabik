@@ -39,7 +39,8 @@ use super::{
     IMAGE_VIEW_CLASS, KRABIK_IMAGES_CLASS, KRABIK_RECYCLERS_CLASS, KRABIK_STYLE_CLASS,
     KRABIK_VIEWS_CLASS, LAYOUT_PARAMS_CLASS, LONG_CLASS, MEASURE_SPEC_CLASS, PROGRESS_BAR_CLASS,
     RADIO_CLASS, RADIO_GROUP_CLASS, RUST_ROOT_VIEW_CLASS, SEEK_BAR_CLASS, SWITCH_CLASS,
-    TEXT_INPUT_CLASS, TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
+    TAB_BAR_CLASS, TEXT_INPUT_CLASS, TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS,
+    checked,
 };
 
 const VOID: JavaType = JavaType::Primitive(Primitive::Void);
@@ -208,6 +209,7 @@ pub(super) struct Jni {
     pub(super) checkbox: Global<JClass<'static>>,
     pub(super) radio_button: Global<JClass<'static>>,
     pub(super) radio_group: Global<JClass<'static>>,
+    pub(super) tab_bar: Global<JClass<'static>>,
     pub(super) date_picker: Global<JClass<'static>>,
     pub(super) seek_bar: Global<JClass<'static>>,
     pub(super) progress_bar: Global<JClass<'static>>,
@@ -265,7 +267,11 @@ pub(super) struct Jni {
     pub(super) checkbox_set_checked_silently: Method,
     pub(super) radio_set_checked_silently: Method,
     pub(super) configure_radio_group: Method,
+    pub(super) configure_tab_bar: Method,
     pub(super) configure_date_picker: Method,
+    pub(super) date_picker_set_date_range: Method,
+    pub(super) date_picker_set_time_range: Method,
+    pub(super) date_picker_set_style: Method,
     pub(super) configure_seek_bar: Method,
     pub(super) seek_set_value_silently: Method,
 
@@ -303,6 +309,7 @@ pub(super) struct Jni {
     pub(super) checkbox_ctor: Ctor,
     pub(super) radio_ctor: Ctor,
     pub(super) radio_group_ctor: Ctor,
+    pub(super) tab_bar_ctor: Ctor,
     pub(super) date_picker_ctor: Ctor,
     pub(super) seek_bar_ctor: Ctor,
     pub(super) progress_bar_ctor: Ctor,
@@ -323,6 +330,7 @@ impl Jni {
         let checkbox = class(env, CHECKBOX_CLASS)?;
         let radio_button = class(env, RADIO_CLASS)?;
         let radio_group = class(env, RADIO_GROUP_CLASS)?;
+        let tab_bar = class(env, TAB_BAR_CLASS)?;
         let date_picker = class(env, DATE_PICKER_CLASS)?;
         let seek_bar = class(env, SEEK_BAR_CLASS)?;
         let progress_bar = class(env, PROGRESS_BAR_CLASS)?;
@@ -460,7 +468,23 @@ impl Jni {
                 "([Ljava/lang/String;IFIFZ)V",
                 VOID
             ),
-            configure_date_picker: method!(env, &date_picker, "configure", "(IIIZFIZ)V", VOID),
+            configure_tab_bar: method!(
+                env,
+                &tab_bar,
+                "configure",
+                "([Ljava/lang/String;IFIZ)V",
+                VOID
+            ),
+            configure_date_picker: method!(env, &date_picker, "configure", "(IIIIIIZ)V", VOID),
+            date_picker_set_date_range: method!(
+                env,
+                &date_picker,
+                "setDateRange",
+                "(IIIIII)V",
+                VOID
+            ),
+            date_picker_set_time_range: method!(env, &date_picker, "setTimeRange", "(IIII)V", VOID),
+            date_picker_set_style: method!(env, &date_picker, "setStyle", "(FIZ)V", VOID),
             configure_seek_bar: method!(env, &seek_bar, "configure", "(FFFI)V", VOID),
             seek_set_value_silently: method!(env, &seek_bar, "setValueSilently", "(F)V", VOID),
 
@@ -598,6 +622,11 @@ impl Jni {
                 &radio_group,
                 "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
             ),
+            tab_bar_ctor: ctor!(
+                env,
+                &tab_bar,
+                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
+            ),
             date_picker_ctor: ctor!(
                 env,
                 &date_picker,
@@ -623,6 +652,7 @@ impl Jni {
             checkbox,
             radio_button,
             radio_group,
+            tab_bar,
             date_picker,
             seek_bar,
             progress_bar,

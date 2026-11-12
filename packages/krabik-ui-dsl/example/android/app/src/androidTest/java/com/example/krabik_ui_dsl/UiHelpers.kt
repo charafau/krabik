@@ -1,9 +1,12 @@
 package com.example.krabik_ui_dsl
 
 import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.action.CoordinatesProvider
+import androidx.test.espresso.action.GeneralSwipeAction
+import androidx.test.espresso.action.Press
+import androidx.test.espresso.action.Swipe
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.swipeDown
-import androidx.test.espresso.action.ViewActions.swipeUp
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isCompletelyDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.isRoot
@@ -23,14 +26,29 @@ internal fun openPage(label: String) {
     Thread.sleep(300)
 }
 
+/**
+ * A short upward swipe, relative to the view it is performed on.
+ *
+ * A full `swipeUp` flings through long catalogs and can skip a short button
+ * between two checks. Stepping by a fifth of the viewport guarantees a target
+ * below the fold becomes visible before it can pass above it.
+ */
+private val shortSwipeUp = GeneralSwipeAction(
+    Swipe.SLOW,
+    CoordinatesProvider { view -> floatArrayOf(view.width / 2f, view.height * 0.7f) },
+    CoordinatesProvider { view -> floatArrayOf(view.width / 2f, view.height * 0.5f) },
+    Press.FINGER,
+)
+
 /** Swipes up until [label] is displayed. */
 internal fun swipeTo(label: String) {
-    repeat(12) {
+    swipeToTop()
+    repeat(30) {
         if (isVisible(label)) {
             return
         }
-        onView(isRoot()).perform(swipeUp())
-        Thread.sleep(400)
+        onView(isRoot()).perform(shortSwipeUp)
+        Thread.sleep(150)
     }
 }
 

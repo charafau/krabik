@@ -221,10 +221,25 @@ class RustRootView(
         }
     }
 
-    /** Forwards a date selected in a native date picker back to Rust. */
-    fun onDateChanged(nodeId: Long, year: Int, month: Int, day: Int) {
+    /** Forwards the selected index of a native tab bar back to Rust. */
+    fun onTabSelected(nodeId: Long, index: Int) {
         if (handle != 0L) {
-            nativeOnDateChanged(handle, hostId, nodeId, year, month, day)
+            nativeOnTabSelected(handle, hostId, nodeId, index)
+        }
+    }
+
+    /** Forwards a date, time or date-and-time selection back to Rust. */
+    fun onPickerChanged(
+        nodeId: Long,
+        kind: Int,
+        year: Int,
+        month: Int,
+        day: Int,
+        hour: Int,
+        minute: Int,
+    ) {
+        if (handle != 0L) {
+            nativeOnPickerChanged(handle, hostId, nodeId, kind, year, month, day, hour, minute)
         }
     }
 
@@ -308,13 +323,18 @@ class RustRootView(
 
     private external fun nativeOnRadioGroupSelected(handle: Long, host: Long, nodeId: Long, index: Int)
 
-    private external fun nativeOnDateChanged(
+    private external fun nativeOnTabSelected(handle: Long, host: Long, nodeId: Long, index: Int)
+
+    private external fun nativeOnPickerChanged(
         handle: Long,
         host: Long,
         nodeId: Long,
+        kind: Int,
         year: Int,
         month: Int,
         day: Int,
+        hour: Int,
+        minute: Int,
     )
 
     private external fun nativeOnScroll(handle: Long, host: Long, nodeId: Long, offset: Float)

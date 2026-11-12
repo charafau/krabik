@@ -16,7 +16,7 @@ use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Event, set_app_factory};
 use krabik_ui_dsl::navigation::{Navigation, Screen};
 use krabik_ui_dsl::presentation::{Presentation, PresentationKind};
-use krabik_ui_dsl::ui::{DateValue, Element};
+use krabik_ui_dsl::ui::{DateValue, Element, TimeValue};
 
 mod checklist;
 mod pages;
@@ -39,6 +39,11 @@ pub struct ShowcaseApp {
     size_choice: usize,
     date: DateValue,
     inline_date: DateValue,
+    time: TimeValue,
+    date_time_date: DateValue,
+    date_time: TimeValue,
+    range_date: DateValue,
+    tab: usize,
     volume: f32,
     stepped: f32,
     progress: f32,
@@ -65,6 +70,11 @@ impl ShowcaseApp {
             size_choice: 1,
             date: DateValue::new(2026, 11, 12),
             inline_date: DateValue::new(2026, 11, 12),
+            time: TimeValue::new(10, 30),
+            date_time_date: DateValue::new(2026, 11, 12),
+            date_time: TimeValue::new(10, 30),
+            range_date: DateValue::new(2026, 6, 15),
+            tab: 0,
             volume: 40.0,
             stepped: 30.0,
             progress: 0.4,
@@ -291,6 +301,39 @@ impl App for ShowcaseApp {
                 self.inline_date = date;
                 true
             }
+            Event::DateChanged {
+                action: "demo:date-range",
+                date,
+            } => {
+                self.range_date = date;
+                true
+            }
+            Event::TimeChanged {
+                action: "demo:time",
+                time,
+            } => {
+                self.time = time;
+                true
+            }
+            Event::DateTimeChanged {
+                action: "demo:date-time",
+                date,
+                time,
+            } => {
+                self.date_time_date = date;
+                self.date_time = time;
+                true
+            }
+            Event::Selected {
+                action: "demo:tab",
+                index,
+            } => {
+                if index > 2 || self.tab == index {
+                    return false;
+                }
+                self.tab = index;
+                true
+            }
             Event::ValueChanged {
                 action: "demo:volume",
                 value,
@@ -431,6 +474,63 @@ mod tests {
             date: DateValue::new(2027, 3, 4),
         }));
         assert_eq!(app.inline_date, DateValue::new(2027, 3, 4));
+    }
+
+    #[test]
+    fn time_and_range_pickers_update_their_values() {
+        let mut app = app();
+        assert!(app.handle(Event::TimeChanged {
+            action: "demo:time",
+            time: TimeValue::new(9, 45),
+        }));
+        assert_eq!(app.time, TimeValue::new(9, 45));
+        assert!(app.handle(Event::DateTimeChanged {
+            action: "demo:date-time",
+            date: DateValue::new(2027, 2, 3),
+            time: TimeValue::new(18, 15),
+        }));
+        assert_eq!(app.date_time_date, DateValue::new(2027, 2, 3));
+        assert_eq!(app.date_time, TimeValue::new(18, 15));
+        assert!(app.handle(Event::DateChanged {
+            action: "demo:date-range",
+            date: DateValue::new(2026, 8, 1),
+        }));
+        assert_eq!(app.range_date, DateValue::new(2026, 8, 1));
+    }
+
+    #[test]
+    fn tabs_page_contains_both_tab_bars() {
+        let element = pages::screen(&app(), "tabs").expect("tabs page");
+        let tree = krabik_ui_dsl::tree::build(&element);
+        let bars: Vec<_> = krabik_ui_dsl::tree::preorder(&tree)
+            .into_iter()
+            .filter(|node| matches!(node.kind, krabik_ui_dsl::tree::NodeKind::TabBar(_)))
+            .collect();
+        assert_eq!(bars.len(), 2);
+        for bar in bars {
+            let krabik_ui_dsl::tree::NodeKind::TabBar(props) = &bar.kind else {
+                continue;
+            };
+            assert!(!props.tabs.is_empty());
+        }
+    }
+
+    #[test]
+    fn tab_bar_updates_the_selected_tab() {
+        let mut app = app();
+        assert!(app.handle(Event::Selected {
+            action: "demo:tab",
+            index: 2,
+        }));
+        assert_eq!(app.tab, 2);
+        assert!(!app.handle(Event::Selected {
+            action: "demo:tab",
+            index: 2,
+        }));
+        assert!(!app.handle(Event::Selected {
+            action: "demo:tab",
+            index: 9,
+        }));
     }
 
     #[test]
