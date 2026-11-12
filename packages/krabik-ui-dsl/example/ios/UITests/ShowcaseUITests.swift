@@ -49,12 +49,32 @@ final class ShowcaseUITests: XCTestCase {
         )
         backToCatalog()
 
-        open("Animations")
+        open("Frames & opacity")
         XCTAssertTrue(app.staticTexts["Panel is open."].waitForExistence(timeout: 5))
         tapButton("Hide panel")
         XCTAssertTrue(app.staticTexts["Panel is closed."].waitForExistence(timeout: 5))
         tapButton("Show panel")
         XCTAssertTrue(app.staticTexts["Panel is open."].waitForExistence(timeout: 5))
+        backToCatalog()
+
+        open("Decoration")
+        XCTAssertTrue(app.staticTexts["Warm card"].waitForExistence(timeout: 5))
+        tapButton("Cool palette")
+        XCTAssertTrue(app.staticTexts["Cool card"].waitForExistence(timeout: 5))
+        backToCatalog()
+
+        open("Enter & exit")
+        XCTAssertTrue(app.staticTexts["2 cards"].waitForExistence(timeout: 5))
+        tapButton("Add card")
+        XCTAssertTrue(app.staticTexts["3 cards"].waitForExistence(timeout: 5))
+        tapButton("Remove card")
+        XCTAssertTrue(app.staticTexts["2 cards"].waitForExistence(timeout: 5))
+        backToCatalog()
+
+        open("Curves & springs")
+        XCTAssertTrue(app.staticTexts["Target: narrow"].waitForExistence(timeout: 5))
+        tapButton("Run curves")
+        XCTAssertTrue(app.staticTexts["Target: wide"].waitForExistence(timeout: 5))
         backToCatalog()
 
         open("Progress")
