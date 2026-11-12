@@ -46,6 +46,9 @@ class RustRootView(
     /** Running frame animations, so a newer frame cancels the previous one. */
     private val frameAnimators = WeakHashMap<View, ValueAnimator>()
 
+    /** Views animating out, keyed by node id so a recreated node cancels the exit. */
+    private val pendingExits = LongSparseArray<View>()
+
     init {
         if (!ownsSession) {
             nativeAttachHost(handle, hostId)
@@ -118,7 +121,7 @@ class RustRootView(
      * another layout pass.
      */
     fun applyFrame(view: View, x: Int, y: Int, width: Int, height: Int) {
-        applyFrameInternal(view, x, y, width, height, 0, 0)
+        applyFrameInternal(view, x, y, width, height, 0, 0, 0, 0, 0, 0)
     }
 
     /**
@@ -136,14 +139,19 @@ class RustRootView(
         for (id in ids) {
             val view = nodeViews.get(id)?.get()
             if (view != null) {
+                val animation = index * ANIMATION_STRIDE
                 applyFrameInternal(
                     view,
                     frames[offset],
                     frames[offset + 1],
                     frames[offset + 2],
                     frames[offset + 3],
-                    animations[index * 2],
-                    animations[index * 2 + 1],
+                    animations[animation],
+                    animations[animation + 1],
+                    animations[animation + 2],
+                    animations[animation + 3],
+                    animations[animation + 4],
+                    animations[animation + 5],
                 )
             }
             offset += 4
@@ -153,6 +161,15 @@ class RustRootView(
 
     /** Remembers a node's view so a later batch can address it by id. */
     fun registerView(nodeId: Long, view: View) {
+        // A deferred exit may still own this node id. Detach it immediately and
+        // let the new view take over.
+        pendingExits.get(nodeId)?.let { old ->
+            old.animate().cancel()
+            (old.parent as? ViewGroup)?.removeView(old)
+            pendingExits.remove(nodeId)
+            frameAnimators.remove(old)?.cancel()
+            KrabikStyle.cancel(old)
+        }
         nodeViews.put(nodeId, WeakReference(view))
     }
 
@@ -160,9 +177,70 @@ class RustRootView(
     fun unregisterView(nodeId: Long) {
         val view = nodeViews.get(nodeId)?.get()
         nodeViews.remove(nodeId)
+        pendingExits.remove(nodeId)
         if (view != null) {
             frameAnimators.remove(view)?.cancel()
+            KrabikStyle.cancel(view)
         }
+    }
+
+    /** Starts the fade/scale entrance of a newly created node. */
+    fun startEnter(
+        view: View,
+        targetAlpha: Float,
+        duration: Int,
+        kind: Int,
+        p1: Int,
+        p2: Int,
+        p3: Int,
+        p4: Int,
+    ) {
+        if (duration <= 0) return
+        view.alpha = 0f
+        view.scaleX = 0.96f
+        view.scaleY = 0.96f
+        view.post {
+            view.animate()
+                .alpha(targetAlpha)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(duration.toLong())
+                .setInterpolator(KrabikStyle.interpolator(kind, p1, p2, p3, p4))
+                .start()
+        }
+    }
+
+    /** Animates a node out and detaches it when the transition ends. */
+    fun startExit(
+        nodeId: Long,
+        view: View,
+        duration: Int,
+        kind: Int,
+        p1: Int,
+        p2: Int,
+        p3: Int,
+        p4: Int,
+    ) {
+        pendingExits.put(nodeId, view)
+        frameAnimators.remove(view)?.cancel()
+        KrabikStyle.cancel(view)
+        view.animate()
+            .alpha(0f)
+            .scaleX(0.96f)
+            .scaleY(0.96f)
+            .setDuration(duration.toLong())
+            .setInterpolator(KrabikStyle.interpolator(kind, p1, p2, p3, p4))
+            .withEndAction {
+                (view.parent as? ViewGroup)?.removeView(view)
+                if (pendingExits.get(nodeId) === view) {
+                    pendingExits.remove(nodeId)
+                    if (nodeViews.get(nodeId)?.get() === view) {
+                        nodeViews.remove(nodeId)
+                    }
+                }
+                KrabikStyle.cancel(view)
+            }
+            .start()
     }
 
     /** The number of registered views, for tests. */
@@ -175,7 +253,11 @@ class RustRootView(
         width: Int,
         height: Int,
         duration: Int,
-        curve: Int,
+        curveKind: Int,
+        p1: Int,
+        p2: Int,
+        p3: Int,
+        p4: Int,
     ) {
         frameAnimators.remove(view)?.cancel()
 
@@ -191,7 +273,7 @@ class RustRootView(
 
         val animator = ValueAnimator.ofFloat(0f, 1f).apply {
             this.duration = duration.toLong()
-            interpolator = KrabikStyle.interpolator(curve)
+            interpolator = KrabikStyle.interpolator(curveKind, p1, p2, p3, p4)
             addUpdateListener { animation ->
                 val fraction = animation.animatedValue as Float
                 view.translationX = startX + (x - startX) * fraction
@@ -200,8 +282,8 @@ class RustRootView(
                     view,
                     x = 0,
                     y = 0,
-                    width = lerp(startWidth, width, fraction),
-                    height = lerp(startHeight, height, fraction),
+                    width = lerp(startWidth, width, fraction).coerceAtLeast(0),
+                    height = lerp(startHeight, height, fraction).coerceAtLeast(0),
                     move = false,
                 )
             }
@@ -235,6 +317,10 @@ class RustRootView(
 
     private fun lerp(start: Int, end: Int, fraction: Float): Int =
         (start + (end - start) * fraction).roundToInt()
+
+    private companion object {
+        const val ANIMATION_STRIDE = 6
+    }
 
     /** Forwards an edit of a native input back to Rust. */
     fun onTextChanged(nodeId: Long, text: String) {

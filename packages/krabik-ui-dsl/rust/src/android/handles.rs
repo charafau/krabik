@@ -281,6 +281,8 @@ pub(super) struct Jni {
     pub(super) apply_layouts: Method,
     pub(super) register_view: Method,
     pub(super) unregister_view: Method,
+    pub(super) start_enter: Method,
+    pub(super) start_exit: Method,
     pub(super) ensure_keyboard_shown: Method,
 
     // Statics and their fields.
@@ -504,6 +506,20 @@ impl Jni {
                 VOID
             ),
             unregister_view: method!(env, &rust_root_view, "unregisterView", "(J)V", VOID),
+            start_enter: method!(
+                env,
+                &rust_root_view,
+                "startEnter",
+                "(Landroid/view/View;FIIIIII)V",
+                VOID
+            ),
+            start_exit: method!(
+                env,
+                &rust_root_view,
+                "startExit",
+                "(JLandroid/view/View;IIIIII)V",
+                VOID
+            ),
             ensure_keyboard_shown: method!(
                 env,
                 &rust_root_view,
@@ -567,7 +583,7 @@ impl Jni {
                 env,
                 &krabik_style,
                 "apply",
-                "(Landroid/view/View;IZIIZZFFFFFZFIZFZFII)V",
+                "(Landroid/view/View;IZIIZZFFFFFZFIZFZFIIIIII)V",
                 VOID
             ),
             typeface_default: static_field!(

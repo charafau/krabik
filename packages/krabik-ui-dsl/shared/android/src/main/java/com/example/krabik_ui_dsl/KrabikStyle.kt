@@ -1,5 +1,7 @@
 package com.example.krabik_ui_dsl
 
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.Drawable
@@ -11,16 +13,24 @@ import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.Interpolator
 import android.view.animation.LinearInterpolator
+import android.view.animation.PathInterpolator
 import java.util.WeakHashMap
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Applies the platform-independent style properties to native views.
  *
  * Keeping drawable construction here keeps the Rust renderer to a single JNI
- * call per styled node and preserves the native ripple of buttons.
+ * call per styled node and preserves the native ripple of buttons. When the
+ * node opts into an animation, the same values are interpolated by a
+ * [ValueAnimator] instead of being applied immediately.
  */
 object KrabikStyle {
-    private val originalBackgrounds = WeakHashMap<View, Drawable?>()
+    private val states = WeakHashMap<View, ViewStyle>()
 
     @JvmStatic
     fun apply(
@@ -44,102 +54,293 @@ object KrabikStyle {
         ripple: Boolean,
         elevation: Float,
         animationDuration: Int,
-        animationCurve: Int,
+        curveKind: Int,
+        p1: Int,
+        p2: Int,
+        p3: Int,
+        p4: Int,
     ) {
-        val density = view.resources.displayMetrics.density
-        val borderPx = borderWidth * density
-        val radii = radiiInPixels(
-            density,
-            if (hasCornerRadii) {
-                floatArrayOf(
-                    topLeftRadius,
-                    topRightRadius,
-                    bottomRightRadius,
-                    bottomLeftRadius,
-                )
-            } else {
-                floatArrayOf(cornerRadius, cornerRadius, cornerRadius, cornerRadius)
+        val target = if (hasCornerRadii) {
+            StyleValues(
+                backgroundColor = backgroundColor,
+                hasBackground = hasBackground,
+                gradientStart = gradientStart,
+                gradientEnd = gradientEnd,
+                hasGradient = hasGradient,
+                gradientHorizontal = gradientHorizontal,
+                topLeft = topLeftRadius,
+                topRight = topRightRadius,
+                bottomRight = bottomRightRadius,
+                bottomLeft = bottomLeftRadius,
+                borderWidth = borderWidth,
+                borderColor = borderColor,
+                hasBorder = hasBorder,
+                alpha = opacity.coerceIn(0f, 1f),
+                elevation = elevation,
+            )
+        } else {
+            StyleValues(
+                backgroundColor = backgroundColor,
+                hasBackground = hasBackground,
+                gradientStart = gradientStart,
+                gradientEnd = gradientEnd,
+                hasGradient = hasGradient,
+                gradientHorizontal = gradientHorizontal,
+                topLeft = cornerRadius,
+                topRight = cornerRadius,
+                bottomRight = cornerRadius,
+                bottomLeft = cornerRadius,
+                borderWidth = borderWidth,
+                borderColor = borderColor,
+                hasBorder = hasBorder,
+                alpha = opacity.coerceIn(0f, 1f),
+                elevation = elevation,
+            )
+        }
+
+        val style = states.getOrPut(view) { ViewStyle() }
+        // A cancelled animator must not apply its old target; the new
+        // animation starts from the last rendered frame instead.
+        style.animator?.let {
+            it.removeAllListeners()
+            it.cancel()
+        }
+        style.animator = null
+
+        val from = style.current
+        if (animationDuration <= 0 || from == null) {
+            applyValues(view, style, target, ripple)
+            style.current = target
+            return
+        }
+
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = animationDuration.toLong()
+            interpolator = interpolator(curveKind, p1, p2, p3, p4)
+            addUpdateListener { animation ->
+                val fraction = animation.animatedValue as Float
+                val value = interpolate(from, target, fraction)
+                applyValues(view, style, value, ripple)
+                style.current = value
+            }
+        }
+        animator.addListener(
+            object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    applyValues(view, style, target, ripple)
+                    style.current = target
+                    if (style.animator === animation) {
+                        style.animator = null
+                    }
+                }
             },
         )
-        val hasShape = hasBackground || hasGradient || hasBorder ||
-            radii.any { it > 0f } || elevation > 0f
+        style.animator = animator
+        animator.start()
+    }
+
+    /** Cancels a view's style animation and forgets its state. */
+    @JvmStatic
+    fun cancel(view: View) {
+        states.remove(view)?.animator?.let {
+            it.removeAllListeners()
+            it.cancel()
+        }
+    }
+
+    /** The native interpolator for a packed animation curve. */
+    @JvmStatic
+    fun interpolator(kind: Int, p1: Int, p2: Int, p3: Int, p4: Int): Interpolator =
+        when (kind) {
+            1 -> PathInterpolator(
+                (p1 / SCALE).coerceIn(0f, 1f),
+                p2 / SCALE,
+                (p3 / SCALE).coerceIn(0f, 1f),
+                p4 / SCALE,
+            )
+            2 -> SpringInterpolator(p1 / SCALE, p2 / SCALE)
+            else -> when (p1) {
+                1 -> LinearInterpolator()
+                2 -> AccelerateInterpolator()
+                3 -> DecelerateInterpolator()
+                else -> AccelerateDecelerateInterpolator()
+            }
+        }
+
+    private fun applyValues(view: View, style: ViewStyle, values: StyleValues, ripple: Boolean) {
+        val density = view.resources.displayMetrics.density
+        fun radius(value: Float): Float = (value * density).coerceAtLeast(0f)
+        val radii = floatArrayOf(
+            radius(values.topLeft),
+            radius(values.topLeft),
+            radius(values.topRight),
+            radius(values.topRight),
+            radius(values.bottomRight),
+            radius(values.bottomRight),
+            radius(values.bottomLeft),
+            radius(values.bottomLeft),
+        )
+        val hasShape = values.hasBackground || values.hasGradient || values.hasBorder ||
+            radii.any { it > 0f } || values.elevation > 0f
 
         if (!hasShape) {
-            // Restore what the platform gave the view, if we ever replaced it.
-            if (originalBackgrounds.containsKey(view)) {
-                view.background = originalBackgrounds.remove(view)
-            }
+            style.shape = null
+            style.mask = null
+            style.ripple = null
+            restoreBackground(view, style)
         } else {
-            if (!originalBackgrounds.containsKey(view)) {
-                originalBackgrounds[view] = view.background
-            }
-
-            val shape = GradientDrawable().apply {
+            rememberBackground(view, style)
+            val shape = style.shape ?: GradientDrawable().apply {
                 this.shape = GradientDrawable.RECTANGLE
-                if (hasGradient) {
-                    colors = intArrayOf(gradientStart, gradientEnd)
-                    orientation = if (gradientHorizontal) {
-                        GradientDrawable.Orientation.LEFT_RIGHT
-                    } else {
-                        GradientDrawable.Orientation.TOP_BOTTOM
-                    }
+                style.shape = this
+            }
+            if (values.hasGradient) {
+                shape.colors = intArrayOf(values.gradientStart, values.gradientEnd)
+                shape.orientation = if (values.gradientHorizontal) {
+                    GradientDrawable.Orientation.LEFT_RIGHT
                 } else {
-                    setColor(if (hasBackground) backgroundColor else Color.TRANSPARENT)
+                    GradientDrawable.Orientation.TOP_BOTTOM
                 }
-                setCornerRadii(radii)
-                if (hasBorder && borderPx > 0f) {
-                    setStroke(borderPx.toInt().coerceAtLeast(1), borderColor)
-                }
+            } else {
+                shape.setColor(if (values.hasBackground) values.backgroundColor else Color.TRANSPARENT)
+            }
+            shape.cornerRadii = radii
+            if (values.hasBorder && values.borderWidth > 0f) {
+                shape.setStroke(
+                    (values.borderWidth.coerceAtLeast(0f) * density).toInt().coerceAtLeast(1),
+                    values.borderColor,
+                )
+            } else {
+                shape.setStroke(0, Color.TRANSPARENT)
             }
 
-            view.background = if (ripple) {
-                val mask = GradientDrawable().apply {
+            if (ripple) {
+                val mask = style.mask ?: GradientDrawable().apply {
                     this.shape = GradientDrawable.RECTANGLE
                     setColor(Color.WHITE)
-                    setCornerRadii(radii)
+                    style.mask = this
                 }
-                RippleDrawable(ColorStateList.valueOf(RIPPLE_COLOR), shape, mask)
-            } else {
-                shape
+                mask.cornerRadii = radii
+                val wrapper = style.ripple ?: RippleDrawable(
+                    ColorStateList.valueOf(RIPPLE_COLOR),
+                    shape,
+                    mask,
+                ).also { style.ripple = it }
+                if (view.background !== wrapper) {
+                    view.background = wrapper
+                }
+            } else if (view.background !== shape) {
+                view.background = shape
             }
+            view.clipToOutline = radii.any { it > 0f }
         }
 
-        view.clipToOutline = radii.any { it > 0f }
-        view.elevation = (elevation * density).coerceAtLeast(0f)
+        view.alpha = values.alpha.coerceIn(0f, 1f)
+        view.elevation = (values.elevation * density).coerceAtLeast(0f)
+    }
 
-        val targetAlpha = opacity.coerceIn(0f, 1f)
-        if (animationDuration > 0) {
-            view.animate()
-                .setDuration(animationDuration.toLong())
-                .setInterpolator(interpolator(animationCurve))
-                .alpha(targetAlpha)
-        } else {
-            view.animate().cancel()
-            view.alpha = targetAlpha
+    private fun rememberBackground(view: View, style: ViewStyle) {
+        if (!style.replaced) {
+            style.original = view.background
+            style.replaced = true
         }
     }
 
-    /** The native interpolator for a shared animation curve code. */
-    @JvmStatic
-    fun interpolator(curve: Int): Interpolator = when (curve) {
-        1 -> LinearInterpolator()
-        2 -> AccelerateInterpolator()
-        3 -> DecelerateInterpolator()
-        else -> AccelerateDecelerateInterpolator()
+    private fun restoreBackground(view: View, style: ViewStyle) {
+        if (style.replaced) {
+            view.background = style.original
+            style.original = null
+            style.replaced = false
+        }
     }
 
-    /**
-     * Converts four radii into the eight-value form expected by
-     * `GradientDrawable.setCornerRadii`, scaling to pixels.
-     */
-    private fun radiiInPixels(density: Float, radii: FloatArray): FloatArray {
-        val px = FloatArray(8)
-        for (corner in 0 until 4) {
-            px[corner * 2] = radii[corner] * density
-            px[corner * 2 + 1] = radii[corner] * density
+    private fun interpolate(from: StyleValues, to: StyleValues, fraction: Float): StyleValues {
+        val evaluator = ArgbEvaluator()
+        fun color(a: Int, b: Int): Int = evaluator.evaluate(fraction, a, b) as Int
+        fun lerp(a: Float, b: Float): Float = a + (b - a) * fraction
+        return StyleValues(
+            backgroundColor = color(
+                if (from.hasBackground) from.backgroundColor else Color.TRANSPARENT,
+                if (to.hasBackground) to.backgroundColor else Color.TRANSPARENT,
+            ),
+            hasBackground = from.hasBackground || to.hasBackground,
+            gradientStart = color(
+                if (from.hasGradient) from.gradientStart else Color.TRANSPARENT,
+                if (to.hasGradient) to.gradientStart else Color.TRANSPARENT,
+            ),
+            gradientEnd = color(
+                if (from.hasGradient) from.gradientEnd else Color.TRANSPARENT,
+                if (to.hasGradient) to.gradientEnd else Color.TRANSPARENT,
+            ),
+            hasGradient = from.hasGradient || to.hasGradient,
+            gradientHorizontal = to.gradientHorizontal,
+            topLeft = lerp(from.topLeft, to.topLeft),
+            topRight = lerp(from.topRight, to.topRight),
+            bottomRight = lerp(from.bottomRight, to.bottomRight),
+            bottomLeft = lerp(from.bottomLeft, to.bottomLeft),
+            borderWidth = lerp(from.borderWidth, to.borderWidth),
+            borderColor = color(
+                if (from.hasBorder) from.borderColor else Color.TRANSPARENT,
+                if (to.hasBorder) to.borderColor else Color.TRANSPARENT,
+            ),
+            hasBorder = from.hasBorder || to.hasBorder,
+            alpha = lerp(from.alpha, to.alpha),
+            elevation = lerp(from.elevation, to.elevation),
+        )
+    }
+
+    private class ViewStyle {
+        var current: StyleValues? = null
+        var animator: ValueAnimator? = null
+        var shape: GradientDrawable? = null
+        var mask: GradientDrawable? = null
+        var ripple: RippleDrawable? = null
+        var original: Drawable? = null
+        var replaced = false
+    }
+
+    private data class StyleValues(
+        val backgroundColor: Int,
+        val hasBackground: Boolean,
+        val gradientStart: Int,
+        val gradientEnd: Int,
+        val hasGradient: Boolean,
+        val gradientHorizontal: Boolean,
+        val topLeft: Float,
+        val topRight: Float,
+        val bottomRight: Float,
+        val bottomLeft: Float,
+        val borderWidth: Float,
+        val borderColor: Int,
+        val hasBorder: Boolean,
+        val alpha: Float,
+        val elevation: Float,
+    )
+
+    /** A damped-spring timing curve evaluated in normalized time. */
+    private class SpringInterpolator(
+        damping: Float,
+        response: Float,
+    ) : Interpolator {
+        private val zeta = damping.coerceIn(0.01f, 1f)
+        private val response = response.coerceAtLeast(0.01f)
+
+        override fun getInterpolation(input: Float): Float {
+            if (input <= 0f) return 0f
+            if (input >= 1f) return 1f
+
+            val omega = (2.0 * PI / response).toFloat()
+            val time = input * response
+            val decay = exp(-zeta * omega * time)
+            if (zeta >= 0.999f) {
+                return 1f - decay * (1f + omega * time)
+            }
+            val damped = omega * sqrt(1f - zeta * zeta)
+            return 1f - decay *
+                (cos(damped * time) + (zeta * omega / damped) * sin(damped * time))
         }
-        return px
     }
 
     private const val RIPPLE_COLOR: Int = 0x1F000000
+    private const val SCALE = 10_000f
 }

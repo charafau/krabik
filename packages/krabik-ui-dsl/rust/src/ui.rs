@@ -879,7 +879,7 @@ impl Gradient {
 }
 
 /// A timing curve for implicit animations.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum AnimationCurve {
     /// Constant speed.
     Linear,
@@ -890,22 +890,61 @@ pub enum AnimationCurve {
     /// Starts and ends slowly.
     #[default]
     EaseInOut,
+    /// A custom cubic Bezier curve, with control points in `0.0..=1.0`.
+    CubicBezier {
+        /// X coordinate of the first control point.
+        x1: f32,
+        /// Y coordinate of the first control point.
+        y1: f32,
+        /// X coordinate of the second control point.
+        x2: f32,
+        /// Y coordinate of the second control point.
+        y2: f32,
+    },
+    /// A damped spring.
+    Spring {
+        /// Damping ratio. `1.0` is critically damped; less overshoots.
+        damping: f32,
+        /// Natural response time in seconds.
+        response: f32,
+    },
 }
 
 impl AnimationCurve {
-    /// The stable code shared with the native renderers.
-    pub(crate) const fn code(self) -> i32 {
+    /// Creates a custom cubic Bezier curve.
+    pub const fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
+        Self::CubicBezier { x1, y1, x2, y2 }
+    }
+
+    /// Creates a damped spring curve.
+    pub const fn spring(damping: f32, response: f32) -> Self {
+        Self::Spring { damping, response }
+    }
+
+    /// Packs the curve into the fixed-width integers shared with the Android renderer.
+    ///
+    /// The first value is the kind: `0` standard, `1` cubic Bezier, `2` spring.
+    /// Fractional parameters use four decimal places.
+    pub(crate) fn packed(&self) -> [i32; 5] {
+        fn fixed(value: f32) -> i32 {
+            (value * 10_000.0).round() as i32
+        }
+
         match self {
-            Self::EaseInOut => 0,
-            Self::Linear => 1,
-            Self::EaseIn => 2,
-            Self::EaseOut => 3,
+            Self::EaseInOut => [0, 0, 0, 0, 0],
+            Self::Linear => [0, 1, 0, 0, 0],
+            Self::EaseIn => [0, 2, 0, 0, 0],
+            Self::EaseOut => [0, 3, 0, 0, 0],
+            Self::CubicBezier { x1, y1, x2, y2 } => {
+                [1, fixed(*x1), fixed(*y1), fixed(*x2), fixed(*y2)]
+            }
+            Self::Spring { damping, response } => [2, fixed(*damping), fixed(*response), 0, 0],
         }
     }
 }
 
 /// An implicit animation applied when a node's frame or opacity changes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Animation {
     /// Duration in milliseconds. Zero disables the animation.
     pub duration_ms: u32,
@@ -926,7 +965,7 @@ impl Animation {
     }
 
     /// Replaces the timing curve.
-    pub const fn curve(mut self, curve: AnimationCurve) -> Self {
+    pub fn curve(mut self, curve: AnimationCurve) -> Self {
         self.curve = curve;
         self
     }
@@ -935,6 +974,37 @@ impl Animation {
 impl Default for Animation {
     fn default() -> Self {
         Self::new(Self::DEFAULT_DURATION_MS)
+    }
+}
+
+/// A fade-and-scale transition used when a node enters or leaves the tree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Transition {
+    /// Duration in milliseconds. Zero disables the transition.
+    pub duration_ms: u32,
+    /// The timing curve.
+    pub curve: AnimationCurve,
+}
+
+impl Transition {
+    /// Creates a transition with the given duration and an ease-in-out curve.
+    pub const fn new(duration_ms: u32) -> Self {
+        Self {
+            duration_ms,
+            curve: AnimationCurve::EaseInOut,
+        }
+    }
+
+    /// Replaces the timing curve.
+    pub fn curve(mut self, curve: AnimationCurve) -> Self {
+        self.curve = curve;
+        self
+    }
+}
+
+impl Default for Transition {
+    fn default() -> Self {
+        Self::new(Animation::DEFAULT_DURATION_MS)
     }
 }
 
@@ -975,8 +1045,12 @@ pub struct Style {
     pub elevation: f32,
     /// Whether the node accepts input. `None` leaves the platform default.
     pub enabled: Option<bool>,
-    /// Implicit animation for frame and opacity changes, if any.
+    /// Implicit animation for frame and decoration changes, if any.
     pub animation: Option<Animation>,
+    /// Fade-and-scale transition when the node is created, if any.
+    pub enter: Option<Transition>,
+    /// Fade-and-scale transition applied before the node is removed, if any.
+    pub exit: Option<Transition>,
     /// Accessibility label announced by screen readers, if any.
     pub accessibility_label: Option<String>,
 }
@@ -1243,6 +1317,32 @@ macro_rules! style_builder {
             pub fn animation_curve(mut self, curve: AnimationCurve) -> Self {
                 let animation = self.0.style.animation.unwrap_or_default().curve(curve);
                 self.0.style.animation = Some(animation);
+                self
+            }
+
+            /// Fades and scales the node in when it is created.
+            pub fn animate_enter(mut self, duration_ms: u32) -> Self {
+                self.0.style.enter = Some(Transition::new(duration_ms));
+                self
+            }
+
+            /// Fades and scales the node out before it is removed.
+            pub fn animate_exit(mut self, duration_ms: u32) -> Self {
+                self.0.style.exit = Some(Transition::new(duration_ms));
+                self
+            }
+
+            /// Replaces the enter transition's timing curve.
+            pub fn enter_curve(mut self, curve: AnimationCurve) -> Self {
+                let transition = self.0.style.enter.take().unwrap_or_default().curve(curve);
+                self.0.style.enter = Some(transition);
+                self
+            }
+
+            /// Replaces the exit transition's timing curve.
+            pub fn exit_curve(mut self, curve: AnimationCurve) -> Self {
+                let transition = self.0.style.exit.take().unwrap_or_default().curve(curve);
+                self.0.style.exit = Some(transition);
                 self
             }
 
@@ -2499,6 +2599,29 @@ mod tests {
             element.style.animation,
             Some(Animation::new(Animation::DEFAULT_DURATION_MS).curve(AnimationCurve::Linear))
         );
+    }
+
+    #[test]
+    fn custom_curves_and_enter_exit_transitions_are_stored() {
+        let element: Element = Button::new("Motion")
+            .animation(Animation::new(400).curve(AnimationCurve::cubic_bezier(0.2, 0.9, 0.3, 1.0)))
+            .animate_enter(200)
+            .enter_curve(AnimationCurve::spring(0.7, 0.35))
+            .animate_exit(160)
+            .exit_curve(AnimationCurve::EaseIn)
+            .into();
+
+        let animation = element.style.animation.as_ref().unwrap();
+        assert_eq!(
+            animation.curve,
+            AnimationCurve::cubic_bezier(0.2, 0.9, 0.3, 1.0)
+        );
+        let enter = element.style.enter.as_ref().unwrap();
+        assert_eq!(enter.duration_ms, 200);
+        assert_eq!(enter.curve, AnimationCurve::spring(0.7, 0.35));
+        let exit = element.style.exit.as_ref().unwrap();
+        assert_eq!(exit.duration_ms, 160);
+        assert_eq!(exit.curve, AnimationCurve::EaseIn);
     }
 
     #[test]
