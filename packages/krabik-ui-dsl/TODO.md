@@ -169,9 +169,10 @@ The runtime now supports multiple native hosts per application session:
   returns to the catalog before the Activity exits. iOS navigation uses the
   native bar's Back item.
 
-The showcase adds Navigation, Dialog and Bottom sheet entries. Android
-instrumented tests and iOS XCUITests cover push/pop, system back, dialog
-dismissal and sheet dismissal.
+The widget showcase itself is now a native navigation stack: every widget page
+is a screen, Dialog and Bottom sheet are modal hosts. Android instrumented
+tests and iOS XCUITests cover push/pop, system back, dialog dismissal and sheet
+dismissal.
 
 ### 3b. Virtualized lists ✅
 

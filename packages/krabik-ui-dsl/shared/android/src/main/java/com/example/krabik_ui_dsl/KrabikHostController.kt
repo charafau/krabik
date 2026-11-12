@@ -27,15 +27,17 @@ class KrabikHostController(
         if (navContainer.id == View.NO_ID) {
             navContainer.id = View.generateViewId()
         }
-        main.setController(this)
         navContainer.setBackgroundColor(Color.WHITE)
         navContainer.isClickable = true
         toolbar.visibility = View.GONE
-        toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationContentDescription("Back")
         toolbar.setNavigationOnClickListener {
             main.onBackPressed()
         }
+        setRootVisible(true)
+        // Register last: this synchronously syncs the session, which may push
+        // the first navigation screen and update the toolbar/containers.
+        main.setController(this)
     }
 
     /** Pushes a screen fragment for a Rust host. */
@@ -77,18 +79,24 @@ class KrabikHostController(
 
     /** Switches between the main app root and the navigation container. */
     fun setRootVisible(visible: Boolean) {
-        // Keep the main root laid out behind the navigation container. Hiding
-        // and re-showing it leaves its native view with stale measured bounds.
-        mainContainer.visibility = View.VISIBLE
+        // A navigation app renders its root as a screen too, so the unused
+        // main host must leave the accessibility tree to avoid duplicate rows.
+        mainContainer.visibility = if (visible) View.VISIBLE else View.GONE
         navContainer.visibility = if (visible) View.GONE else View.VISIBLE
     }
 
     private fun updateChrome() {
         if (titles.isEmpty()) {
             toolbar.visibility = View.GONE
+            return
+        }
+        toolbar.visibility = View.VISIBLE
+        toolbar.title = titles.last()
+        if (titles.size > 1) {
+            toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
+            toolbar.setNavigationContentDescription("Back")
         } else {
-            toolbar.visibility = View.VISIBLE
-            toolbar.title = titles.last()
+            toolbar.navigationIcon = null
         }
     }
 

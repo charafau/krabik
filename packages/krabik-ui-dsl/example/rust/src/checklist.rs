@@ -141,7 +141,6 @@ impl Checklist {
             .spacing(12)
             .width_percent(1.0)
             .align_items(Align::Start)
-            .child(super::pages::back_button())
             .child(Text::new("Checklist").size(30).bold().color(COLOR_TEXT))
             .child(caption(&self.summary()))
             .child(

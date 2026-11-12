@@ -1,9 +1,9 @@
 //! A widget showcase built with the UI DSL.
 //!
-//! The home screen lists every widget; each entry opens a page that
-//! demonstrates that widget in isolation. Navigation is application state (a
-//! [`Page`] enum) so the example stays independent of any future navigation
-//! primitive.
+//! The home screen lists every widget; each entry opens a native navigation
+//! screen that demonstrates that widget in isolation. The application publishes
+//! its route stack through [`App::navigation`] and builds each screen through
+//! [`App::screen`]; the platform supplies the native navigation controller.
 //!
 //! The app is a normal Rust crate that depends on [`krabik_ui_dsl`], implements
 //! [`App`], and registers itself through [`set_app_factory`]. The iOS shell in
@@ -23,64 +23,10 @@ mod pages;
 
 use checklist::Checklist;
 
-/// A page in the widget catalog.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Page {
-    /// The list of every widget.
-    #[default]
-    Home,
-    Text,
-    Button,
-    TextField,
-    Switch,
-    Checkbox,
-    RadioButtons,
-    RadioGroup,
-    DatePicker,
-    Slider,
-    Progress,
-    Spinner,
-    Image,
-    Scroll,
-    List,
-    RecycledList,
-    Layouts,
-    Styling,
-    Checklist,
-}
-
-impl Page {
-    /// Maps a `page:*` action to a page.
-    fn from_action(action: &str) -> Option<Self> {
-        Some(match action.strip_prefix("page:")? {
-            "home" => Self::Home,
-            "text" => Self::Text,
-            "button" => Self::Button,
-            "text-field" => Self::TextField,
-            "switch" => Self::Switch,
-            "checkbox" => Self::Checkbox,
-            "radio-buttons" => Self::RadioButtons,
-            "radio-group" => Self::RadioGroup,
-            "date-picker" => Self::DatePicker,
-            "slider" => Self::Slider,
-            "progress" => Self::Progress,
-            "spinner" => Self::Spinner,
-            "image" => Self::Image,
-            "scroll" => Self::Scroll,
-            "list" => Self::List,
-            "recycled-list" => Self::RecycledList,
-            "layouts" => Self::Layouts,
-            "styling" => Self::Styling,
-            "checklist" => Self::Checklist,
-            _ => return None,
-        })
-    }
-}
-
 /// The state of the showcase application.
 pub struct ShowcaseApp {
-    /// The page currently shown.
-    pub page: Page,
+    /// The native navigation stack, starting at `home`.
+    stack: Vec<&'static str>,
     /// The checklist demo, which has its own state.
     checklist: Checklist,
     name: String,
@@ -99,7 +45,6 @@ pub struct ShowcaseApp {
     list_items: Arc<Vec<String>>,
     recycled_items: Arc<Vec<String>>,
     recycled_taps: usize,
-    navigation: Vec<&'static str>,
     dialog_open: bool,
     sheet_open: bool,
 }
@@ -108,7 +53,7 @@ impl ShowcaseApp {
     /// Creates the showcase on its home page.
     pub fn new() -> Self {
         Self {
-            page: Page::Home,
+            stack: vec!["home"],
             checklist: Checklist::new(),
             name: String::new(),
             submitted: String::new(),
@@ -134,7 +79,6 @@ impl ShowcaseApp {
                     .collect(),
             ),
             recycled_taps: 0,
-            navigation: Vec::new(),
             dialog_open: false,
             sheet_open: false,
         }
@@ -157,30 +101,20 @@ impl Default for ShowcaseApp {
 
 impl App for ShowcaseApp {
     fn view(&self) -> Element {
-        pages::view(self)
+        pages::home()
     }
 
     fn navigation(&self) -> Option<Navigation> {
-        if self.navigation.is_empty() {
-            return None;
-        }
         Some(Navigation::new(
-            self.navigation
+            self.stack
                 .iter()
-                .map(|key| match *key {
-                    "detail" => Screen::new("detail", "Details"),
-                    _ => Screen::new("root", "Navigation"),
-                })
+                .map(|key| Screen::new(*key, pages::title(key)))
                 .collect(),
         ))
     }
 
     fn screen(&self, key: &str) -> Option<Element> {
-        match key {
-            "root" => Some(pages::navigation_root(self)),
-            "detail" => Some(pages::navigation_detail(self)),
-            _ => None,
-        }
+        pages::screen(self, key)
     }
 
     fn presentation(&self) -> Option<Presentation> {
@@ -214,14 +148,22 @@ impl App for ShowcaseApp {
     fn handle(&mut self, event: Event<'_>) -> bool {
         match event {
             Event::Click { action } if action.starts_with("page:") => {
-                let Some(page) = Page::from_action(action) else {
+                let Some(key) = pages::screen_key(action) else {
                     return false;
                 };
-                if self.page == page {
-                    return false;
+                if key == "home" {
+                    if self.stack.len() > 1 {
+                        self.stack.truncate(1);
+                        true
+                    } else {
+                        false
+                    }
+                } else if self.stack.last() == Some(&key) {
+                    false
+                } else {
+                    self.stack.push(key);
+                    true
                 }
-                self.page = page;
-                true
             }
             Event::Back => {
                 if self.dialog_open {
@@ -230,22 +172,15 @@ impl App for ShowcaseApp {
                 } else if self.sheet_open {
                     self.sheet_open = false;
                     true
-                } else if !self.navigation.is_empty() {
-                    if self.navigation.len() > 1 {
-                        self.navigation.pop();
-                    } else {
-                        self.navigation.clear();
-                    }
+                } else if self.stack.len() > 1 {
+                    self.stack.pop();
                     true
-                } else if self.page == Page::Home {
-                    false
                 } else {
-                    self.page = Page::Home;
-                    true
+                    false
                 }
             }
-            // The checklist page owns every remaining event on its page.
-            _ if self.page == Page::Checklist => self.checklist.handle(event),
+            // The checklist screen owns every remaining event on its page.
+            _ if self.stack.last() == Some(&"checklist") => self.checklist.handle(event),
             Event::TextChanged {
                 action: "demo:name",
                 value,
@@ -284,32 +219,6 @@ impl App for ShowcaseApp {
                 "demo:recycled-tap" => {
                     self.recycled_taps += 1;
                     true
-                }
-                "nav:open" => {
-                    self.navigation = vec!["root"];
-                    true
-                }
-                "nav:push" => {
-                    if self.navigation.last() != Some(&"detail") {
-                        self.navigation.push("detail");
-                    }
-                    true
-                }
-                "nav:pop" => {
-                    if self.navigation.len() > 1 {
-                        self.navigation.pop();
-                        true
-                    } else {
-                        false
-                    }
-                }
-                "nav:close" => {
-                    if self.navigation.is_empty() {
-                        false
-                    } else {
-                        self.navigation.clear();
-                        true
-                    }
                 }
                 "dialog:open" => {
                     self.dialog_open = true;
@@ -439,25 +348,24 @@ mod tests {
     #[test]
     fn starts_on_the_widget_catalog() {
         let app = app();
-        assert_eq!(app.page, Page::Home);
+        assert_eq!(app.stack, vec!["home"]);
+        assert_eq!(app.navigation().unwrap().screens.len(), 1);
+        assert!(app.screen("home").is_some());
         assert_eq!(app.size_choice, 1);
         assert_eq!(app.volume, 40.0);
     }
 
     #[test]
-    fn navigation_state_is_published_and_back_pops_it() {
+    fn page_actions_push_and_back_pops() {
         let mut app = app();
-        assert!(app.navigation().is_none());
-        assert!(app.handle(click("nav:open")));
-        assert_eq!(app.navigation().unwrap().screens.len(), 1);
-        assert!(app.screen("root").is_some());
-        assert!(app.handle(click("nav:push")));
-        assert_eq!(app.navigation().unwrap().screens.len(), 2);
-        assert!(app.screen("detail").is_some());
+        assert!(app.handle(click("page:radio-group")));
+        assert_eq!(app.stack, vec!["home", "radio-group"]);
+        assert!(app.screen("radio-group").is_some());
+        assert!(!app.handle(click("page:radio-group")));
         assert!(app.handle(Event::Back));
-        assert_eq!(app.navigation().unwrap().screens.len(), 1);
-        assert!(app.handle(Event::Back));
-        assert!(app.navigation().is_none());
+        assert_eq!(app.stack, vec!["home"]);
+        assert!(app.handle(click("page:checklist")));
+        assert!(app.screen("checklist").is_some());
     }
 
     #[test]
@@ -476,23 +384,9 @@ mod tests {
     }
 
     #[test]
-    fn page_actions_navigate_and_back() {
+    fn unknown_pages_are_ignored_and_back_at_home_is_unhandled() {
         let mut app = app();
-        assert!(app.handle(click("page:radio-group")));
-        assert_eq!(app.page, Page::RadioGroup);
-        assert!(!app.handle(click("page:radio-group")));
-        assert!(app.handle(click("page:home")));
-        assert_eq!(app.page, Page::Home);
         assert!(!app.handle(click("page:unknown")));
-    }
-
-    #[test]
-    fn back_returns_to_the_catalog() {
-        let mut app = app();
-        assert!(!app.handle(Event::Back));
-        assert!(app.handle(click("page:radio-group")));
-        assert!(app.handle(Event::Back));
-        assert_eq!(app.page, Page::Home);
         assert!(!app.handle(Event::Back));
     }
 
@@ -575,10 +469,10 @@ mod tests {
     }
 
     #[test]
-    fn checklist_page_delegates_its_events() {
+    fn checklist_screen_delegates_its_events() {
         let mut app = app();
         assert!(app.handle(click("page:checklist")));
-        assert_eq!(app.page, Page::Checklist);
+        assert_eq!(app.stack.last(), Some(&"checklist"));
         assert!(app.handle(Event::Toggled {
             action: "task:1",
             checked: true,
