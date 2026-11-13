@@ -6,7 +6,6 @@ import androidx.test.espresso.action.GeneralSwipeAction
 import androidx.test.espresso.action.Press
 import androidx.test.espresso.action.Swipe
 import androidx.test.espresso.action.ViewActions.click
-import androidx.test.espresso.action.ViewActions.swipeDown
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isCompletelyDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.isRoot
@@ -40,6 +39,19 @@ private val shortSwipeUp = GeneralSwipeAction(
     Press.FINGER,
 )
 
+/**
+ * A downward swipe that starts inside the page content.
+ *
+ * Espresso's `swipeDown` starts at the top edge of the window, which is the
+ * status bar and toolbar, so it never scrolls the page underneath.
+ */
+private val contentSwipeDown = GeneralSwipeAction(
+    Swipe.FAST,
+    CoordinatesProvider { view -> floatArrayOf(view.width / 2f, view.height * 0.35f) },
+    CoordinatesProvider { view -> floatArrayOf(view.width / 2f, view.height * 0.85f) },
+    Press.FINGER,
+)
+
 /** Swipes up until [label] is displayed. */
 internal fun swipeTo(label: String) {
     swipeToTop()
@@ -52,13 +64,16 @@ internal fun swipeTo(label: String) {
     }
 }
 
-/** Swipes down to the top of the current page. */
+/**
+ * Swipes down to the top of the catalog. A popped-to screen keeps its scroll
+ * position, so the catalog is usually not at the top after going back.
+ */
 internal fun swipeToTop() {
     repeat(12) {
         if (isVisible("Krabik UI DSL")) {
             return
         }
-        onView(isRoot()).perform(swipeDown())
+        onView(isRoot()).perform(contentSwipeDown)
         Thread.sleep(400)
     }
 }

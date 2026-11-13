@@ -1,11 +1,12 @@
 //! One page per widget for the showcase app.
 
+use krabik_ui_dsl::navigation::{BottomNavItem, BottomNavigation};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::ui::{
-    Align, AnimationCurve, BottomNavItem, BottomNavigation, Button, Checkbox, Column, DatePicker,
-    DatePickerMode, DateValue, EdgeInsets, Element, Gradient, Icon, Image, ImageScale, ImageSource,
-    Justify, List, Pager, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider,
-    Spacer, Switch, TabBar, Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
+    Align, AnimationCurve, Button, Checkbox, Column, DatePicker, DatePickerMode, DateValue,
+    EdgeInsets, Element, Gradient, Icon, Image, ImageScale, ImageSource, Justify, List, Pager,
+    ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider, Spacer, Switch, TabBar,
+    Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
 };
 
 use crate::ShowcaseApp;
@@ -439,34 +440,24 @@ fn radio_group_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-pub(crate) fn dialog_view(_app: &ShowcaseApp) -> Element {
-    Dialog::new()
-        .child(Text::new("Delete task?").size(20).bold().color(COLOR_TEXT))
-        .child(
-            Text::new("This cannot be undone.")
-                .size(15)
-                .color(COLOR_MUTED),
-        )
-        .child(
-            Row::new()
-                .spacing(8)
-                .justify_content(Justify::End)
-                .child(Button::new("Cancel").action("dialog:close"))
-                .child(Button::new("Delete").action("dialog:close")),
-        )
-        .into()
+/// The system alert shown by the "Dialog" entry.
+pub(crate) fn dialog() -> Dialog {
+    Dialog::new("Delete task?")
+        .message("This cannot be undone.")
+        .cancel("Cancel", "dialog:close")
+        .destructive("Delete", "dialog:delete")
 }
 
-pub(crate) fn sheet_view(_app: &ShowcaseApp) -> Element {
-    BottomSheet::new()
+/// The content of the native bottom sheet.
+pub(crate) fn sheet() -> BottomSheet {
+    BottomSheet::new("sheet:close")
         .child(Text::new("Filters").size(20).bold().color(COLOR_TEXT))
         .child(
-            Text::new("The native sheet provides the drag handle and dismissal.")
+            Text::new("The native sheet provides the surface, drag handle and dismissal.")
                 .size(15)
                 .color(COLOR_MUTED),
         )
         .child(Button::new("Close").action("sheet:close"))
-        .into()
 }
 
 fn date_picker_page(app: &ShowcaseApp) -> Element {
@@ -801,7 +792,7 @@ fn bottom_sheet_page() -> Element {
                 .action("sheet:open")
                 .width_percent(1.0),
             caption(
-                "Android uses a Material BottomSheetDialogFragment; iOS uses                  UISheetPresentationController with medium and large detents.",
+                "Android uses a Material BottomSheetDialogFragment; iOS uses UISheetPresentationController. Both size the sheet to its content.",
             ),
             caption("Close it with the sheet's button or drag it down."),
         ],
@@ -885,43 +876,33 @@ fn tabs_view_page(app: &ShowcaseApp) -> Element {
 }
 
 fn bottom_navigation_page(app: &ShowcaseApp) -> Element {
-    let selected = app.bottom_dest.min(2);
-    let content = match selected {
+    let content = match app.bottom_dest.min(2) {
         0 => "Home destination",
         1 => "Search destination",
         _ => "Settings destination",
     };
-    Column::new()
-        .padding(24)
-        .spacing(14)
-        .width_percent(1.0)
-        .height_percent(1.0)
-        .child(
-            Text::new("Bottom navigation")
-                .size(28)
-                .bold()
-                .color(COLOR_TEXT),
-        )
-        .child(caption(
-            "The bar is a widget; the application owns the content above it.",
-        ))
-        .child(Text::new(content).size(20).color(COLOR_ACCENT).grow(1.0))
-        .child(
-            BottomNavigation::new([
-                BottomNavItem::new("Home", Icon::new().drawable("ic_home").sf("house.fill")),
-                BottomNavItem::new(
-                    "Search",
-                    Icon::new().drawable("ic_search").sf("magnifyingglass"),
-                ),
-                BottomNavItem::new(
-                    "Settings",
-                    Icon::new().drawable("ic_settings").sf("gearshape.fill"),
-                ),
-            ])
-            .selected(selected)
-            .action("demo:bottom-nav"),
-        )
-        .into()
+    page(
+        "Bottom navigation",
+        "The native bar is configured by the Screen, like the toolbar; the page only draws the content above it.",
+        body![Text::new(content).size(20).color(COLOR_ACCENT)],
+    )
+}
+
+/// The native bar declared on the bottom-navigation screen.
+pub(crate) fn bottom_navigation(app: &ShowcaseApp) -> BottomNavigation {
+    BottomNavigation::new([
+        BottomNavItem::new("Home", Icon::new().drawable("ic_home").sf("house.fill")),
+        BottomNavItem::new(
+            "Search",
+            Icon::new().drawable("ic_search").sf("magnifyingglass"),
+        ),
+        BottomNavItem::new(
+            "Settings",
+            Icon::new().drawable("ic_settings").sf("gearshape.fill"),
+        ),
+    ])
+    .selected(app.bottom_dest.min(2))
+    .action("demo:bottom-nav")
 }
 
 fn toolbar_page(app: &ShowcaseApp) -> Element {

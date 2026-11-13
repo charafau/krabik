@@ -3,7 +3,7 @@ import UIKit
 /// One Rust-rendered host view.
 ///
 /// The main host is created by `krabik_ios_create`; child hosts attach with a
-/// session/host pair and are used by navigation screens and modals.
+/// session/host pair and are used by navigation screens and the sheet.
 final class RustHostView: UIView {
     private var session: UInt64 = 0
     private var host: UInt64 = 0
@@ -39,6 +39,16 @@ final class RustHostView: UIView {
             krabik_ios_attach_host(session, host, Unmanaged.passUnretained(self).toOpaque())
             self.setNeedsLayout()
         }
+    }
+
+    /// Binds a child host, attaches it and renders it at its current size
+    /// right away. Only valid when Rust is not in the middle of a render.
+    func bindNow(session: UInt64, host: UInt64) {
+        self.session = session
+        self.host = host
+        krabik_ios_attach_host(session, host, Unmanaged.passUnretained(self).toOpaque())
+        renderedSize = bounds.size
+        krabik_ios_render(session, host, Double(bounds.width), Double(bounds.height))
     }
 
     required init?(coder: NSCoder) {

@@ -56,17 +56,28 @@ class RustRootView(
     }
     private var renderedWidth = -1
     private var renderedHeight = -1
+    private var wrapsContent = false
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
-        val height = MeasureSpec.getSize(heightMeasureSpec)
-        setMeasuredDimension(width, height)
+        val available = MeasureSpec.getSize(heightMeasureSpec)
 
-        if (handle != 0L && width > 0 && height > 0 && (width != renderedWidth || height != renderedHeight)) {
+        if (handle != 0L && width > 0 && available > 0 && (width != renderedWidth || available != renderedHeight)) {
             renderedWidth = width
-            renderedHeight = height
-            nativeRender(handle, hostId, width, height)
+            renderedHeight = available
+            nativeRender(handle, hostId, width, available)
         }
+
+        // A parent that lets this view choose its height, such as a bottom
+        // sheet, gets the height of the rendered content.
+        wrapsContent = MeasureSpec.getMode(heightMeasureSpec) != MeasureSpec.EXACTLY
+        val height = if (!wrapsContent || handle == 0L) {
+            available
+        } else {
+            val content = nativeContentHeight(handle, hostId)
+            if (available > 0) minOf(content, available) else content
+        }
+        setMeasuredDimension(width, height)
 
         for (index in 0 until childCount) {
             val child = getChildAt(index)
@@ -100,7 +111,8 @@ class RustRootView(
 
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
         super.onSizeChanged(width, height, oldWidth, oldHeight)
-        if (handle != 0L && width > 0 && height > 0 && (width != renderedWidth || height != renderedHeight)) {
+        // A content-sized host already rendered against the available height.
+        if (!wrapsContent && handle != 0L && width > 0 && height > 0 && (width != renderedWidth || height != renderedHeight)) {
             renderedWidth = width
             renderedHeight = height
             nativeRender(handle, hostId, width, height)
@@ -399,10 +411,20 @@ class RustRootView(
         }
     }
 
-    /** Forwards the selected destination of a bottom navigation bar back to Rust. */
-    fun onBottomNavigationSelected(nodeId: Long, index: Int) {
+    /**
+     * Reports that the system alert closed. [action] is the pressed button's
+     * action, or the cancel action (possibly empty) for a native dismissal.
+     */
+    fun onDialogAction(action: String) {
         if (handle != 0L) {
-            nativeOnBottomNavigationSelected(handle, hostId, nodeId, index)
+            nativeOnDialogAction(handle, action)
+        }
+    }
+
+    /** Forwards the destination picked in the host-level bottom navigation bar. */
+    fun onBottomNavigationSelected(index: Int) {
+        if (handle != 0L) {
+            nativeOnBottomNavigationSelected(handle, index)
         }
     }
 
@@ -453,7 +475,7 @@ class RustRootView(
         }
     }
 
-    /** Asks the application to close the presented modal. */
+    /** Reports that the user dismissed the bottom sheet natively. */
     fun onModalDismiss() {
         if (handle != 0L) {
             nativeOnModalDismiss(handle)
@@ -478,6 +500,9 @@ class RustRootView(
     ): Long
 
     private external fun nativeRender(handle: Long, host: Long, widthPx: Int, heightPx: Int)
+
+    /** The height, in pixels, of the content rendered by the last pass. */
+    private external fun nativeContentHeight(handle: Long, host: Long): Int
 
     private external fun nativeOnClick(handle: Long, host: Long, nodeId: Long)
 
@@ -505,14 +530,11 @@ class RustRootView(
 
     private external fun nativeOnPageSelected(handle: Long, host: Long, nodeId: Long, index: Int)
 
-    private external fun nativeOnBottomNavigationSelected(
-        handle: Long,
-        host: Long,
-        nodeId: Long,
-        index: Int,
-    )
+    private external fun nativeOnBottomNavigationSelected(handle: Long, index: Int)
 
     private external fun nativeOnToolbarAction(handle: Long, action: String)
+
+    private external fun nativeOnDialogAction(handle: Long, action: String)
 
     private external fun nativeOnPickerChanged(
         handle: Long,

@@ -30,11 +30,23 @@ void krabik_ios_set_controller(uint64_t handle, void *controller);
 /// Releases every widget and the Rust state.
 void krabik_ios_destroy(uint64_t handle);
 
-/// Asks the application to close the presented modal.
+/// Reports that the user dismissed the sheet natively.
 void krabik_ios_on_modal_dismiss(uint64_t handle);
+
+/// Reports a button press of the system alert.
+void krabik_ios_on_dialog_action(uint64_t handle, const char *action);
+
+/// Reports a selection in the host-level tab bar.
+void krabik_ios_on_bottom_navigation_selected(uint64_t handle, uint64_t index);
+
+/// The height, in points, of the content a host rendered last.
+double krabik_ios_content_height(uint64_t handle, uint64_t host);
 
 /// Dispatches a native back action. Returns whether the application handled it.
 bool krabik_ios_on_back(uint64_t handle);
+
+/// Dispatches a toolbar action.
+void krabik_ios_on_toolbar_action(uint64_t handle, const char *action);
 
 void krabik_ios_on_click(uint64_t handle, uint64_t host, uint64_t node_id);
 void krabik_ios_on_text_changed(uint64_t handle, uint64_t host, uint64_t node_id, const char *text);

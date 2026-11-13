@@ -35,12 +35,12 @@ use jni::strings::JNIStr;
 use jni::{Env, jni_sig, jni_str};
 
 use super::{
-    BOTTOM_NAV_CLASS, BUTTON_CLASS, CHECKBOX_CLASS, DATE_PICKER_CLASS, FRAME_LAYOUT_CLASS,
-    FRAME_PARAMS_CLASS, IMAGE_VIEW_CLASS, KRABIK_IMAGES_CLASS, KRABIK_RECYCLERS_CLASS,
-    KRABIK_ROWS_CLASS, KRABIK_STYLE_CLASS, KRABIK_VIEWS_CLASS, LAYOUT_PARAMS_CLASS, LONG_CLASS,
-    MEASURE_SPEC_CLASS, PAGER_CLASS, PLAIN_SWITCH_CLASS, PROGRESS_BAR_CLASS, RADIO_CLASS,
-    RADIO_GROUP_CLASS, RUST_ROOT_VIEW_CLASS, SEEK_BAR_CLASS, SWITCH_CLASS, TAB_BAR_CLASS,
-    TEXT_INPUT_CLASS, TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
+    BUTTON_CLASS, CHECKBOX_CLASS, DATE_PICKER_CLASS, FRAME_LAYOUT_CLASS, FRAME_PARAMS_CLASS,
+    IMAGE_VIEW_CLASS, KRABIK_IMAGES_CLASS, KRABIK_RECYCLERS_CLASS, KRABIK_ROWS_CLASS,
+    KRABIK_STYLE_CLASS, KRABIK_VIEWS_CLASS, LAYOUT_PARAMS_CLASS, LONG_CLASS, MEASURE_SPEC_CLASS,
+    PAGER_CLASS, PLAIN_SWITCH_CLASS, PROGRESS_BAR_CLASS, RADIO_CLASS, RADIO_GROUP_CLASS,
+    RUST_ROOT_VIEW_CLASS, SEEK_BAR_CLASS, SWITCH_CLASS, TAB_BAR_CLASS, TEXT_INPUT_CLASS,
+    TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
 };
 
 const VOID: JavaType = JavaType::Primitive(Primitive::Void);
@@ -213,7 +213,6 @@ pub(super) struct Jni {
     pub(super) radio_group: Global<JClass<'static>>,
     pub(super) tab_bar: Global<JClass<'static>>,
     pub(super) pager: Global<JClass<'static>>,
-    pub(super) bottom_nav: Global<JClass<'static>>,
     pub(super) date_picker: Global<JClass<'static>>,
     pub(super) seek_bar: Global<JClass<'static>>,
     pub(super) progress_bar: Global<JClass<'static>>,
@@ -274,7 +273,6 @@ pub(super) struct Jni {
     pub(super) configure_radio_group: Method,
     pub(super) configure_tab_bar: Method,
     pub(super) configure_pager: Method,
-    pub(super) configure_bottom_nav: Method,
     pub(super) configure_date_picker: Method,
     pub(super) date_picker_set_date_range: Method,
     pub(super) date_picker_set_time_range: Method,
@@ -324,7 +322,6 @@ pub(super) struct Jni {
     pub(super) radio_group_ctor: Ctor,
     pub(super) tab_bar_ctor: Ctor,
     pub(super) pager_ctor: Ctor,
-    pub(super) bottom_nav_ctor: Ctor,
     pub(super) date_picker_ctor: Ctor,
     pub(super) seek_bar_ctor: Ctor,
     pub(super) progress_bar_ctor: Ctor,
@@ -348,7 +345,6 @@ impl Jni {
         let radio_group = class(env, RADIO_GROUP_CLASS)?;
         let tab_bar = class(env, TAB_BAR_CLASS)?;
         let pager = class(env, PAGER_CLASS)?;
-        let bottom_nav = class(env, BOTTOM_NAV_CLASS)?;
         let date_picker = class(env, DATE_PICKER_CLASS)?;
         let seek_bar = class(env, SEEK_BAR_CLASS)?;
         let progress_bar = class(env, PROGRESS_BAR_CLASS)?;
@@ -495,13 +491,6 @@ impl Jni {
                 VOID
             ),
             configure_pager: method!(env, &pager, "configure", "(II)V", VOID),
-            configure_bottom_nav: method!(
-                env,
-                &bottom_nav,
-                "configure",
-                "([Ljava/lang/String;[Ljava/lang/String;II)V",
-                VOID
-            ),
             configure_date_picker: method!(env, &date_picker, "configure", "(IIIIIIZ)V", VOID),
             date_picker_set_date_range: method!(
                 env,
@@ -695,11 +684,6 @@ impl Jni {
                 &pager,
                 "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
             ),
-            bottom_nav_ctor: ctor!(
-                env,
-                &bottom_nav,
-                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
-            ),
             date_picker_ctor: ctor!(
                 env,
                 &date_picker,
@@ -728,7 +712,6 @@ impl Jni {
             radio_group,
             tab_bar,
             pager,
-            bottom_nav,
             date_picker,
             seek_bar,
             progress_bar,

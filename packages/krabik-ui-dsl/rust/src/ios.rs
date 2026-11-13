@@ -39,10 +39,9 @@ use objc2_ui_kit::{
     UIDatePicker, UIDatePickerMode, UIDatePickerStyle, UIEdgeInsets, UIFont, UIImage, UIImageView,
     UIKeyboardType, UILabel, UILayoutConstraintAxis, UIProgressView, UIReturnKeyType, UIScrollView,
     UIScrollViewDelegate, UISegmentedControl, UISlider, UISpringTimingParameters, UIStackView,
-    UIStackViewAlignment, UIStackViewDistribution, UISwitch, UITabBar, UITabBarDelegate,
-    UITabBarItem, UITextBorderStyle, UITextField, UITextInputTraits, UITimingCurveProvider, UIView,
-    UIViewAnimating, UIViewAnimatingPosition, UIViewAnimationCurve, UIViewContentMode,
-    UIViewPropertyAnimator,
+    UIStackViewAlignment, UIStackViewDistribution, UISwitch, UITextBorderStyle, UITextField,
+    UITextInputTraits, UITimingCurveProvider, UIView, UIViewAnimating, UIViewAnimatingPosition,
+    UIViewAnimationCurve, UIViewContentMode, UIViewPropertyAnimator,
 };
 
 use crate::animation::ease_curve;
@@ -54,11 +53,11 @@ use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Animation, AnimationCurve, Axis, Border, BottomNavigationProps, ButtonProps, CheckProps,
-    DatePickerMode, DatePickerProps, DatePickerValue, DateValue, EdgeInsets, Element, FontWeight,
-    Gradient, GradientDirection, ImageProps, ImageScale, ImageSource, ImeAction, KeyboardType,
-    ProgressProps, RadioGroupProps, SliderProps, SpinnerProps, TabBarProps, TextAlign,
-    TextFieldProps, TextProps, TimeValue, dim_color, snap_slider_value,
+    Animation, AnimationCurve, Axis, Border, ButtonProps, CheckProps, DatePickerMode,
+    DatePickerProps, DatePickerValue, DateValue, EdgeInsets, Element, FontWeight, Gradient,
+    GradientDirection, ImageProps, ImageScale, ImageSource, ImeAction, KeyboardType, ProgressProps,
+    RadioGroupProps, SliderProps, SpinnerProps, TabBarProps, TextAlign, TextFieldProps, TextProps,
+    TimeValue, dim_color, snap_slider_value,
 };
 
 /// Measures text with an off-screen `UILabel`.
@@ -533,13 +532,6 @@ enum Content {
         pages: usize,
         selected: usize,
     },
-    BottomNavigation {
-        bar: Retained<UITabBar>,
-        _delegate: Retained<BottomNavDelegate>,
-        labels: Vec<String>,
-        icons: Vec<String>,
-        items: Vec<Retained<UITabBarItem>>,
-    },
     Slider(Retained<UISlider>),
     Progress(Retained<UIProgressView>),
     Spinner(Retained<UIActivityIndicatorView>),
@@ -663,52 +655,6 @@ fn report_pager_page(ivars: &PagerDelegateIvars, scroll_view: &UIScrollView) {
 impl PagerDelegate {
     fn new(handle: u64, host: u64, id: NodeId, mtm: MainThreadMarker) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(PagerDelegateIvars { handle, host, id });
-        // SAFETY: `NSObject`'s initializer returns an initialized instance of
-        // this class with the ivars already set.
-        unsafe { objc2::msg_send![super(this), init] }
-    }
-}
-
-struct BottomNavDelegateIvars {
-    handle: u64,
-    host: u64,
-    id: NodeId,
-}
-
-objc2::define_class!(
-    #[unsafe(super(NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[name = "KrabikBottomNavDelegate"]
-    #[ivars = BottomNavDelegateIvars]
-    struct BottomNavDelegate;
-
-    unsafe impl NSObjectProtocol for BottomNavDelegate {}
-
-    unsafe impl UITabBarDelegate for BottomNavDelegate {
-        #[unsafe(method(tabBar:didSelectItem:))]
-        fn tab_bar_did_select_item(&self, tab_bar: &UITabBar, item: &UITabBarItem) {
-            let Some(items) = tab_bar.items() else {
-                return;
-            };
-            let count = items.count();
-            let mut index = 0usize;
-            for candidate in 0..count {
-                if &*items.objectAtIndex(candidate) == item {
-                    index = candidate;
-                    break;
-                }
-            }
-            let handle = self.ivars().handle;
-            let host = self.ivars().host;
-            let id = self.ivars().id;
-            schedule(move || dispatch_selected(handle, host, id, index));
-        }
-    }
-);
-
-impl BottomNavDelegate {
-    fn new(handle: u64, host: u64, id: NodeId, mtm: MainThreadMarker) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(BottomNavDelegateIvars { handle, host, id });
         // SAFETY: `NSObject`'s initializer returns an initialized instance of
         // this class with the ivars already set.
         unsafe { objc2::msg_send![super(this), init] }
@@ -1618,28 +1564,6 @@ impl IosState {
                     node,
                 )
             }
-            NodeKind::BottomNavigation(props) => {
-                let bar = UITabBar::new(mtm);
-                let delegate = BottomNavDelegate::new(self.handle, self.host, node.id, mtm);
-                // SAFETY: the delegate is kept alive by the view handle.
-                bar.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-                let mut labels = Vec::new();
-                let mut icons = Vec::new();
-                let mut items = Vec::new();
-                update_bottom_navigation(&bar, &mut labels, &mut icons, &mut items, props, mtm);
-                let view = cast_view(bar.clone());
-                ViewHandle::new(
-                    view,
-                    Content::BottomNavigation {
-                        bar,
-                        _delegate: delegate,
-                        labels,
-                        icons,
-                        items,
-                    },
-                    node,
-                )
-            }
             NodeKind::Slider(props) => {
                 let slider = UISlider::new(mtm);
                 update_slider(&slider, props);
@@ -2188,10 +2112,6 @@ impl IosState {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::BottomNavigation(props) if !props.action.is_empty() => {
-                    action.selected = Some(props.action.clone());
-                    any = true;
-                }
                 NodeKind::DatePicker(props) if !props.action.is_empty() => {
                     action.date = Some(props.action.clone());
                     action.date_range = props.date_range;
@@ -2298,16 +2218,6 @@ fn update_content(
             update_date_picker(picker, props);
         }
         (Content::TabBar(control), NodeKind::TabBar(props)) => update_tab_bar(control, props),
-        (
-            Content::BottomNavigation {
-                bar,
-                labels,
-                icons,
-                items,
-                ..
-            },
-            NodeKind::BottomNavigation(props),
-        ) => update_bottom_navigation(bar, labels, icons, items, props, mtm),
         (
             Content::Pager {
                 scroll,
@@ -2452,62 +2362,6 @@ fn update_check(button: &UIButton, props: &CheckProps, radio: bool) {
     button.setContentHorizontalAlignment(UIControlContentHorizontalAlignment::Left);
     // SAFETY: the color is retained by the view for as long as it is set.
     unsafe { button.setTintColor(Some(&text_color)) };
-}
-
-fn update_bottom_navigation(
-    bar: &UITabBar,
-    labels: &mut Vec<String>,
-    icons: &mut Vec<String>,
-    items: &mut Vec<Retained<UITabBarItem>>,
-    props: &BottomNavigationProps,
-    mtm: MainThreadMarker,
-) {
-    let new_labels: Vec<String> = props.items.iter().map(|item| item.label.clone()).collect();
-    let new_icons: Vec<String> = props
-        .items
-        .iter()
-        .map(|item| item.icon.ios_name().unwrap_or("").to_string())
-        .collect();
-    if *labels != new_labels || *icons != new_icons {
-        let mut fresh = Vec::with_capacity(props.items.len());
-        for (index, item) in props.items.iter().enumerate() {
-            let name = new_icons.get(index).map(String::as_str).unwrap_or("");
-            let image = if name.is_empty() {
-                None
-            } else {
-                UIImage::systemImageNamed(&NSString::from_str(name))
-                    .or_else(|| UIImage::imageNamed(&NSString::from_str(name)))
-            };
-            let title = NSString::from_str(&item.label);
-            let tab = UITabBarItem::initWithTitle_image_selectedImage(
-                UITabBarItem::alloc(mtm),
-                Some(&title),
-                image.as_deref(),
-                None,
-            );
-            fresh.push(tab);
-        }
-        let array = NSArray::from_retained_slice(&fresh);
-        bar.setItems(Some(&array));
-        *labels = new_labels;
-        *icons = new_icons;
-        *items = fresh;
-    }
-    let selected = if items.is_empty() {
-        None
-    } else {
-        items
-            .get(props.selected.min(items.len() - 1))
-            .map(|item| &**item)
-    };
-    bar.setSelectedItem(selected);
-    // SAFETY: the color is a valid `UIColor` for the lifetime of the call.
-    unsafe { bar.setTintColor(Some(&color(props.color))) };
-    bar.setUnselectedItemTintColor(Some(&color(faded(props.color))));
-}
-
-fn faded(argb: u32) -> u32 {
-    (argb & 0x00FF_FFFF) | 0x8800_0000
 }
 
 fn update_tab_bar(control: &UISegmentedControl, props: &TabBarProps) {
@@ -3425,7 +3279,6 @@ fn dispatch_selected(handle: u64, host: u64, id: NodeId, index: usize) {
                     .runtime
                     .tab_bar_action(id)
                     .or_else(|| state.runtime.pager_action(id))
-                    .or_else(|| state.runtime.bottom_navigation_action(id))
                     .or_else(|| state.runtime.radio_group_action(id))
                     .or_else(|| {
                         state
@@ -3543,9 +3396,10 @@ struct IosSession {
     pending: HashMap<u64, IosHostKind>,
     next_host: u64,
     controller: Option<Retained<NSObject>>,
+    /// The navigation stack last mirrored to the native controller.
     navigation: Vec<crate::navigation::Screen>,
-    toolbar: Option<crate::navigation::Toolbar>,
-    presentation: Option<crate::presentation::Presentation>,
+    /// The alert the native controller is showing.
+    dialog: Option<crate::presentation::Dialog>,
 }
 
 // SAFETY: every host and the controller are only touched on the main thread,
@@ -3565,8 +3419,7 @@ impl IosSession {
             next_host: 1,
             controller: None,
             navigation: Vec::new(),
-            toolbar: None,
-            presentation: None,
+            dialog: None,
         }
     }
 
@@ -3578,7 +3431,7 @@ impl IosSession {
                 IosHostKind::Main if has_navigation => None,
                 IosHostKind::Main => Some(self.app.view()),
                 IosHostKind::Screen(key) => self.app.screen(key),
-                IosHostKind::Modal => self.app.presentation_view(),
+                IosHostKind::Modal => self.app.sheet().map(|sheet| sheet.into_content()),
             };
             if let Some(element) = element {
                 elements.push((*id, element));
@@ -3604,43 +3457,42 @@ impl IosSession {
             .unwrap_or_default();
         if navigation != self.navigation {
             self.sync_navigation(&navigation);
+            self.sync_chrome(navigation.last());
             self.navigation = navigation;
         }
-        let presentation = self.app.presentation();
-        if presentation != self.presentation {
-            self.sync_presentation(presentation.as_ref());
-            self.presentation = presentation;
+        let dialog = self.app.dialog();
+        if dialog != self.dialog {
+            self.sync_dialog(dialog.as_ref());
+            self.dialog = dialog;
         }
-        let toolbar = self
-            .navigation
-            .last()
-            .and_then(|screen| screen.toolbar.clone());
-        if toolbar != self.toolbar {
-            self.sync_toolbar(&toolbar);
-            self.toolbar = toolbar;
+        let sheet = self.app.sheet().is_some();
+        if sheet != self.has_sheet() {
+            self.sync_sheet(sheet);
         }
     }
 
-    fn sync_toolbar(&mut self, toolbar: &Option<crate::navigation::Toolbar>) {
+    /// Mirrors the top screen's toolbar and bottom navigation.
+    ///
+    /// Sent on every navigation change so the native chrome never keeps a
+    /// previous screen's configuration.
+    fn sync_chrome(&mut self, screen: Option<&crate::navigation::Screen>) {
         let Some(controller) = self.controller.as_ref() else {
             return;
         };
-        let screen = self.navigation.last();
+        let toolbar = screen.and_then(|screen| screen.toolbar.as_ref());
         let title = screen.map_or("", |screen| screen.title.as_str());
-        let subtitle = toolbar
-            .as_ref()
-            .and_then(|toolbar| toolbar.subtitle.as_deref())
-            .unwrap_or("");
+        let subtitle = toolbar.and_then(|t| t.subtitle.as_deref()).unwrap_or("");
         let back_title = toolbar
-            .as_ref()
-            .and_then(|toolbar| toolbar.back_title.as_deref())
+            .and_then(|t| t.back_title.as_deref())
             .unwrap_or("Back");
-        let hidden = screen.is_none() || toolbar.as_ref().is_none_or(|toolbar| toolbar.hidden);
-        let actions = toolbar
-            .as_ref()
-            .map(|toolbar| toolbar.actions.as_slice())
-            .unwrap_or(&[]);
+        // A screen shows the navigation bar unless it explicitly hides it.
+        let hidden = screen.is_none() || toolbar.is_some_and(|toolbar| toolbar.hidden);
+        let actions = toolbar.map_or(&[][..], |toolbar| toolbar.actions.as_slice());
         controller_set_toolbar(controller, title, subtitle, back_title, hidden, actions);
+        controller_set_bottom_navigation(
+            controller,
+            screen.and_then(|screen| screen.bottom_navigation.as_ref()),
+        );
     }
 
     fn sync_navigation(&mut self, screens: &[crate::navigation::Screen]) {
@@ -3654,9 +3506,16 @@ impl IosSession {
             .take_while(|(old, new)| old.key == new.key)
             .count();
 
-        for screen in self.navigation.iter().skip(common).rev() {
-            controller_pop(controller, screen.transition.code());
-            if let Some(host) = self.screen_host(&screen.key) {
+        // Leaving several screens at once is one native pop, animated with
+        // the transition of the screen the user is looking at.
+        let popped = &self.navigation[common..];
+        if let Some(top) = popped.last() {
+            controller_pop(controller, popped.len(), top.transition.code());
+            let hosts: Vec<u64> = popped
+                .iter()
+                .filter_map(|screen| self.screen_host(&screen.key))
+                .collect();
+            for host in hosts {
                 self.hosts.remove(&host);
                 self.pending.remove(&host);
             }
@@ -3672,21 +3531,52 @@ impl IosSession {
         controller_set_root_visible(controller, screens.is_empty());
     }
 
-    fn sync_presentation(&mut self, presentation: Option<&crate::presentation::Presentation>) {
+    /// Shows, replaces or closes the system alert.
+    fn sync_dialog(&mut self, dialog: Option<&crate::presentation::Dialog>) {
         let Some(controller) = self.controller.as_ref() else {
             return;
         };
-        if let Some(host) = self.modal_host() {
-            controller_dismiss(controller);
-            self.hosts.remove(&host);
-            self.pending.remove(&host);
+        if self.dialog.is_some() {
+            controller_dismiss_dialog(controller);
         }
-        if let Some(presentation) = presentation {
+        if let Some(dialog) = dialog {
+            controller_show_dialog(controller, dialog);
+        }
+    }
+
+    /// Presents or dismisses the native bottom sheet.
+    fn sync_sheet(&mut self, show: bool) {
+        let Some(controller) = self.controller.as_ref() else {
+            return;
+        };
+        if show {
             let host = self.next_host;
             self.next_host += 1;
             self.pending.insert(host, IosHostKind::Modal);
-            controller_present(controller, host, presentation.kind as i64);
+            controller_present_sheet(controller, host);
+        } else {
+            controller_dismiss_sheet(controller);
+            self.forget_sheet();
         }
+    }
+
+    /// Whether a sheet is presented or about to be.
+    fn has_sheet(&self) -> bool {
+        self.hosts
+            .values()
+            .any(|host| matches!(host.kind, IosHostKind::Modal))
+            || self
+                .pending
+                .values()
+                .any(|kind| matches!(kind, IosHostKind::Modal))
+    }
+
+    /// Drops the sheet's host after the sheet closed.
+    fn forget_sheet(&mut self) {
+        self.hosts
+            .retain(|_, host| !matches!(host.kind, IosHostKind::Modal));
+        self.pending
+            .retain(|_, kind| !matches!(kind, IosHostKind::Modal));
     }
 
     fn attach_host(&mut self, host: u64, root: &Retained<UIView>, mtm: MainThreadMarker) {
@@ -3706,12 +3596,6 @@ impl IosSession {
             IosHostKind::Screen(screen) if screen == key => Some(*id),
             _ => None,
         })
-    }
-
-    fn modal_host(&self) -> Option<u64> {
-        self.hosts
-            .iter()
-            .find_map(|(id, host)| matches!(host.kind, IosHostKind::Modal).then_some(*id))
     }
 }
 
@@ -3769,9 +3653,11 @@ fn controller_set_toolbar(
     };
 }
 
-fn controller_pop(controller: &NSObject, transition: i32) {
+fn controller_pop(controller: &NSObject, count: usize, transition: i32) {
     // SAFETY: see `controller_push`.
-    let _: () = unsafe { objc2::msg_send![controller, krabikPop: transition as i64] };
+    let _: () = unsafe {
+        objc2::msg_send![controller, krabikPop: count as i64, transition: transition as i64]
+    };
 }
 
 fn controller_set_root_visible(controller: &NSObject, visible: bool) {
@@ -3779,14 +3665,68 @@ fn controller_set_root_visible(controller: &NSObject, visible: bool) {
     let _: () = unsafe { objc2::msg_send![controller, krabikSetRootVisible: visible] };
 }
 
-fn controller_present(controller: &NSObject, host: u64, kind: i64) {
-    // SAFETY: see `controller_push`.
-    let _: () = unsafe { objc2::msg_send![controller, krabikPresent: host as i64, kind: kind] };
+fn string_array<'a>(values: impl Iterator<Item = &'a str>) -> Retained<NSArray<NSString>> {
+    let values: Vec<Retained<NSString>> = values.map(NSString::from_str).collect();
+    NSArray::from_retained_slice(&values)
 }
 
-fn controller_dismiss(controller: &NSObject) {
+/// Applies the bottom navigation bar; `None` hides it.
+fn controller_set_bottom_navigation(
+    controller: &NSObject,
+    bar: Option<&crate::navigation::BottomNavigation>,
+) {
+    let items = bar.map_or(&[][..], |bar| bar.items.as_slice());
+    let labels = string_array(items.iter().map(|item| item.label.as_str()));
+    let icons = string_array(items.iter().map(|item| item.icon.ios_name().unwrap_or("")));
+    let selected = bar.map_or(0, |bar| bar.selected) as i64;
     // SAFETY: see `controller_push`.
-    let _: () = unsafe { objc2::msg_send![controller, krabikDismiss] };
+    let _: () = unsafe {
+        objc2::msg_send![
+            controller,
+            krabikSetBottomNavigation: &*labels,
+            icons: &*icons,
+            selected: selected
+        ]
+    };
+}
+
+fn controller_show_dialog(controller: &NSObject, dialog: &crate::presentation::Dialog) {
+    let title = NSString::from_str(&dialog.title);
+    let message = NSString::from_str(dialog.message.as_deref().unwrap_or(""));
+    let labels = string_array(dialog.buttons.iter().map(|b| b.label.as_str()));
+    let actions = string_array(dialog.buttons.iter().map(|b| b.action.as_str()));
+    let roles: Vec<Retained<NSNumber>> = dialog
+        .buttons
+        .iter()
+        .map(|b| NSNumber::new_i32(b.role.code()))
+        .collect();
+    let roles = NSArray::from_retained_slice(&roles);
+    // SAFETY: see `controller_push`.
+    let _: () = unsafe {
+        objc2::msg_send![
+            controller,
+            krabikShowDialog: &*title,
+            message: &*message,
+            labels: &*labels,
+            roles: &*roles,
+            actions: &*actions
+        ]
+    };
+}
+
+fn controller_dismiss_dialog(controller: &NSObject) {
+    // SAFETY: see `controller_push`.
+    let _: () = unsafe { objc2::msg_send![controller, krabikDismissDialog] };
+}
+
+fn controller_present_sheet(controller: &NSObject, host: u64) {
+    // SAFETY: see `controller_push`.
+    let _: () = unsafe { objc2::msg_send![controller, krabikPresentSheet: host as i64] };
+}
+
+fn controller_dismiss_sheet(controller: &NSObject) {
+    // SAFETY: see `controller_push`.
+    let _: () = unsafe { objc2::msg_send![controller, krabikDismissSheet] };
 }
 
 static STATES: OnceLock<Mutex<HashMap<u64, IosSession>>> = OnceLock::new();
@@ -3924,7 +3864,10 @@ pub unsafe extern "C" fn krabik_ios_set_controller(handle: u64, controller: *mut
     });
 }
 
-/// Dispatches the native dismissal of the presented dialog or sheet.
+/// Dispatches the native dismissal of the bottom sheet (swipe or scrim tap).
+///
+/// The platform has already closed the sheet, so the session forgets it
+/// first: if the application still returns a sheet, it is presented again.
 ///
 /// # Safety
 ///
@@ -3934,20 +3877,96 @@ pub unsafe extern "C" fn krabik_ios_on_modal_dismiss(handle: u64) {
     if MainThreadMarker::new().is_none() {
         return;
     }
-    guard("modal dismiss", || {
+    guard("sheet dismiss", || {
         with_session(handle, |session| {
-            let Some(action) = session
-                .app
-                .presentation()
-                .map(|presentation| presentation.dismiss_action)
-            else {
-                return;
-            };
-            if session.app.handle(Event::Click { action: &action }) {
+            session.forget_sheet();
+            if let Some(sheet) = session.app.sheet() {
+                session.app.handle(Event::Click {
+                    action: &sheet.dismiss_action,
+                });
+            }
+            session.render_all();
+        });
+    });
+}
+
+/// Dispatches a button press of the system alert.
+///
+/// The platform has already closed the alert, so the session forgets it
+/// first: if the application still returns a dialog, it is shown again.
+///
+/// # Safety
+///
+/// `action` must point to a valid NUL-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_dialog_action(handle: u64, action: *const c_char) {
+    if action.is_null() || MainThreadMarker::new().is_none() {
+        return;
+    }
+    // SAFETY: the caller guarantees a valid NUL-terminated string.
+    let action = unsafe { CStr::from_ptr(action) }
+        .to_string_lossy()
+        .into_owned();
+    guard("dialog action", || {
+        with_session(handle, |session| {
+            session.dialog = None;
+            if !action.is_empty() {
+                session.app.handle(Event::Click { action: &action });
+            }
+            session.render_all();
+        });
+    });
+}
+
+/// Dispatches a selection in the host-level bottom navigation bar.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_bottom_navigation_selected(handle: u64, index: u64) {
+    if MainThreadMarker::new().is_none() {
+        return;
+    }
+    guard("bottom navigation", || {
+        with_session(handle, |session| {
+            let action = session
+                .navigation
+                .last()
+                .and_then(|screen| screen.bottom_navigation.as_ref())
+                .map(|bar| bar.action.clone())
+                .filter(|action| !action.is_empty());
+            if let Some(action) = action
+                && session.app.handle(Event::Selected {
+                    action: &action,
+                    index: index as usize,
+                })
+            {
                 session.render_all();
             }
         });
     });
+}
+
+/// The height, in points, of the content a host rendered last.
+///
+/// Lets a content-sized native container, such as a sheet, wrap it.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_content_height(handle: u64, host: u64) -> f64 {
+    if MainThreadMarker::new().is_none() {
+        return 0.0;
+    }
+    with_session(handle, |session| {
+        session
+            .hosts
+            .get(&host)
+            .map_or(0.0, |state| f64::from(state.runtime.content_height()))
+    })
+    .unwrap_or(0.0)
 }
 
 /// Dispatches a click on a native widget back into the Rust tree.

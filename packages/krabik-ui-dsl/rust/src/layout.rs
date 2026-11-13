@@ -436,8 +436,6 @@ fn content_size(
         }
         // A tab bar fills the available width and has a fixed touch height.
         NodeKind::TabBar(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), TAB_BAR_HEIGHT),
-        // A bottom navigation bar fills the width below its content.
-        NodeKind::BottomNavigation(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), 56.0),
         NodeKind::DatePicker(props) => {
             let (compact_width, inline_width, inline_height) = match props.value {
                 crate::ui::DatePickerValue::Date(_) => (DATE_PICKER_WIDTH, 320.0, 320.0),

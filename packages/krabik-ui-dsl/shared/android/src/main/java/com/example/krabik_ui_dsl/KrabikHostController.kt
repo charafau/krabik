@@ -1,5 +1,8 @@
 package com.example.krabik_ui_dsl
 
+import android.app.Dialog
+import android.content.DialogInterface
+import android.graphics.Color
 import android.view.Gravity
 import android.view.MenuItem
 import android.view.View
@@ -8,26 +11,39 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toolbar
+import androidx.appcompat.app.AlertDialog
+import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.FragmentActivity
+import com.google.android.material.color.MaterialColors
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 /**
- * Owns the native navigation stack and modal presentations for one session.
+ * Owns the native chrome of one session: the screen stack, the toolbar, the
+ * bottom navigation bar, the system alert and the bottom sheet.
  *
- * Rust is the source of truth: it calls [push], [pop], [present] and [dismiss]
- * after an application state change. The toolbar and fragment transactions are
- * native; the back button asks Rust first.
+ * Rust is the source of truth. After an application state change it calls
+ * [push] / [pop], [setToolbar], [setBottomNavigation], [showDialog] /
+ * [dismissDialog] and [presentSheet] / [dismissSheet]. Nothing here changes
+ * what is shown on its own; user input is reported to Rust, which decides.
  */
 class KrabikHostController(
     private val activity: FragmentActivity,
     private val session: Long,
     private val toolbar: Toolbar,
+    private val bottomNavigation: KrabikBottomNavigation,
     private val mainContainer: FrameLayout,
     private val navContainer: FrameLayout,
     private val main: RustRootView,
 ) {
-    private val titles = ArrayList<String>()
-    private var poppingToRoot = false
+    /**
+     * The screen stack, root first. Screens are plain fragments added to
+     * [navContainer]; the fragment back stack is not used, so the system back
+     * button can never pop a screen without Rust knowing.
+     */
+    private val screens = ArrayList<KrabikScreenFragment>()
     private var toolbarActions: List<String> = emptyList()
+    private var dialog: Dialog? = null
+    private var lastPopAnimated = false
     private val hideNavigation = Runnable {
         navContainer.visibility = View.GONE
     }
@@ -40,7 +56,7 @@ class KrabikHostController(
         // transparent lets a pop reveal the root underneath.
         navContainer.isClickable = true
         toolbar.visibility = View.GONE
-        toolbar.setNavigationContentDescription("Back")
+        bottomNavigation.visibility = View.GONE
         toolbar.setNavigationOnClickListener {
             main.onBackPressed()
         }
@@ -59,64 +75,113 @@ class KrabikHostController(
         main.setController(this)
     }
 
-    /** Pushes a screen fragment for a Rust host with the requested transition. */
+    // region Screen stack
+
+    /**
+     * Pushes a screen for a Rust host.
+     *
+     * The new screen is added above the current one, which is hidden once the
+     * transition ends. Its view stays alive, so a later [pop] reveals it
+     * exactly as the user left it.
+     */
     fun push(hostId: Long, title: String, transition: Int) {
         navContainer.removeCallbacks(hideNavigation)
-        poppingToRoot = false
         val fragment = KrabikScreenFragment.newInstance(session, hostId)
+        val previous = screens.lastOrNull()
         val transaction = activity.supportFragmentManager.beginTransaction()
-        val (enter, exit, popEnter, popExit) = when (transition) {
-            TRANSITION_FADE -> intArrayOf(
-                R.anim.krabik_fade_in,
-                R.anim.krabik_fade_out,
-                R.anim.krabik_fade_in,
-                R.anim.krabik_fade_out,
-            )
-            TRANSITION_SLIDE -> intArrayOf(
-                R.anim.krabik_slide_in_right,
-                R.anim.krabik_slide_out_left,
+            .setReorderingAllowed(true)
+        if (previous != null) {
+            when (transition) {
+                // The new screen slides in above while the old one drifts back.
+                TRANSITION_SLIDE -> transaction.setCustomAnimations(
+                    R.anim.krabik_slide_in_right,
+                    R.anim.krabik_slide_out_left,
+                )
+                // Only the new screen fades; the old one stays solid beneath.
+                TRANSITION_FADE -> transaction.setCustomAnimations(
+                    R.anim.krabik_fade_in,
+                    R.anim.krabik_hold,
+                )
+            }
+        }
+        transaction.add(navContainer.id, fragment)
+        if (previous != null) {
+            transaction.hide(previous)
+        }
+        transaction.commitAllowingStateLoss()
+        screens.add(fragment)
+    }
+
+    /**
+     * Pops [count] screens in one step, animating only the visible top screen
+     * with the [transition] it was pushed with.
+     */
+    fun pop(count: Int, transition: Int) {
+        if (count <= 0 || screens.isEmpty()) {
+            return
+        }
+        val removed = ArrayList<KrabikScreenFragment>()
+        repeat(minOf(count, screens.size)) {
+            removed.add(screens.removeAt(screens.size - 1))
+        }
+        val top = removed.first()
+        val target = screens.lastOrNull()
+        val manager = activity.supportFragmentManager
+
+        // Screens between the top and the target are hidden; drop them quietly.
+        if (removed.size > 1) {
+            val quiet = manager.beginTransaction().setReorderingAllowed(true)
+            removed.drop(1).forEach { quiet.remove(it) }
+            quiet.commitAllowingStateLoss()
+        }
+
+        val transaction = manager.beginTransaction().setReorderingAllowed(true)
+        when (transition) {
+            // The top screen slides away above while the target drifts in.
+            TRANSITION_SLIDE -> transaction.setCustomAnimations(
                 R.anim.krabik_slide_in_left,
                 R.anim.krabik_slide_out_right,
             )
-            else -> intArrayOf(0, 0, 0, 0)
+            // Only the top screen fades; the target is already solid beneath.
+            TRANSITION_FADE -> transaction.setCustomAnimations(0, R.anim.krabik_fade_out)
         }
-        transaction.setCustomAnimations(enter, exit, popEnter, popExit)
-        transaction.replace(navContainer.id, fragment)
-        transaction.addToBackStack(title)
-        transaction.commit()
-        titles.add(title)
-        updateChrome()
+        transaction.remove(top)
+        if (target != null) {
+            transaction.show(target)
+        }
+        transaction.commitAllowingStateLoss()
+        lastPopAnimated = transition == TRANSITION_SLIDE || transition == TRANSITION_FADE
     }
 
-    /** Pops the current screen fragment. */
-    fun pop() {
-        activity.supportFragmentManager.popBackStack()
-        if (titles.isNotEmpty()) {
-            titles.removeAt(titles.size - 1)
-        }
-        poppingToRoot = titles.isEmpty()
-        updateChrome()
-    }
-
-    /** Presents a dialog or bottom sheet host. */
-    fun present(hostId: Long, kind: Int) {
-        val fragment = if (kind == 1) {
-            KrabikSheetFragment.newInstance(session, hostId)
+    /** Switches between the main app root and the navigation container. */
+    fun setRootVisible(visible: Boolean) {
+        navContainer.removeCallbacks(hideNavigation)
+        if (visible) {
+            mainContainer.visibility = View.VISIBLE
+            if (lastPopAnimated && navContainer.visibility == View.VISIBLE) {
+                // Keep the navigation container above the root until the last
+                // screen has animated out, then reveal the root underneath.
+                navContainer.postDelayed(hideNavigation, TRANSITION_MS + 40L)
+            } else {
+                navContainer.visibility = View.GONE
+            }
         } else {
-            KrabikDialogFragment.newInstance(session, hostId)
+            // A navigation app renders its root as a screen too, so the unused
+            // main host must leave the accessibility tree to avoid duplicate rows.
+            mainContainer.visibility = View.GONE
+            navContainer.visibility = View.VISIBLE
         }
-        fragment.show(activity.supportFragmentManager, MODAL_TAG)
+        lastPopAnimated = false
     }
 
-    /** Dismisses the current modal, if any. */
-    fun dismiss() {
-        val fragment = activity.supportFragmentManager.findFragmentByTag(MODAL_TAG)
-        if (fragment is androidx.fragment.app.DialogFragment) {
-            fragment.dismissAllowingStateLoss()
-        }
-    }
+    // endregion
 
-    /** Applies the top screen's toolbar metadata. */
+    // region Toolbar and bottom navigation
+
+    /**
+     * Applies the top screen's toolbar. Rust calls this after every navigation
+     * change, so the toolbar never keeps a previous screen's configuration.
+     */
     fun setToolbar(
         title: String,
         subtitle: String,
@@ -129,7 +194,12 @@ class KrabikHostController(
         toolbarActions = actionIds.toList()
         toolbar.title = title
         toolbar.subtitle = subtitle.ifEmpty { null }
-        toolbar.setNavigationContentDescription(backTitle.ifEmpty { "Back" })
+        if (screens.size > 1) {
+            toolbar.setNavigationIcon(R.drawable.krabik_ic_arrow_back)
+            toolbar.setNavigationContentDescription(backTitle.ifEmpty { "Back" })
+        } else {
+            toolbar.navigationIcon = null
+        }
         toolbar.menu.clear()
         for (index in actionLabels.indices) {
             val item = toolbar.menu.add(0, ACTION_ID_BASE + index, index, actionLabels[index])
@@ -177,58 +247,121 @@ class KrabikHostController(
                 item.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
             }
         }
-        if (hidden || titles.isEmpty()) {
-            toolbar.visibility = View.GONE
-        } else {
-            toolbar.visibility = View.VISIBLE
+        toolbar.visibility = if (hidden || screens.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /** Applies the top screen's bottom navigation bar; no items hides it. */
+    fun setBottomNavigation(labels: Array<String>, icons: Array<String>, selected: Int) {
+        bottomNavigation.configure(labels.toList(), icons.toList(), selected)
+        bottomNavigation.visibility = if (labels.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    // endregion
+
+    // region Dialog and bottom sheet
+
+    /**
+     * Shows the system alert. [roles] holds one code per button: 0 default,
+     * 1 cancel, 2 destructive. An empty [dismissAction] means the alert can
+     * only be closed with a button.
+     */
+    fun showDialog(
+        title: String,
+        message: String,
+        labels: Array<String>,
+        roles: IntArray,
+        actions: Array<String>,
+        dismissAction: String,
+    ) {
+        dismissDialog()
+        val builder = MaterialAlertDialogBuilder(activity).setTitle(title)
+        if (message.isNotEmpty()) {
+            builder.setMessage(message)
+        }
+
+        // Android places buttons by slot, not by order: the cancel button is
+        // the negative one, the first other choice the positive one.
+        var destructiveSlot = 0
+        var positiveUsed = false
+        var neutralUsed = false
+        for (index in labels.indices) {
+            val action = actions[index]
+            val listener = DialogInterface.OnClickListener { _, _ ->
+                dialog = null
+                main.onDialogAction(action)
+            }
+            val slot = when {
+                roles[index] == ROLE_CANCEL -> DialogInterface.BUTTON_NEGATIVE
+                !positiveUsed -> DialogInterface.BUTTON_POSITIVE
+                !neutralUsed -> DialogInterface.BUTTON_NEUTRAL
+                else -> continue
+            }
+            when (slot) {
+                DialogInterface.BUTTON_NEGATIVE -> builder.setNegativeButton(labels[index], listener)
+                DialogInterface.BUTTON_POSITIVE -> {
+                    positiveUsed = true
+                    builder.setPositiveButton(labels[index], listener)
+                }
+                else -> {
+                    neutralUsed = true
+                    builder.setNeutralButton(labels[index], listener)
+                }
+            }
+            if (roles[index] == ROLE_DESTRUCTIVE) {
+                destructiveSlot = slot
+            }
+        }
+
+        builder.setCancelable(dismissAction.isNotEmpty())
+        builder.setOnCancelListener {
+            dialog = null
+            main.onDialogAction(dismissAction)
+        }
+        val alert: AlertDialog = builder.show()
+        if (destructiveSlot != 0) {
+            alert.getButton(destructiveSlot)?.setTextColor(
+                MaterialColors.getColor(
+                    alert.context,
+                    com.google.android.material.R.attr.colorError,
+                    Color.RED,
+                ),
+            )
+        }
+        dialog = alert
+    }
+
+    /** Closes the system alert without reporting anything back. */
+    fun dismissDialog() {
+        dialog?.dismiss()
+        dialog = null
+    }
+
+    /** Presents the native bottom sheet around a Rust host. */
+    fun presentSheet(hostId: Long) {
+        KrabikSheetFragment.newInstance(session, hostId)
+            .show(activity.supportFragmentManager, SHEET_TAG)
+    }
+
+    /** Dismisses the bottom sheet, if any. */
+    fun dismissSheet() {
+        val fragment = activity.supportFragmentManager.findFragmentByTag(SHEET_TAG)
+        if (fragment is DialogFragment) {
+            fragment.dismissAllowingStateLoss()
         }
     }
 
-    /** Switches between the main app root and the navigation container. */
-    fun setRootVisible(visible: Boolean) {
-        navContainer.removeCallbacks(hideNavigation)
-        if (visible) {
-            // Keep the navigation container above the root while a pop
-            // transition runs, then reveal the root underneath.
-            mainContainer.visibility = View.VISIBLE
-            navContainer.visibility = View.VISIBLE
-            if (poppingToRoot) {
-                poppingToRoot = false
-                navContainer.postDelayed(hideNavigation, TRANSITION_MS + 40L)
-            } else {
-                navContainer.visibility = View.GONE
-            }
-        } else {
-            // A navigation app renders its root as a screen too, so the unused
-            // main host must leave the accessibility tree to avoid duplicate rows.
-            mainContainer.visibility = View.GONE
-            navContainer.visibility = View.VISIBLE
-        }
-    }
+    // endregion
 
     private fun dp(value: Int): Int =
         (value * activity.resources.displayMetrics.density).toInt()
 
-    private fun updateChrome() {
-        if (titles.isEmpty()) {
-            toolbar.visibility = View.GONE
-            return
-        }
-        toolbar.visibility = View.VISIBLE
-        toolbar.title = titles.last()
-        if (titles.size > 1) {
-            toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
-            toolbar.setNavigationContentDescription("Back")
-        } else {
-            toolbar.navigationIcon = null
-        }
-    }
-
     private companion object {
-        const val MODAL_TAG = "krabik-modal"
+        const val SHEET_TAG = "krabik-sheet"
         const val TRANSITION_MS = 280L
-        const val TRANSITION_FADE = 1
         const val TRANSITION_SLIDE = 0
+        const val TRANSITION_FADE = 1
+        const val ROLE_CANCEL = 1
+        const val ROLE_DESTRUCTIVE = 2
         const val ACTION_ID_BASE = 0x1000
     }
 }

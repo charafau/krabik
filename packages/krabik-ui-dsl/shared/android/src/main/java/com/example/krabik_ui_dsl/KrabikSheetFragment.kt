@@ -7,11 +7,15 @@ import android.view.View
 import android.view.ViewGroup
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 
-/** A native Material bottom sheet hosting a Rust-rendered presentation. */
+/**
+ * A native Material bottom sheet around Rust-rendered content.
+ *
+ * Material supplies the surface, scrim and drag behaviour; the sheet is as
+ * tall as its content. Swiping it away, tapping the scrim and the back button
+ * all arrive in [onCancel].
+ */
 class KrabikSheetFragment : BottomSheetDialogFragment() {
     private var host: RustRootView? = null
-
-    override fun getTheme(): Int = R.style.Theme_KrabikBottomSheet
 
     override fun onCreateView(
         inflater: LayoutInflater,

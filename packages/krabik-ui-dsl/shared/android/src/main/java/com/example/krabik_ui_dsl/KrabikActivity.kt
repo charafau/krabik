@@ -14,8 +14,9 @@ import androidx.fragment.app.FragmentActivity
  * Hosts the Rust session full screen and keeps it inside the system bars.
  *
  * The main root, navigation screens and modal hosts share one session handle.
- * A [KrabikHostController] owns the native toolbar, fragment stack and modal
- * presentations; Rust remains the source of truth for what is shown.
+ * A [KrabikHostController] owns the native toolbar, bottom navigation bar,
+ * screen stack, alert and bottom sheet; Rust remains the source of truth for
+ * what is shown.
  *
  * Subclasses load their native renderer and, if they provide one, register
  * their app factory. That ordering matters: the renderer must be loaded before
@@ -40,6 +41,9 @@ abstract class KrabikActivity : FragmentActivity() {
         root = RustRootView(this)
 
         val toolbar = Toolbar(this)
+        val bottomNavigation = KrabikBottomNavigation(this) { index ->
+            root.onBottomNavigationSelected(index)
+        }
         val mainContainer = FrameLayout(this).apply {
             addView(
                 root,
@@ -86,6 +90,14 @@ abstract class KrabikActivity : FragmentActivity() {
                     1f,
                 ),
             )
+            // The bar keeps its natural Material height below the content.
+            addView(
+                bottomNavigation,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
             setOnApplyWindowInsetsListener { view, insets ->
                 val left: Int
                 val top: Int
@@ -130,14 +142,15 @@ abstract class KrabikActivity : FragmentActivity() {
             this,
             root.session,
             toolbar,
+            bottomNavigation,
             mainContainer,
             navContainer,
             root,
         )
 
-        // Route back through AndroidX so FragmentManager and predictive back
-        // share one ordered pipeline. Rust gets the first chance to pop a
-        // screen or close a dialog.
+        // Rust owns the screen stack, so it decides what back does. When it
+        // declines (the root screen), the system default runs and leaves the
+        // app; the callback is re-armed for when the user returns.
         onBackPressedDispatcher.addCallback(
             this,
             object : OnBackPressedCallback(true) {
@@ -145,6 +158,7 @@ abstract class KrabikActivity : FragmentActivity() {
                     if (!root.onBackPressed()) {
                         isEnabled = false
                         onBackPressedDispatcher.onBackPressed()
+                        isEnabled = true
                     }
                 }
             },

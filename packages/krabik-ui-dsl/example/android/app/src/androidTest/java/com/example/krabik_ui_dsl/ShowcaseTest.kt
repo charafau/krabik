@@ -170,14 +170,52 @@ class ShowcaseTest {
             onView(withText("Cancel")).perform(click())
             onView(withText("Delete task?")).check(doesNotExist())
 
+            // The system alert's other button and the back button close it too.
+            openPage("Dialog")
+            onView(withText("Delete")).perform(click())
+            onView(withText("Delete task?")).check(doesNotExist())
+            openPage("Dialog")
+            androidx.test.espresso.Espresso.pressBack()
+            onView(withText("Delete task?")).check(doesNotExist())
+
             openPage("Bottom sheet")
             onView(withText("Open bottom sheet")).check(matches(isDisplayed()))
             onView(withText("Open bottom sheet")).perform(click())
             onView(withText("Filters")).check(matches(isDisplayed()))
             onView(withText("Close")).perform(click())
             onView(withText("Filters")).check(doesNotExist())
+
+            // A native dismissal reaches Rust, so the sheet can be reopened.
+            onView(withText("Open bottom sheet")).perform(click())
+            onView(withText("Filters")).check(matches(isDisplayed()))
+            androidx.test.espresso.Espresso.pressBack()
+            Thread.sleep(500)
+            onView(withText("Filters")).check(doesNotExist())
+            onView(withText("Open bottom sheet")).perform(click())
+            onView(withText("Filters")).check(matches(isDisplayed()))
+            onView(withText("Close")).perform(click())
             onView(withText("Open bottom sheet")).check(matches(isDisplayed()))
             tapBack()
+        }
+    }
+
+    @Test
+    fun poppingKeepsThePreviousScreenAlive() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            var home: android.view.View? = null
+            scenario.onActivity { activity ->
+                home = activity.supportFragmentManager.fragments
+                    .first { it is KrabikScreenFragment }.view
+            }
+            openPage("Text")
+            androidx.test.espresso.Espresso.pressBack()
+            Thread.sleep(500)
+            scenario.onActivity { activity ->
+                val screens = activity.supportFragmentManager.fragments
+                    .filterIsInstance<KrabikScreenFragment>()
+                assertTrue("only the home screen remains", screens.size == 1)
+                assertTrue("the home view was not rebuilt", screens[0].view === home)
+            }
         }
     }
 
@@ -245,7 +283,8 @@ class ShowcaseTest {
             openPage("Spinner")
             androidx.test.espresso.Espresso.pressBack()
             Thread.sleep(400)
-            onView(withText("Krabik UI DSL")).check(matches(isDisplayed()))
+            // The catalog is revealed where the user left it, not rebuilt.
+            onView(withText("Spinner")).check(matches(isDisplayed()))
         }
     }
 

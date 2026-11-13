@@ -26,11 +26,10 @@ use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Axis, Border, BottomNavigationProps, CheckProps, DatePickerMode, DatePickerProps,
-    DatePickerValue, DateValue, EdgeInsets, FontWeight, Gradient, GradientDirection, ImageProps,
-    ImageScale, ImageSource, ImeAction, KeyboardType, PagerProps, ProgressProps, RadioGroupProps,
-    SliderProps, SwitchProps, TabBarProps, TextAlign, TextFieldProps, TextProps, TimeValue,
-    dim_color, snap_slider_value,
+    Axis, Border, CheckProps, DatePickerMode, DatePickerProps, DatePickerValue, DateValue,
+    EdgeInsets, FontWeight, Gradient, GradientDirection, ImageProps, ImageScale, ImageSource,
+    ImeAction, KeyboardType, PagerProps, ProgressProps, RadioGroupProps, SliderProps, SwitchProps,
+    TabBarProps, TextAlign, TextFieldProps, TextProps, TimeValue, dim_color, snap_slider_value,
 };
 
 mod handles;
@@ -61,7 +60,6 @@ const RADIO_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioButt
 const RADIO_GROUP_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioGroup");
 const TAB_BAR_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikTabBar");
 const PAGER_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikPager");
-const BOTTOM_NAV_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikBottomNavigation");
 const DATE_PICKER_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikDatePicker");
 const SEEK_BAR_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSeekBar");
 const PROGRESS_BAR_CLASS: &JNIStr = jni_str!("android/widget/ProgressBar");
@@ -419,7 +417,7 @@ enum HostKind {
     Main,
     /// One screen in the native navigation stack.
     Screen(String),
-    /// The currently presented dialog or sheet.
+    /// The content of the presented bottom sheet.
     Modal,
 }
 
@@ -790,10 +788,6 @@ impl AndroidState {
                         .construct(env, &ids.tab_bar, &child_context)?
                 }
                 NodeKind::Pager(_) => ids.pager_ctor.construct(env, &ids.pager, &child_context)?,
-                NodeKind::BottomNavigation(_) => {
-                    ids.bottom_nav_ctor
-                        .construct(env, &ids.bottom_nav, &child_context)?
-                }
                 NodeKind::DatePicker(_) => {
                     ids.date_picker_ctor
                         .construct(env, &ids.date_picker, &child_context)?
@@ -851,8 +845,6 @@ impl AndroidState {
             update_tab_bar(env, &view, props)?;
         } else if let NodeKind::Pager(props) = &node.kind {
             update_pager(env, &view, props)?;
-        } else if let NodeKind::BottomNavigation(props) = &node.kind {
-            update_bottom_navigation(env, &view, props)?;
         } else if let NodeKind::DatePicker(props) = &node.kind {
             update_date_picker(env, &view, props)?;
         } else if let NodeKind::Slider(props) = &node.kind {
@@ -1086,10 +1078,6 @@ impl AndroidState {
                     any = true;
                 }
                 NodeKind::Pager(props) if !props.action.is_empty() => {
-                    action.selected = Some(props.action.clone());
-                    any = true;
-                }
-                NodeKind::BottomNavigation(props) if !props.action.is_empty() => {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
@@ -1351,42 +1339,6 @@ fn update_pager(env: &mut Env<'_>, view: &JObject<'_>, props: &PagerProps) -> Jn
         &[
             JValue::Int(props.pages as jint),
             JValue::Int(props.selected as jint),
-        ],
-    )
-}
-
-fn update_bottom_navigation(
-    env: &mut Env<'_>,
-    view: &JObject<'_>,
-    props: &BottomNavigationProps,
-) -> JniResult<()> {
-    let ids = jni_handles(env)?;
-    let labels = env.new_object_array(
-        props.items.len() as jint,
-        jni_str!("java/lang/String"),
-        JObject::null(),
-    )?;
-    let icons = env.new_object_array(
-        props.items.len() as jint,
-        jni_str!("java/lang/String"),
-        JObject::null(),
-    )?;
-    for (index, item) in props.items.iter().enumerate() {
-        let label = jcall!(env, env.new_string(&item.label))?;
-        let label: &JObject<'_> = label.as_ref();
-        labels.set_element(env, index, label)?;
-        let icon = jcall!(env, env.new_string(item.icon.android_name().unwrap_or("")))?;
-        let icon: &JObject<'_> = icon.as_ref();
-        icons.set_element(env, index, icon)?;
-    }
-    ids.configure_bottom_nav.call_void(
-        env,
-        view,
-        &[
-            JValue::Object(&labels),
-            JValue::Object(&icons),
-            JValue::Int(props.selected as jint),
-            JValue::Int(props.color as jint),
         ],
     )
 }
@@ -1899,9 +1851,28 @@ struct AndroidSession {
     context: Global<JObject<'static>>,
     density: f32,
     controller: Option<Global<JObject<'static>>>,
+    /// The navigation stack last mirrored to the native controller.
     navigation: Vec<crate::navigation::Screen>,
-    toolbar: Option<crate::navigation::Toolbar>,
-    presentation: Option<crate::presentation::Presentation>,
+    /// The alert the native controller is showing.
+    dialog: Option<crate::presentation::Dialog>,
+}
+
+/// Builds a Java `String[]` from string slices.
+macro_rules! string_array {
+    ($env:expr, $values:expr) => {{
+        let values: Vec<&str> = $values.collect();
+        let array = $env.new_object_array(
+            values.len() as jint,
+            jni_str!("java/lang/String"),
+            JObject::null(),
+        )?;
+        for (index, value) in values.into_iter().enumerate() {
+            let text = jcall!($env, $env.new_string(value))?;
+            let text: &JObject<'_> = text.as_ref();
+            array.set_element($env, index, text)?;
+        }
+        array
+    }};
 }
 
 impl AndroidSession {
@@ -1923,12 +1894,11 @@ impl AndroidSession {
             density,
             controller: None,
             navigation: Vec::new(),
-            toolbar: None,
-            presentation: None,
+            dialog: None,
         })
     }
 
-    /// Rebuilds every host and synchronizes the native presentations.
+    /// Rebuilds every host and synchronizes the native chrome and modals.
     fn render_all(&mut self, env: &mut Env<'_>) -> JniResult<()> {
         let has_navigation = self.app.navigation().is_some();
         let mut elements = Vec::new();
@@ -1937,7 +1907,7 @@ impl AndroidSession {
                 HostKind::Main if has_navigation => None,
                 HostKind::Main => Some(self.app.view()),
                 HostKind::Screen(key) => self.app.screen(key),
-                HostKind::Modal => self.app.presentation_view(),
+                HostKind::Modal => self.app.sheet().map(|sheet| sheet.into_content()),
             };
             if let Some(element) = element {
                 elements.push((*id, element));
@@ -1961,77 +1931,63 @@ impl AndroidSession {
             .navigation()
             .map(|nav| nav.screens)
             .unwrap_or_default();
-        let toolbar = navigation.last().and_then(|screen| screen.toolbar.clone());
         if navigation != self.navigation {
             self.sync_navigation(env, &navigation)?;
+            self.sync_chrome(env, navigation.last())?;
             self.navigation = navigation;
         }
-        let presentation = self.app.presentation();
-        if presentation != self.presentation {
-            self.sync_presentation(env, presentation.as_ref())?;
-            self.presentation = presentation;
+        let dialog = self.app.dialog();
+        if dialog != self.dialog {
+            self.sync_dialog(env, dialog.as_ref())?;
+            self.dialog = dialog;
         }
-        if toolbar != self.toolbar {
-            let screen = self.navigation.last().cloned();
-            self.sync_toolbar(env, screen.as_ref(), &toolbar)?;
-            self.toolbar = toolbar;
+        let sheet = self.app.sheet().is_some();
+        if sheet != self.has_sheet() {
+            self.sync_sheet(env, sheet)?;
         }
         Ok(())
     }
 
-    fn sync_toolbar(
+    /// Mirrors the top screen's toolbar and bottom navigation.
+    ///
+    /// Sent on every navigation change so the native chrome never keeps a
+    /// previous screen's configuration.
+    fn sync_chrome(
         &mut self,
         env: &mut Env<'_>,
         screen: Option<&crate::navigation::Screen>,
-        toolbar: &Option<crate::navigation::Toolbar>,
     ) -> JniResult<()> {
         let controller = self.controller.as_ref().map(|c| c.as_obj());
         let Some(controller) = controller else {
             return Ok(());
         };
-        let title = screen.map_or("", |screen| screen.title.as_str());
-        let subtitle = toolbar
-            .as_ref()
-            .and_then(|toolbar| toolbar.subtitle.as_deref())
-            .unwrap_or("");
-        let back_title = toolbar
-            .as_ref()
-            .and_then(|toolbar| toolbar.back_title.as_deref())
-            .unwrap_or("Back");
-        let hidden = toolbar.as_ref().is_none_or(|toolbar| toolbar.hidden);
-        let actions = toolbar
-            .as_ref()
-            .map(|toolbar| toolbar.actions.as_slice())
-            .unwrap_or(&[]);
-        let action_ids = env.new_object_array(
-            actions.len() as jint,
-            jni_str!("java/lang/String"),
-            JObject::null(),
+        let toolbar = screen.and_then(|screen| screen.toolbar.as_ref());
+        let actions = toolbar.map_or(&[][..], |toolbar| toolbar.actions.as_slice());
+        // A screen shows the toolbar unless it explicitly hides it.
+        let hidden = screen.is_none() || toolbar.is_some_and(|toolbar| toolbar.hidden);
+
+        let action_ids = string_array!(env, actions.iter().map(|a| a.action.as_str()));
+        let action_labels = string_array!(env, actions.iter().map(|a| a.label.as_str()));
+        let action_icons = string_array!(
+            env,
+            actions.iter().map(|a| a.icon.android_name().unwrap_or(""))
+        );
+        let title = jcall!(
+            env,
+            env.new_string(screen.map_or("", |screen| screen.title.as_str()))
         )?;
-        let action_labels = env.new_object_array(
-            actions.len() as jint,
-            jni_str!("java/lang/String"),
-            JObject::null(),
+        let subtitle = jcall!(
+            env,
+            env.new_string(toolbar.and_then(|t| t.subtitle.as_deref()).unwrap_or(""))
         )?;
-        let action_icons = env.new_object_array(
-            actions.len() as jint,
-            jni_str!("java/lang/String"),
-            JObject::null(),
+        let back_title = jcall!(
+            env,
+            env.new_string(
+                toolbar
+                    .and_then(|t| t.back_title.as_deref())
+                    .unwrap_or("Back")
+            )
         )?;
-        for (index, action) in actions.iter().enumerate() {
-            for (array, value) in [
-                (&action_ids, action.action.as_str()),
-                (&action_labels, action.label.as_str()),
-                (&action_icons, action.icon.android_name().unwrap_or("")),
-            ] {
-                let text = jcall!(env, env.new_string(value))?;
-                let text: &JObject<'_> = text.as_ref();
-                array.set_element(env, index, text)?;
-            }
-        }
-        let title = jcall!(env, env.new_string(title))?;
-        let subtitle = jcall!(env, env.new_string(subtitle))?;
-        let back_title = jcall!(env, env.new_string(back_title))?;
         env.call_method(
             controller,
             jni_str!("setToolbar"),
@@ -2044,6 +2000,27 @@ impl AndroidSession {
                 JValue::Object(&action_ids),
                 JValue::Object(&action_labels),
                 JValue::Object(&action_icons),
+            ],
+        )?;
+
+        // No items hides the bar.
+        let bar = screen.and_then(|screen| screen.bottom_navigation.as_ref());
+        let items = bar.map_or(&[][..], |bar| bar.items.as_slice());
+        let labels = string_array!(env, items.iter().map(|item| item.label.as_str()));
+        let icons = string_array!(
+            env,
+            items
+                .iter()
+                .map(|item| item.icon.android_name().unwrap_or(""))
+        );
+        env.call_method(
+            controller,
+            jni_str!("setBottomNavigation"),
+            jni_sig!("([Ljava/lang/String;[Ljava/lang/String;I)V"),
+            &[
+                JValue::Object(&labels),
+                JValue::Object(&icons),
+                JValue::Int(bar.map_or(0, |bar| bar.selected) as jint),
             ],
         )?;
         Ok(())
@@ -2065,9 +2042,24 @@ impl AndroidSession {
             .take_while(|(old, new)| old.key == new.key)
             .count();
 
-        for screen in self.navigation.iter().skip(common).rev() {
-            env.call_method(controller, jni_str!("pop"), jni_sig!("()V"), &[])?;
-            if let Some(host) = self.screen_host(&screen.key) {
+        // Leaving several screens at once is one native pop, animated with
+        // the transition of the screen the user is looking at.
+        let popped = &self.navigation[common..];
+        if let Some(top) = popped.last() {
+            env.call_method(
+                controller,
+                jni_str!("pop"),
+                jni_sig!("(II)V"),
+                &[
+                    JValue::Int(popped.len() as jint),
+                    JValue::Int(top.transition.code()),
+                ],
+            )?;
+            let hosts: Vec<u64> = popped
+                .iter()
+                .filter_map(|screen| self.screen_host(&screen.key))
+                .collect();
+            for host in hosts {
                 self.hosts.remove(&host);
                 self.pending.remove(&host);
             }
@@ -2100,35 +2092,86 @@ impl AndroidSession {
         Ok(())
     }
 
-    fn sync_presentation(
+    /// Shows, replaces or closes the system alert.
+    fn sync_dialog(
         &mut self,
         env: &mut Env<'_>,
-        presentation: Option<&crate::presentation::Presentation>,
+        dialog: Option<&crate::presentation::Dialog>,
     ) -> JniResult<()> {
         let controller = self.controller.as_ref().map(|c| c.as_obj());
         let Some(controller) = controller else {
             return Ok(());
         };
-        if let Some(host) = self.modal_host() {
-            env.call_method(controller, jni_str!("dismiss"), jni_sig!("()V"), &[])?;
-            self.hosts.remove(&host);
-            self.pending.remove(&host);
+        if self.dialog.is_some() {
+            env.call_method(controller, jni_str!("dismissDialog"), jni_sig!("()V"), &[])?;
         }
-        if let Some(presentation) = presentation {
+        let Some(dialog) = dialog else {
+            return Ok(());
+        };
+        let title = jcall!(env, env.new_string(&dialog.title))?;
+        let message = jcall!(env, env.new_string(dialog.message.as_deref().unwrap_or("")))?;
+        let labels = string_array!(env, dialog.buttons.iter().map(|b| b.label.as_str()));
+        let actions = string_array!(env, dialog.buttons.iter().map(|b| b.action.as_str()));
+        let role_codes: Vec<jint> = dialog.buttons.iter().map(|b| b.role.code()).collect();
+        let roles = env.new_int_array(role_codes.len())?;
+        roles.set_region(env, 0, &role_codes)?;
+        let dismiss = jcall!(env, env.new_string(dialog.dismiss_action().unwrap_or("")))?;
+        env.call_method(
+            controller,
+            jni_str!("showDialog"),
+            jni_sig!("(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[I[Ljava/lang/String;Ljava/lang/String;)V"),
+            &[
+                JValue::Object(title.as_ref()),
+                JValue::Object(message.as_ref()),
+                JValue::Object(&labels),
+                JValue::Object(&roles),
+                JValue::Object(&actions),
+                JValue::Object(dismiss.as_ref()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Presents or dismisses the native bottom sheet.
+    fn sync_sheet(&mut self, env: &mut Env<'_>, show: bool) -> JniResult<()> {
+        let controller = self.controller.as_ref().map(|c| c.as_obj());
+        let Some(controller) = controller else {
+            return Ok(());
+        };
+        if show {
             let host = self.next_host;
             self.next_host += 1;
             self.pending.insert(host, HostKind::Modal);
             env.call_method(
                 controller,
-                jni_str!("present"),
-                jni_sig!("(JI)V"),
-                &[
-                    JValue::Long(host as jlong),
-                    JValue::Int(presentation.kind as jint),
-                ],
+                jni_str!("presentSheet"),
+                jni_sig!("(J)V"),
+                &[JValue::Long(host as jlong)],
             )?;
+        } else {
+            env.call_method(controller, jni_str!("dismissSheet"), jni_sig!("()V"), &[])?;
+            self.forget_sheet();
         }
         Ok(())
+    }
+
+    /// Whether a sheet is presented or about to be.
+    fn has_sheet(&self) -> bool {
+        self.hosts
+            .values()
+            .any(|host| matches!(host.kind, HostKind::Modal))
+            || self
+                .pending
+                .values()
+                .any(|kind| matches!(kind, HostKind::Modal))
+    }
+
+    /// Drops the sheet's host after the sheet closed.
+    fn forget_sheet(&mut self) {
+        self.hosts
+            .retain(|_, host| !matches!(host.kind, HostKind::Modal));
+        self.pending
+            .retain(|_, kind| !matches!(kind, HostKind::Modal));
     }
 
     fn screen_host(&self, key: &str) -> Option<u64> {
@@ -2136,12 +2179,6 @@ impl AndroidSession {
             HostKind::Screen(screen) if screen == key => Some(*id),
             _ => None,
         })
-    }
-
-    fn modal_host(&self) -> Option<u64> {
-        self.hosts
-            .iter()
-            .find_map(|(id, host)| matches!(host.kind, HostKind::Modal).then_some(*id))
     }
 
     /// Attaches a native host view to the session.
@@ -2205,6 +2242,28 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeCreat
             .expect("android states")
             .insert(handle, session);
         Ok(handle)
+    })
+}
+
+/// The height, in pixels, of the content a host rendered last.
+///
+/// Lets a content-sized native container, such as a bottom sheet, wrap it.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeContentHeight<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    host: jlong,
+) -> jint {
+    run(&mut unenv, "nativeContentHeight", |_env| {
+        let states = states().lock().expect("android states");
+        let height = states
+            .get(&handle)
+            .and_then(|session| session.hosts.get(&(host as u64)))
+            .map_or(0.0, |state| state.runtime.content_height() * state.density);
+        Ok(height.ceil() as jint)
     })
 }
 
@@ -2735,7 +2794,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnPag
     });
 }
 
-/// Dispatches a toolbar action back into the application.
+/// Dispatches a host-level action: a toolbar item.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnToolbarAction<
     'caller,
@@ -2760,7 +2819,36 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnToo
     });
 }
 
-/// Dispatches a bottom-navigation selection back into the Rust tree.
+/// Dispatches a button press or dismissal of the system alert.
+///
+/// The platform has already closed the alert, so the session forgets it
+/// first: if the application still returns a dialog, it is shown again.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnDialogAction<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    action: JString<'caller>,
+) {
+    run(&mut unenv, "nativeOnDialogAction", |env| {
+        let action = action.try_to_string(env)?;
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        let Some(session) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+        session.dialog = None;
+        if !action.is_empty() {
+            session.app.handle(Event::Click { action: &action });
+        }
+        session.render_all(env)
+    });
+}
+
+/// Dispatches a selection in the host-level bottom navigation bar.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnBottomNavigationSelected<
     'caller,
@@ -2768,8 +2856,6 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnBot
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
-    host: jlong,
-    node_id: jlong,
     index: jint,
 ) {
     run(&mut unenv, "nativeOnBottomNavigationSelected", |env| {
@@ -2779,16 +2865,12 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnBot
         let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
-
-        let id = NodeId(node_id as u64);
-        let action = session.hosts.get(&(host as u64)).and_then(|state| {
-            state.runtime.bottom_navigation_action(id).or_else(|| {
-                state
-                    .row_actions
-                    .get(&id)
-                    .and_then(|row| row.selected.clone())
-            })
-        });
+        let action = session
+            .navigation
+            .last()
+            .and_then(|screen| screen.bottom_navigation.as_ref())
+            .map(|bar| bar.action.clone())
+            .filter(|action| !action.is_empty());
         if let Some(action) = action
             && session.app.handle(Event::Selected {
                 action: &action,
@@ -3027,7 +3109,10 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeSetCo
     });
 }
 
-/// Dispatches the native dismissal of the presented dialog or sheet.
+/// Dispatches the native dismissal of the bottom sheet (swipe, back, scrim).
+///
+/// The platform has already closed the sheet, so the session forgets it
+/// first: if the application still returns a sheet, it is presented again.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnModalDismiss<
     'caller,
@@ -3043,17 +3128,13 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnMod
         let Some(session) = states.get_mut(&handle) else {
             return Ok(());
         };
-        let Some(action) = session
-            .app
-            .presentation()
-            .map(|presentation| presentation.dismiss_action)
-        else {
-            return Ok(());
-        };
-        if session.app.handle(Event::Click { action: &action }) {
-            session.render_all(env)?;
+        session.forget_sheet();
+        if let Some(sheet) = session.app.sheet() {
+            session.app.handle(Event::Click {
+                action: &sheet.dismiss_action,
+            });
         }
-        Ok(())
+        session.render_all(env)
     });
 }
 

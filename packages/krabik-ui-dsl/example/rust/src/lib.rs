@@ -15,7 +15,7 @@ use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Event, set_app_factory};
 use krabik_ui_dsl::navigation::{Navigation, Screen, ScreenTransition, Toolbar};
-use krabik_ui_dsl::presentation::{Presentation, PresentationKind};
+use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::ui::{DateValue, Element, Icon, TimeValue};
 
 mod checklist;
@@ -145,6 +145,9 @@ impl App for ShowcaseApp {
                         _ => ScreenTransition::Slide,
                     };
                     let mut screen = Screen::new(*key, pages::title(key)).transition(transition);
+                    if *key == "bottom-navigation" {
+                        screen = screen.bottom_navigation(pages::bottom_navigation(self));
+                    }
                     if *key == "toolbar" {
                         screen = screen.toolbar(
                             Toolbar::new()
@@ -168,32 +171,12 @@ impl App for ShowcaseApp {
         pages::screen(self, key)
     }
 
-    fn presentation(&self) -> Option<Presentation> {
-        if self.dialog_open {
-            Some(Presentation::new(
-                "dialog",
-                PresentationKind::Dialog,
-                "dialog:close",
-            ))
-        } else if self.sheet_open {
-            Some(Presentation::new(
-                "sheet",
-                PresentationKind::Sheet,
-                "sheet:close",
-            ))
-        } else {
-            None
-        }
+    fn dialog(&self) -> Option<Dialog> {
+        self.dialog_open.then(pages::dialog)
     }
 
-    fn presentation_view(&self) -> Option<Element> {
-        if self.dialog_open {
-            Some(pages::dialog_view(self))
-        } else if self.sheet_open {
-            Some(pages::sheet_view(self))
-        } else {
-            None
-        }
+    fn sheet(&self) -> Option<BottomSheet> {
+        self.sheet_open.then(pages::sheet)
     }
 
     fn handle(&mut self, event: Event<'_>) -> bool {
@@ -315,7 +298,7 @@ impl App for ShowcaseApp {
                     self.dialog_open = true;
                     true
                 }
-                "dialog:close" => {
+                "dialog:close" | "dialog:delete" => {
                     let changed = self.dialog_open;
                     self.dialog_open = false;
                     changed
@@ -523,18 +506,31 @@ mod tests {
     }
 
     #[test]
-    fn presentations_are_exclusive_and_dismissible() {
+    fn dialog_and_sheet_open_and_close() {
         let mut app = app();
-        assert!(app.presentation().is_none());
+        assert!(app.dialog().is_none());
+        assert!(app.sheet().is_none());
         assert!(app.handle(click("dialog:open")));
-        assert_eq!(app.presentation().unwrap().kind, PresentationKind::Dialog);
-        assert!(app.presentation_view().is_some());
-        assert!(app.handle(click("dialog:close")));
-        assert!(app.presentation().is_none());
+        let dialog = app.dialog().expect("dialog");
+        assert_eq!(dialog.title, "Delete task?");
+        assert_eq!(dialog.dismiss_action(), Some("dialog:close"));
+        assert!(app.handle(click("dialog:delete")));
+        assert!(app.dialog().is_none());
         assert!(app.handle(click("sheet:open")));
-        assert_eq!(app.presentation().unwrap().kind, PresentationKind::Sheet);
+        assert_eq!(app.sheet().expect("sheet").dismiss_action, "sheet:close");
         assert!(app.handle(Event::Back));
-        assert!(app.presentation().is_none());
+        assert!(app.sheet().is_none());
+    }
+
+    #[test]
+    fn the_bottom_navigation_screen_declares_its_bar() {
+        let mut app = app();
+        assert!(app.handle(click("page:bottom-navigation")));
+        let screens = app.navigation().expect("navigation").screens;
+        assert!(screens[0].bottom_navigation.is_none());
+        let bar = screens[1].bottom_navigation.as_ref().expect("bar");
+        assert_eq!(bar.items.len(), 3);
+        assert_eq!(bar.action, "demo:bottom-nav");
     }
 
     #[test]
