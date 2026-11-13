@@ -14,7 +14,7 @@ use std::sync::Arc;
 use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Event, set_app_factory};
-use krabik_ui_dsl::navigation::{Navigation, Screen};
+use krabik_ui_dsl::navigation::{Navigation, Screen, ScreenTransition};
 use krabik_ui_dsl::presentation::{Presentation, PresentationKind};
 use krabik_ui_dsl::ui::{DateValue, Element, TimeValue};
 
@@ -126,7 +126,14 @@ impl App for ShowcaseApp {
         Some(Navigation::new(
             self.stack
                 .iter()
-                .map(|key| Screen::new(*key, pages::title(key)))
+                .map(|key| {
+                    let transition = match *key {
+                        "transition-fade" => ScreenTransition::Fade,
+                        "transition-none" => ScreenTransition::None,
+                        _ => ScreenTransition::Slide,
+                    };
+                    Screen::new(*key, pages::title(key)).transition(transition)
+                })
                 .collect(),
         ))
     }
@@ -601,10 +608,40 @@ mod tests {
             "animation-decoration",
             "animation-enter-exit",
             "animation-curves",
+            "transitions",
+            "transition-slide",
+            "transition-fade",
+            "transition-none",
+            "bottom-sheet",
         ] {
             assert!(pages::screen(&app, key).is_some(), "missing page {key}");
             assert!(pages::screen_key(&format!("page:{key}")).is_some());
         }
+    }
+
+    #[test]
+    fn demo_screens_choose_their_native_transition() {
+        let mut app = app();
+        app.stack = vec!["home", "transition-fade"];
+        let nav = app.navigation().expect("navigation");
+        assert_eq!(
+            nav.screens.last().unwrap().transition,
+            ScreenTransition::Fade
+        );
+
+        app.stack = vec!["home", "transition-none"];
+        let nav = app.navigation().expect("navigation");
+        assert_eq!(
+            nav.screens.last().unwrap().transition,
+            ScreenTransition::None
+        );
+
+        app.stack = vec!["home", "text"];
+        let nav = app.navigation().expect("navigation");
+        assert_eq!(
+            nav.screens.last().unwrap().transition,
+            ScreenTransition::Slide
+        );
     }
 
     #[test]

@@ -108,9 +108,39 @@ final class ShowcaseUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Delete task?"].exists)
 
         open("Bottom sheet")
+        XCTAssertTrue(app.buttons["Open bottom sheet"].waitForExistence(timeout: 5))
+        tapButton("Open bottom sheet")
         XCTAssertTrue(app.staticTexts["Filters"].waitForExistence(timeout: 5))
         app.buttons["Close"].tap()
         XCTAssertFalse(app.staticTexts["Filters"].exists)
+        XCTAssertTrue(app.buttons["Open bottom sheet"].waitForExistence(timeout: 5))
+        backToCatalog()
+    }
+
+    func testPageTransitions() throws {
+        open("Page transitions")
+
+        tapButton("Push with slide")
+        XCTAssertTrue(
+            app.staticTexts["Pushed with the native slide transition."]
+                .waitForExistence(timeout: 5)
+        )
+        app.buttons["Back"].tap()
+
+        tapButton("Push with fade")
+        XCTAssertTrue(
+            app.staticTexts["Pushed with a cross-fade transition."]
+                .waitForExistence(timeout: 5)
+        )
+        app.buttons["Back"].tap()
+
+        tapButton("Push with no animation")
+        XCTAssertTrue(
+            app.staticTexts["Pushed with no animation."]
+                .waitForExistence(timeout: 5)
+        )
+        app.buttons["Back"].tap()
+        backToCatalog()
     }
 
     func testWindowedListExists() throws {

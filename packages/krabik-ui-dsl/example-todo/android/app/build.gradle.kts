@@ -21,6 +21,7 @@ android {
   compileSdk = 37
   sourceSets["main"].java.srcDir(sharedAndroidSources)
   sourceSets["main"].kotlin.srcDir(sharedAndroidSources)
+  sourceSets["main"].res.srcDir(sharedAndroidSources.parentFile.resolve("res"))
   defaultConfig {
     // Differs from the dev harness so both apps can be installed side by side.
     applicationId = "com.example.krabik_ui_dsl_todo"

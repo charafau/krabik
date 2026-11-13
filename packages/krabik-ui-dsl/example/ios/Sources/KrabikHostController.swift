@@ -1,3 +1,4 @@
+import QuartzCore
 import UIKit
 
 /// Owns the native navigation controller and modal presentations for a session.
@@ -39,7 +40,7 @@ final class KrabikHostController: UIViewController {
         krabik_ios_set_controller(session, Unmanaged.passUnretained(self).toOpaque())
     }
 
-    @objc func krabikPush(_ host: Int64, title: String) {
+    @objc func krabikPush(_ host: Int64, title: String, transition: Int) {
         let vc = UIViewController()
         let hostView = RustHostView(frame: .zero)
         hostView.bind(session: session, host: UInt64(host))
@@ -53,15 +54,42 @@ final class KrabikHostController: UIViewController {
                 action: #selector(backTapped)
             )
         }
-        navigation.pushViewController(vc, animated: true)
-        navigation.setNavigationBarHidden(false, animated: true)
+        switch transition {
+        case 1:
+            addFadeTransition()
+            navigation.setNavigationBarHidden(false, animated: false)
+            navigation.pushViewController(vc, animated: false)
+        case 2:
+            navigation.setNavigationBarHidden(false, animated: false)
+            navigation.pushViewController(vc, animated: false)
+        default:
+            navigation.setNavigationBarHidden(false, animated: true)
+            navigation.pushViewController(vc, animated: true)
+        }
     }
 
-    @objc func krabikPop() {
-        navigation.popViewController(animated: true)
-        if navigation.viewControllers.count <= 1 {
-            navigation.setNavigationBarHidden(true, animated: true)
+    @objc func krabikPop(_ transition: Int) {
+        let toRoot = navigation.viewControllers.count <= 2
+        switch transition {
+        case 1:
+            addFadeTransition()
+            navigation.popViewController(animated: false)
+        case 2:
+            navigation.popViewController(animated: false)
+        default:
+            navigation.popViewController(animated: true)
         }
+        if toRoot {
+            navigation.setNavigationBarHidden(true, animated: transition == 0)
+        }
+    }
+
+    private func addFadeTransition() {
+        let transition = CATransition()
+        transition.duration = 0.28
+        transition.type = .fade
+        transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        navigation.view.layer.add(transition, forKey: kCATransition)
     }
 
     @objc func krabikSetRootVisible(_ visible: Bool) {

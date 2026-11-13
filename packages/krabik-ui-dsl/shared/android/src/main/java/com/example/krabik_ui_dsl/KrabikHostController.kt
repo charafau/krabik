@@ -22,6 +22,10 @@ class KrabikHostController(
     private val main: RustRootView,
 ) {
     private val titles = ArrayList<String>()
+    private var poppingToRoot = false
+    private val hideNavigation = Runnable {
+        navContainer.visibility = View.GONE
+    }
 
     init {
         if (navContainer.id == View.NO_ID) {
@@ -40,10 +44,29 @@ class KrabikHostController(
         main.setController(this)
     }
 
-    /** Pushes a screen fragment for a Rust host. */
-    fun push(hostId: Long, title: String) {
+    /** Pushes a screen fragment for a Rust host with the requested transition. */
+    fun push(hostId: Long, title: String, transition: Int) {
+        navContainer.removeCallbacks(hideNavigation)
+        poppingToRoot = false
+        val fragment = KrabikScreenFragment.newInstance(session, hostId)
         val transaction = activity.supportFragmentManager.beginTransaction()
-        transaction.replace(navContainer.id, KrabikScreenFragment.newInstance(session, hostId))
+        val (enter, exit, popEnter, popExit) = when (transition) {
+            TRANSITION_FADE -> intArrayOf(
+                R.anim.krabik_fade_in,
+                R.anim.krabik_fade_out,
+                R.anim.krabik_fade_in,
+                R.anim.krabik_fade_out,
+            )
+            TRANSITION_SLIDE -> intArrayOf(
+                R.anim.krabik_slide_in_right,
+                R.anim.krabik_slide_out_left,
+                R.anim.krabik_slide_in_left,
+                R.anim.krabik_slide_out_right,
+            )
+            else -> intArrayOf(0, 0, 0, 0)
+        }
+        transaction.setCustomAnimations(enter, exit, popEnter, popExit)
+        transaction.replace(navContainer.id, fragment)
         transaction.addToBackStack(title)
         transaction.commit()
         titles.add(title)
@@ -56,6 +79,7 @@ class KrabikHostController(
         if (titles.isNotEmpty()) {
             titles.removeAt(titles.size - 1)
         }
+        poppingToRoot = titles.isEmpty()
         updateChrome()
     }
 
@@ -79,10 +103,24 @@ class KrabikHostController(
 
     /** Switches between the main app root and the navigation container. */
     fun setRootVisible(visible: Boolean) {
-        // A navigation app renders its root as a screen too, so the unused
-        // main host must leave the accessibility tree to avoid duplicate rows.
-        mainContainer.visibility = if (visible) View.VISIBLE else View.GONE
-        navContainer.visibility = if (visible) View.GONE else View.VISIBLE
+        navContainer.removeCallbacks(hideNavigation)
+        if (visible) {
+            // Keep the navigation container above the root while a pop
+            // transition runs, then reveal the root underneath.
+            mainContainer.visibility = View.VISIBLE
+            navContainer.visibility = View.VISIBLE
+            if (poppingToRoot) {
+                poppingToRoot = false
+                navContainer.postDelayed(hideNavigation, TRANSITION_MS + 40L)
+            } else {
+                navContainer.visibility = View.GONE
+            }
+        } else {
+            // A navigation app renders its root as a screen too, so the unused
+            // main host must leave the accessibility tree to avoid duplicate rows.
+            mainContainer.visibility = View.GONE
+            navContainer.visibility = View.VISIBLE
+        }
     }
 
     private fun updateChrome() {
@@ -102,5 +140,8 @@ class KrabikHostController(
 
     private companion object {
         const val MODAL_TAG = "krabik-modal"
+        const val TRANSITION_MS = 280L
+        const val TRANSITION_FADE = 1
+        const val TRANSITION_SLIDE = 0
     }
 }
