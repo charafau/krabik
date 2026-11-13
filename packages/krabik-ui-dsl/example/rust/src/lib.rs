@@ -473,6 +473,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_ExampleBridge_install<'c
 #[cfg(test)]
 mod tests {
     use super::*;
+    use krabik_ui_dsl::widgets::Widget;
 
     fn app() -> ShowcaseApp {
         ShowcaseApp::new()
@@ -611,11 +612,16 @@ mod tests {
         let tree = krabik_ui_dsl::tree::build(&element);
         let bars: Vec<_> = krabik_ui_dsl::tree::preorder(&tree)
             .into_iter()
-            .filter(|node| matches!(node.kind, krabik_ui_dsl::tree::NodeKind::TabBar(_)))
+            .filter(|node| {
+                matches!(
+                    node.kind,
+                    krabik_ui_dsl::tree::NodeKind::Widget(Widget::TabBar(_))
+                )
+            })
             .collect();
         assert_eq!(bars.len(), 2);
         for bar in bars {
-            let krabik_ui_dsl::tree::NodeKind::TabBar(props) = &bar.kind else {
+            let krabik_ui_dsl::tree::NodeKind::Widget(Widget::TabBar(props)) = &bar.kind else {
                 continue;
             };
             assert!(!props.tabs.is_empty());
@@ -759,7 +765,7 @@ mod tests {
         );
         assert!(update.ops.iter().any(|op| matches!(
             op,
-            Op::Update(node) if matches!(&node.kind, NodeKind::TabBar(p) if p.selected == 1)
+            Op::Update(node) if matches!(&node.kind, NodeKind::Widget(Widget::TabBar(p)) if p.selected == 1)
         )));
     }
 

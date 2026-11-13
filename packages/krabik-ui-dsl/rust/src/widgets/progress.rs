@@ -1,0 +1,105 @@
+//! The `progress` widget: properties and builder.
+
+use crate::element::{Element, ElementKind, style_builder};
+use crate::engine::geometry::Size;
+use crate::style::CONTROL_ACCENT;
+use crate::widgets::CONTROL_WIDTH;
+use crate::widgets::Widget;
+
+/// Platform-independent properties of a progress indicator.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProgressProps {
+    /// The progress in the range `0.0..=1.0`.
+    pub value: f32,
+    /// ARGB color of the filled part.
+    pub color: u32,
+}
+
+impl ProgressProps {
+    /// Creates a progress indicator with the given fraction.
+    pub fn new(value: f32) -> Self {
+        Self {
+            value,
+            color: CONTROL_ACCENT,
+        }
+    }
+}
+
+/// Platform-independent properties of an indeterminate progress spinner.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpinnerProps {
+    /// ARGB color of the spinner.
+    pub color: u32,
+}
+
+impl SpinnerProps {
+    /// Creates a spinner with the default accent color.
+    pub fn new() -> Self {
+        Self {
+            color: CONTROL_ACCENT,
+        }
+    }
+}
+
+impl Default for SpinnerProps {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A native determinate progress indicator.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProgressIndicator(pub(crate) Element);
+
+impl ProgressIndicator {
+    /// Creates a determinate progress indicator with a fraction in `0.0..=1.0`.
+    pub fn new(value: f32) -> Self {
+        Self(Element::leaf(ElementKind::Widget(Widget::Progress(
+            ProgressProps::new(value.clamp(0.0, 1.0)),
+        ))))
+    }
+
+    /// Creates an indeterminate progress spinner.
+    pub fn indeterminate() -> Self {
+        Self(Element::leaf(ElementKind::Widget(Widget::Spinner(
+            SpinnerProps::new(),
+        ))))
+    }
+
+    /// Sets the ARGB color of the filled part or spinner.
+    pub fn color(mut self, color: u32) -> Self {
+        match &mut self.0.kind {
+            ElementKind::Widget(Widget::Progress(props)) => props.color = color,
+            ElementKind::Widget(Widget::Spinner(props)) => props.color = color,
+            _ => {}
+        }
+        self
+    }
+}
+
+impl From<ProgressIndicator> for Element {
+    fn from(component: ProgressIndicator) -> Self {
+        component.0
+    }
+}
+
+style_builder!(ProgressIndicator);
+
+/// The intrinsic height of a progress bar.
+const PROGRESS_HEIGHT: f32 = 6.0;
+/// The side of an indeterminate spinner in logical points.
+const SPINNER_SIZE: f32 = 24.0;
+
+impl ProgressProps {
+    /// A progress bar fills the width it is given.
+    pub(crate) fn intrinsic_size(&self, max_width: Option<f32>) -> Size {
+        Size::new(max_width.unwrap_or(CONTROL_WIDTH), PROGRESS_HEIGHT)
+    }
+}
+
+impl SpinnerProps {
+    /// A spinner is a fixed square.
+    pub(crate) fn intrinsic_size(&self) -> Size {
+        Size::new(SPINNER_SIZE, SPINNER_SIZE)
+    }
+}

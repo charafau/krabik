@@ -15,6 +15,7 @@ use crate::tree::{
     self, BuildInfo, ListExtent, ListMeasurements, NodeId, NodeKind, ROOT_ID, UiNode,
 };
 use crate::ui::{Element, ListProps};
+use crate::widgets::Widget;
 
 /// The result of rebuilding the UI: the used size and the operations to apply.
 #[derive(Clone, Debug, Default)]
@@ -395,7 +396,9 @@ impl Runtime {
     pub fn click(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::Button(props) if !props.action.is_empty() => Some(props.action.clone()),
+            NodeKind::Widget(Widget::Button(props)) if !props.action.is_empty() => {
+                Some(props.action.clone())
+            }
             _ => None,
         }
     }
@@ -404,9 +407,15 @@ impl Runtime {
     pub fn toggle_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::Switch(props) if !props.action.is_empty() => Some(props.action.clone()),
-            NodeKind::Checkbox(props) if !props.action.is_empty() => Some(props.action.clone()),
-            NodeKind::RadioButton(props) if !props.action.is_empty() => Some(props.action.clone()),
+            NodeKind::Widget(Widget::Switch(props)) if !props.action.is_empty() => {
+                Some(props.action.clone())
+            }
+            NodeKind::Widget(Widget::Checkbox(props)) if !props.action.is_empty() => {
+                Some(props.action.clone())
+            }
+            NodeKind::Widget(Widget::RadioButton(props)) if !props.action.is_empty() => {
+                Some(props.action.clone())
+            }
             _ => None,
         }
     }
@@ -420,7 +429,9 @@ impl Runtime {
     pub fn slider_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::Slider(props) if !props.action.is_empty() => Some(props.action.clone()),
+            NodeKind::Widget(Widget::Slider(props)) if !props.action.is_empty() => {
+                Some(props.action.clone())
+            }
             _ => None,
         }
     }
@@ -429,7 +440,7 @@ impl Runtime {
     pub fn slider_config(&self, id: NodeId) -> Option<(f32, f32, Option<f32>)> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::Slider(props) => Some((props.min, props.max, props.step)),
+            NodeKind::Widget(Widget::Slider(props)) => Some((props.min, props.max, props.step)),
             _ => None,
         }
     }
@@ -438,7 +449,9 @@ impl Runtime {
     pub fn radio_group_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::RadioGroup(props) if !props.action.is_empty() => Some(props.action.clone()),
+            NodeKind::Widget(Widget::RadioGroup(props)) if !props.action.is_empty() => {
+                Some(props.action.clone())
+            }
             _ => None,
         }
     }
@@ -456,7 +469,9 @@ impl Runtime {
     pub fn tab_bar_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::TabBar(props) if !props.action.is_empty() => Some(props.action.clone()),
+            NodeKind::Widget(Widget::TabBar(props)) if !props.action.is_empty() => {
+                Some(props.action.clone())
+            }
             _ => None,
         }
     }
@@ -473,7 +488,7 @@ impl Runtime {
     )> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::DatePicker(props) if !props.action.is_empty() => {
+            NodeKind::Widget(Widget::DatePicker(props)) if !props.action.is_empty() => {
                 Some((props.action.clone(), props.date_range, props.time_range))
             }
             _ => None,
@@ -484,7 +499,9 @@ impl Runtime {
     pub fn text_field_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::TextField(props) if !props.action.is_empty() => Some(props.action.clone()),
+            NodeKind::Widget(Widget::TextField(props)) if !props.action.is_empty() => {
+                Some(props.action.clone())
+            }
             _ => None,
         }
     }
@@ -493,7 +510,7 @@ impl Runtime {
     pub fn text_field_submit_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::TextField(props) if !props.submit_action.is_empty() => {
+            NodeKind::Widget(Widget::TextField(props)) if !props.submit_action.is_empty() => {
                 Some(props.submit_action.clone())
             }
             _ => None,
@@ -504,7 +521,7 @@ impl Runtime {
     pub fn text_field_focus_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
         match &node.kind {
-            NodeKind::TextField(props) if !props.focus_action.is_empty() => {
+            NodeKind::Widget(Widget::TextField(props)) if !props.focus_action.is_empty() => {
                 Some(props.focus_action.clone())
             }
             _ => None,
@@ -666,7 +683,7 @@ mod tests {
         let button = runtime.tree().children[0]
             .children
             .iter()
-            .find(|node| matches!(node.kind, NodeKind::Button(_)))
+            .find(|node| matches!(node.kind, NodeKind::Widget(Widget::Button(_))))
             .unwrap();
 
         assert_eq!(runtime.click(button.id).as_deref(), Some("click"));

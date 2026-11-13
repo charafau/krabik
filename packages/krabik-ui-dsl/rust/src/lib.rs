@@ -6,16 +6,14 @@
 //! native widgets.
 
 pub mod app;
+pub(crate) mod element;
+pub mod engine;
 pub mod gallery;
-pub mod geometry;
-pub mod layout;
-pub mod measure;
 pub mod navigation;
 pub mod presentation;
-pub mod render;
-pub mod runtime;
-pub mod tree;
+pub mod style;
 pub mod ui;
+pub mod widgets;
 
 // Only the iOS renderer evaluates curves from Rust; the module stays compiled
 // everywhere so its tests run on the host.
@@ -28,6 +26,8 @@ mod animation;
 mod frame_batch;
 
 pub use app::{App, create_app, set_app_factory};
+// The engine modules keep their short public paths, e.g. `krabik_ui_dsl::runtime`.
+pub use engine::{geometry, layout, measure, render, runtime, tree};
 pub use gallery::GalleryApp;
 
 #[cfg(target_os = "android")]

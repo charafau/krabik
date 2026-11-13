@@ -31,6 +31,7 @@ use crate::ui::{
     ImeAction, KeyboardType, PagerProps, ProgressProps, RadioGroupProps, SliderProps, SwitchProps,
     TabBarProps, TextAlign, TextFieldProps, TextProps, TimeValue, dim_color, snap_slider_value,
 };
+use crate::widgets::Widget;
 
 mod handles;
 
@@ -758,44 +759,47 @@ impl AndroidState {
             ];
 
             match &node.kind {
-                NodeKind::Text(_) => ids
-                    .text_view_ctor
-                    .construct(env, &ids.text_view, &context)?,
-                NodeKind::Button(_) => ids.button_ctor.construct(env, &ids.button, &context)?,
-                NodeKind::TextField(_) => {
+                NodeKind::Widget(Widget::Text(_)) => {
+                    ids.text_view_ctor
+                        .construct(env, &ids.text_view, &context)?
+                }
+                NodeKind::Widget(Widget::Button(_)) => {
+                    ids.button_ctor.construct(env, &ids.button, &context)?
+                }
+                NodeKind::Widget(Widget::TextField(_)) => {
                     ids.text_input_ctor
                         .construct(env, &ids.text_input, &child_context)?
                 }
-                NodeKind::Switch(_) => {
+                NodeKind::Widget(Widget::Switch(_)) => {
                     ids.switch_ctor
                         .construct(env, &ids.switch, &child_context)?
                 }
-                NodeKind::Checkbox(_) => {
+                NodeKind::Widget(Widget::Checkbox(_)) => {
                     ids.checkbox_ctor
                         .construct(env, &ids.checkbox, &child_context)?
                 }
-                NodeKind::RadioButton(_) => {
+                NodeKind::Widget(Widget::RadioButton(_)) => {
                     ids.radio_ctor
                         .construct(env, &ids.radio_button, &child_context)?
                 }
-                NodeKind::RadioGroup(_) => {
+                NodeKind::Widget(Widget::RadioGroup(_)) => {
                     ids.radio_group_ctor
                         .construct(env, &ids.radio_group, &child_context)?
                 }
-                NodeKind::TabBar(_) => {
+                NodeKind::Widget(Widget::TabBar(_)) => {
                     ids.tab_bar_ctor
                         .construct(env, &ids.tab_bar, &child_context)?
                 }
                 NodeKind::Pager(_) => ids.pager_ctor.construct(env, &ids.pager, &child_context)?,
-                NodeKind::DatePicker(_) => {
+                NodeKind::Widget(Widget::DatePicker(_)) => {
                     ids.date_picker_ctor
                         .construct(env, &ids.date_picker, &child_context)?
                 }
-                NodeKind::Slider(_) => {
+                NodeKind::Widget(Widget::Slider(_)) => {
                     ids.seek_bar_ctor
                         .construct(env, &ids.seek_bar, &child_context)?
                 }
-                NodeKind::Progress(_) => ids
+                NodeKind::Widget(Widget::Progress(_)) => ids
                     .create_progress
                     .call(
                         env,
@@ -803,11 +807,11 @@ impl AndroidState {
                         &[JValue::Object(self.context.as_obj())],
                     )?
                     .l()?,
-                NodeKind::Spinner(_) => {
+                NodeKind::Widget(Widget::Spinner(_)) => {
                     ids.progress_bar_ctor
                         .construct(env, &ids.progress_bar, &context)?
                 }
-                NodeKind::Image(_) => {
+                NodeKind::Widget(Widget::Image(_)) => {
                     ids.image_view_ctor
                         .construct(env, &ids.image_view, &context)?
                 }
@@ -831,7 +835,7 @@ impl AndroidState {
         };
 
         configure_view(env, &view, &node.kind, self.density)?;
-        if matches!(node.kind, NodeKind::Button(_)) {
+        if matches!(node.kind, NodeKind::Widget(Widget::Button(_))) {
             configure_button(env, &view)?;
             jni_handles(env)?.set_on_click_listener.call_void(
                 env,
@@ -1021,27 +1025,27 @@ impl AndroidState {
             let mut action = RowAction::default();
             let mut any = false;
             match &node.kind {
-                NodeKind::Button(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::Button(props)) if !props.action.is_empty() => {
                     action.click = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::Switch(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::Switch(props)) if !props.action.is_empty() => {
                     action.toggle = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::Checkbox(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::Checkbox(props)) if !props.action.is_empty() => {
                     action.toggle = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::RadioButton(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::RadioButton(props)) if !props.action.is_empty() => {
                     action.toggle = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::RadioGroup(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::RadioGroup(props)) if !props.action.is_empty() => {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::TabBar(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::TabBar(props)) if !props.action.is_empty() => {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
@@ -1049,20 +1053,20 @@ impl AndroidState {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::DatePicker(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::DatePicker(props)) if !props.action.is_empty() => {
                     action.date = Some(props.action.clone());
                     action.date_range = props.date_range;
                     action.time_range = props.time_range;
                     any = true;
                 }
-                NodeKind::Slider(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::Slider(props)) if !props.action.is_empty() => {
                     action.value = Some(props.action.clone());
                     action.value_min = props.min;
                     action.value_max = props.max;
                     action.value_step = props.step;
                     any = true;
                 }
-                NodeKind::TextField(props) => {
+                NodeKind::Widget(Widget::TextField(props)) => {
                     if !props.action.is_empty() {
                         action.text = Some(props.action.clone());
                         any = true;
@@ -1188,18 +1192,20 @@ fn configure_view(
         | NodeKind::Row
         | NodeKind::Spacer
         | NodeKind::Scroll(_) => Ok(()),
-        NodeKind::Text(_) | NodeKind::Button(_) => update_text(env, view, kind),
-        NodeKind::TextField(props) => update_text_field(env, view, props),
-        NodeKind::Switch(props) => update_switch(env, view, props),
-        NodeKind::Checkbox(props) => update_check(env, view, props, false),
-        NodeKind::RadioButton(props) => update_check(env, view, props, true),
-        NodeKind::RadioGroup(props) => update_radio_group(env, view, props),
-        NodeKind::TabBar(props) => update_tab_bar(env, view, props),
+        NodeKind::Widget(Widget::Text(_)) | NodeKind::Widget(Widget::Button(_)) => {
+            update_text(env, view, kind)
+        }
+        NodeKind::Widget(Widget::TextField(props)) => update_text_field(env, view, props),
+        NodeKind::Widget(Widget::Switch(props)) => update_switch(env, view, props),
+        NodeKind::Widget(Widget::Checkbox(props)) => update_check(env, view, props, false),
+        NodeKind::Widget(Widget::RadioButton(props)) => update_check(env, view, props, true),
+        NodeKind::Widget(Widget::RadioGroup(props)) => update_radio_group(env, view, props),
+        NodeKind::Widget(Widget::TabBar(props)) => update_tab_bar(env, view, props),
         NodeKind::Pager(props) => update_pager(env, view, props),
-        NodeKind::DatePicker(props) => update_date_picker(env, view, props),
-        NodeKind::Slider(props) => update_slider(env, view, props),
-        NodeKind::Progress(props) => update_progress(env, view, props),
-        NodeKind::Spinner(props) => {
+        NodeKind::Widget(Widget::DatePicker(props)) => update_date_picker(env, view, props),
+        NodeKind::Widget(Widget::Slider(props)) => update_slider(env, view, props),
+        NodeKind::Widget(Widget::Progress(props)) => update_progress(env, view, props),
+        NodeKind::Widget(Widget::Spinner(props)) => {
             let ids = jni_handles(env)?;
             ids.update_spinner.call_void(
                 env,
@@ -1207,7 +1213,7 @@ fn configure_view(
                 &[JValue::Object(view), JValue::Int(props.color as jint)],
             )
         }
-        NodeKind::Image(props) => update_image(env, view, props),
+        NodeKind::Widget(Widget::Image(props)) => update_image(env, view, props),
         NodeKind::Recycler(props) => update_recycler(env, view, props, density),
     }
 }
@@ -1526,7 +1532,7 @@ fn update_text(env: &mut Env<'_>, view: &JObject<'_>, kind: &NodeKind) -> JniRes
     apply_typeface(env, view, matches!(weight, FontWeight::Bold))?;
     apply_text_limits(env, view, text_limits(kind))?;
 
-    if let NodeKind::Text(props) = kind {
+    if let NodeKind::Widget(Widget::Text(props)) = kind {
         let gravity = match props.align {
             TextAlign::Start => GRAVITY_START,
             TextAlign::Center => GRAVITY_CENTER_HORIZONTAL,
@@ -1542,7 +1548,7 @@ fn update_text(env: &mut Env<'_>, view: &JObject<'_>, kind: &NodeKind) -> JniRes
 /// The line limit and truncation of a text-bearing node.
 fn text_limits(kind: &NodeKind) -> (Option<u32>, bool) {
     match kind {
-        NodeKind::Text(props) => (props.max_lines, props.ellipsis),
+        NodeKind::Widget(Widget::Text(props)) => (props.max_lines, props.ellipsis),
         _ => (None, false),
     }
 }
@@ -1586,8 +1592,12 @@ fn apply_typeface(env: &mut Env<'_>, view: &JObject<'_>, bold: bool) -> JniResul
 
 fn text_properties(kind: &NodeKind) -> Option<(&str, f32, u32, FontWeight)> {
     match kind {
-        NodeKind::Text(props) => Some((&props.content, props.size, props.color, props.weight)),
-        NodeKind::Button(props) => Some((&props.label, props.size, props.color, props.weight)),
+        NodeKind::Widget(Widget::Text(props)) => {
+            Some((&props.content, props.size, props.color, props.weight))
+        }
+        NodeKind::Widget(Widget::Button(props)) => {
+            Some((&props.label, props.size, props.color, props.weight))
+        }
         _ => None,
     }
 }
@@ -1659,7 +1669,7 @@ fn apply_style(
         ..border
     });
     let elevation = if enabled { node.style.elevation } else { 0.0 };
-    let ripple = matches!(node.kind, NodeKind::Button(_));
+    let ripple = matches!(node.kind, NodeKind::Widget(Widget::Button(_)));
     let animation = animate
         .then_some(node.style.animation.as_ref())
         .flatten()
