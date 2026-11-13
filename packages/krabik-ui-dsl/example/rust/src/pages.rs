@@ -69,6 +69,11 @@ pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
         "animation-decoration" => "animation-decoration",
         "animation-enter-exit" => "animation-enter-exit",
         "animation-curves" => "animation-curves",
+        "transitions" => "transitions",
+        "transition-slide" => "transition-slide",
+        "transition-fade" => "transition-fade",
+        "transition-none" => "transition-none",
+        "bottom-sheet" => "bottom-sheet",
         "slider" => "slider",
         "progress" => "progress",
         "spinner" => "spinner",
@@ -100,6 +105,11 @@ pub(crate) fn title(key: &str) -> &'static str {
         "animation-decoration" => "Decoration",
         "animation-enter-exit" => "Enter & exit",
         "animation-curves" => "Curves & springs",
+        "transitions" => "Page transitions",
+        "transition-slide" => "Slide",
+        "transition-fade" => "Fade",
+        "transition-none" => "Instant",
+        "bottom-sheet" => "Bottom sheet",
         "slider" => "Slider",
         "progress" => "Progress",
         "spinner" => "Spinner",
@@ -131,6 +141,11 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element> {
         "animation-decoration" => animation_decoration_page(app),
         "animation-enter-exit" => animation_enter_exit_page(app),
         "animation-curves" => animation_curves_page(app),
+        "transitions" => page_transitions_page(),
+        "transition-slide" => transition_demo_page("transition-slide"),
+        "transition-fade" => transition_demo_page("transition-fade"),
+        "transition-none" => transition_demo_page("transition-none"),
+        "bottom-sheet" => bottom_sheet_page(),
         "slider" => slider_page(app),
         "progress" => progress_page(app),
         "spinner" => spinner_page(),
@@ -167,6 +182,7 @@ pub(crate) fn home() -> Element {
                 ("Decoration", "page:animation-decoration"),
                 ("Enter & exit", "page:animation-enter-exit"),
                 ("Curves & springs", "page:animation-curves"),
+                ("Page transitions", "page:transitions"),
             ],
         ),
         (
@@ -205,7 +221,7 @@ pub(crate) fn home() -> Element {
                 ("Styling", "page:styling"),
                 ("Checklist", "page:checklist"),
                 ("Dialog", "dialog:open"),
-                ("Bottom sheet", "sheet:open"),
+                ("Bottom sheet", "page:bottom-sheet"),
             ],
         ),
     ];
@@ -715,6 +731,58 @@ fn animation_curves_page(app: &ShowcaseApp) -> Element {
             bar("Spring", COLOR_PURPLE, AnimationCurve::spring(0.55, 0.45)),
             bar("Ease out", COLOR_AMBER, AnimationCurve::EaseOut),
             caption("Run it again to compare how each curve settles."),
+        ],
+    )
+}
+
+fn page_transitions_page() -> Element {
+    page(
+        "Page transitions",
+        "Each screen chooses the native transition used when it is pushed.",
+        body![
+            Button::new("Push with slide")
+                .action("page:transition-slide")
+                .width_percent(1.0),
+            Button::new("Push with fade")
+                .action("page:transition-fade")
+                .width_percent(1.0),
+            Button::new("Push with no animation")
+                .action("page:transition-none")
+                .width_percent(1.0),
+            caption("Go back after each push to compare another style."),
+            caption("Pop reverses the same native transition."),
+        ],
+    )
+}
+
+fn transition_demo_page(key: &'static str) -> Element {
+    let (title, detail) = match key {
+        "transition-fade" => ("Fade", "Pushed with a cross-fade transition."),
+        "transition-none" => ("Instant", "Pushed with no animation."),
+        _ => ("Slide", "Pushed with the native slide transition."),
+    };
+    page(
+        title,
+        "This page demonstrates one native navigation transition.",
+        body![
+            Text::new(detail).size(18).color(COLOR_TEXT),
+            caption("Use the native Back button to return and try another style."),
+        ],
+    )
+}
+
+fn bottom_sheet_page() -> Element {
+    page(
+        "Bottom sheet",
+        "A Rust button asks the session to present a platform-native bottom sheet.",
+        body![
+            Button::new("Open bottom sheet")
+                .action("sheet:open")
+                .width_percent(1.0),
+            caption(
+                "Android uses a Material BottomSheetDialogFragment; iOS uses                  UISheetPresentationController with medium and large detents.",
+            ),
+            caption("Close it with the sheet's button or drag it down."),
         ],
     )
 }

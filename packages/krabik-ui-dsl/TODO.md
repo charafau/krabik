@@ -180,6 +180,11 @@ The runtime now supports multiple native hosts per application session:
   AndroidX `OnBackPressedDispatcher`; the app pops a screen, closes a modal or
   returns to the catalog before the Activity exits. iOS navigation uses the
   native bar's Back item.
+- **Transitions** — each `Screen` carries a `ScreenTransition::Slide`, `Fade`
+  or `None`. Android uses shared slide/fade fragment animation resources; iOS
+  keeps the native navigation push for slides and uses a native `CATransition`
+  cross-fade otherwise. The Motion section has a Page transitions demo, and
+  the Bottom sheet catalog entry is now a page with an Open button.
 
 The widget showcase itself is now a native navigation stack: every widget page
 is a screen, Dialog and Bottom sheet are modal hosts. Android instrumented

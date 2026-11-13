@@ -1787,8 +1787,12 @@ impl AndroidSession {
             env.call_method(
                 controller,
                 jni_str!("push"),
-                jni_sig!("(JLjava/lang/String;)V"),
-                &[JValue::Long(host as jlong), JValue::Object(title.as_ref())],
+                jni_sig!("(JLjava/lang/String;I)V"),
+                &[
+                    JValue::Long(host as jlong),
+                    JValue::Object(title.as_ref()),
+                    JValue::Int(screen.transition.code()),
+                ],
             )?;
         }
 

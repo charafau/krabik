@@ -141,9 +141,36 @@ class ShowcaseTest {
             onView(withText("Delete task?")).check(doesNotExist())
 
             openPage("Bottom sheet")
+            onView(withText("Open bottom sheet")).check(matches(isDisplayed()))
+            onView(withText("Open bottom sheet")).perform(click())
             onView(withText("Filters")).check(matches(isDisplayed()))
             onView(withText("Close")).perform(click())
             onView(withText("Filters")).check(doesNotExist())
+            onView(withText("Open bottom sheet")).check(matches(isDisplayed()))
+            tapBack()
+        }
+    }
+
+    @Test
+    fun pageTransitionsDemo() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openPage("Page transitions")
+
+            onView(withText("Push with slide")).perform(click())
+            onView(withText("Pushed with the native slide transition."))
+                .check(matches(isDisplayed()))
+            tapBack()
+
+            onView(withText("Push with fade")).perform(click())
+            onView(withText("Pushed with a cross-fade transition."))
+                .check(matches(isDisplayed()))
+            tapBack()
+
+            onView(withText("Push with no animation")).perform(click())
+            onView(withText("Pushed with no animation."))
+                .check(matches(isDisplayed()))
+            tapBack()
+            tapBack()
         }
     }
 
@@ -152,6 +179,7 @@ class ShowcaseTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             openPage("Spinner")
             androidx.test.espresso.Espresso.pressBack()
+            Thread.sleep(400)
             onView(withText("Krabik UI DSL")).check(matches(isDisplayed()))
         }
     }
