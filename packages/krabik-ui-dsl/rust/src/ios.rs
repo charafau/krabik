@@ -706,7 +706,6 @@ struct IosRowState {
 
 /// What one native iOS host renders.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 enum IosHostKind {
     Main,
     Screen(String),
@@ -3967,92 +3966,6 @@ pub unsafe extern "C" fn krabik_ios_content_height(handle: u64, host: u64) -> f6
             .map_or(0.0, |state| f64::from(state.runtime.content_height()))
     })
     .unwrap_or(0.0)
-}
-
-/// Dispatches a click on a native widget back into the Rust tree.
-///
-/// # Safety
-///
-/// The call must happen on the main thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_click(handle: u64, host: u64, node_id: u64) {
-    dispatch_click(handle, host, NodeId(node_id));
-}
-
-/// Dispatches a text edit on a native input back into the Rust tree.
-///
-/// # Safety
-///
-/// `text` must be a valid, NUL-terminated UTF-8 string, and the call must
-/// happen on the main thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_text_changed(
-    handle: u64,
-    host: u64,
-    node_id: u64,
-    text: *const c_char,
-) {
-    if text.is_null() {
-        return;
-    }
-    // SAFETY: the caller guarantees a valid NUL-terminated string.
-    let value = unsafe { CStr::from_ptr(text) }.to_string_lossy();
-    dispatch_text(handle, host, NodeId(node_id), &value);
-}
-
-/// Dispatches a submit on a native input back into the Rust tree.
-///
-/// # Safety
-///
-/// The call must happen on the main thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_submitted(handle: u64, host: u64, node_id: u64) {
-    dispatch_submitted(handle, host, NodeId(node_id));
-}
-
-/// Dispatches a focus change on a native input back into the Rust tree.
-///
-/// # Safety
-///
-/// The call must happen on the main thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_focus_changed(
-    handle: u64,
-    host: u64,
-    node_id: u64,
-    focused: bool,
-) {
-    dispatch_focus(handle, host, NodeId(node_id), focused);
-}
-
-/// Dispatches a switch, checkbox or radio toggle back into the Rust tree.
-///
-/// # Safety
-///
-/// The call must happen on the main thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_checked_changed(
-    handle: u64,
-    host: u64,
-    node_id: u64,
-    checked: bool,
-) {
-    dispatch_checked(handle, host, NodeId(node_id), checked);
-}
-
-/// Dispatches a slider value back into the Rust tree.
-///
-/// # Safety
-///
-/// The call must happen on the main thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_slider_changed(
-    handle: u64,
-    host: u64,
-    node_id: u64,
-    value: f64,
-) {
-    dispatch_value(handle, host, NodeId(node_id), value);
 }
 
 /// Dispatches a native toolbar action into the application.

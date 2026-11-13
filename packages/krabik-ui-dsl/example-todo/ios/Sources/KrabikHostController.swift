@@ -20,6 +20,13 @@ final class KrabikHostController: UIViewController {
     /// The sheet host waiting for its deferred presentation, if any.
     private var pendingSheet: Int64?
 
+    deinit {
+        // Releases the Rust session and every native view it created.
+        if session != 0 {
+            krabik_ios_destroy(session)
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
 

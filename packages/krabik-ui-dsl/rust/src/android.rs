@@ -411,7 +411,6 @@ struct RowState {
 
 /// What one native host renders.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 enum HostKind {
     /// The main application root.
     Main,
@@ -1841,7 +1840,6 @@ fn apply_content_size(
 }
 
 /// One application instance shared by every native host in an Activity.
-#[allow(dead_code)]
 struct AndroidSession {
     app: Box<dyn App>,
     hosts: HashMap<u64, AndroidState>,

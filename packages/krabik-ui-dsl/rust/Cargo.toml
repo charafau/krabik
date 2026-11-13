@@ -8,19 +8,9 @@ edition = "2024"
 # the Android JNI library and the staticlib is linked into the iOS app.
 crate-type = ["cdylib", "staticlib", "rlib"]
 
-# macro-scaffolding is required by the standard Swift bindings generator. It is opt-in so it
-# doesn't clash with the JNI scaffolding used by Android.
-[features]
-default = []
-ios = ["uniffi/macro-scaffolding"]
-
 [dependencies]
 jni = "0.22"
 taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
-uniffi = { git = "https://github.com/mozilla/uniffi-rs", rev = "c31f4bc025c7a31eae56b49107f50e6d38e76bc7", default-features = false }
-
-[target.'cfg(not(target_os = "ios"))'.dependencies]
-uniffi-bindgen-kotlin-jni-runtime = { git = "https://github.com/mozilla/uniffi-rs", rev = "c31f4bc025c7a31eae56b49107f50e6d38e76bc7" }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 block2 = "0.6"
@@ -69,8 +59,5 @@ objc2-ui-kit = { version = "0.3", features = [
     "objc2-core-graphics",
 ] }
 
-[build-dependencies]
-uniffi-bindgen-kotlin-jni = { git = "https://github.com/mozilla/uniffi-rs", rev = "c31f4bc025c7a31eae56b49107f50e6d38e76bc7" }
-
+# Not part of the repository's root workspace.
 [workspace]
-members = ["uniffi-bindgen", "uniffi-bindgen-swift"]

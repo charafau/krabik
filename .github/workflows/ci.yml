@@ -124,10 +124,10 @@ jobs:
             packages/krabik-ui-dsl/example-todo-minimal/rust
       # lints the iOS renderer, which the `check` job never compiles because
       # it runs on Linux and macOS hosts, not the iOS target
-      - run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --target aarch64-apple-ios-sim --features ios -- -D warnings
+      - run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --target aarch64-apple-ios-sim -- -D warnings
       - name: Build the static library
         working-directory: packages/krabik-ui-dsl/rust
-        run: cargo build --target aarch64-apple-ios-sim --features ios
+        run: cargo build --target aarch64-apple-ios-sim
       - name: Build the example static library
         working-directory: packages/krabik-ui-dsl/example/rust
         run: cargo build --target aarch64-apple-ios-sim

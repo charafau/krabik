@@ -29,7 +29,7 @@ forwards its viewport and owns no UI logic.
 
 | Milestone | Result |
 |---|---|
-| **M0 — build spike** | `build.rs` skips the Kotlin JNI generator on iOS; the staticlib builds for `aarch64-apple-ios-sim --features ios` and the app renders in the simulator. |
+| **M0 — build spike** | The staticlib builds for `aarch64-apple-ios-sim` and the app renders in the simulator. |
 | **M1 — Rust FFI skeleton** | [`ios.rs`](rust/src/ios.rs) behind `#[cfg(target_os = "ios")]`: handle-keyed `Mutex<HashMap<u64, IosState>>` with `create / render / destroy` and typed event entry points mirroring Android. |
 | **M2 — measurement** | `IosMeasure` measures `NSString` text with `UIFont` attributes, including size/weight/max-lines. |
 | **M3 — UIKit widgets** | `UILabel`, `UIButton`, `UISwitch`, `UITextField`, `UIImageView`, `UIScrollView`, `UICollectionView` (recycled lists), plus gradients (`CAGradientLayer`), borders, radii, opacity, elevation, and accessibility labels. |

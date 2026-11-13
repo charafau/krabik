@@ -44,12 +44,6 @@ bool krabik_ios_on_back(uint64_t handle);
 /// Dispatches a toolbar action.
 void krabik_ios_on_toolbar_action(uint64_t handle, const char *action);
 
-void krabik_ios_on_click(uint64_t handle, uint64_t host, uint64_t node_id);
-void krabik_ios_on_text_changed(uint64_t handle, uint64_t host, uint64_t node_id, const char *text);
-void krabik_ios_on_submitted(uint64_t handle, uint64_t host, uint64_t node_id);
-void krabik_ios_on_focus_changed(uint64_t handle, uint64_t host, uint64_t node_id, bool focused);
-void krabik_ios_on_checked_changed(uint64_t handle, uint64_t host, uint64_t node_id, bool checked);
-void krabik_ios_on_slider_changed(uint64_t handle, uint64_t host, uint64_t node_id, double value);
 #ifdef __cplusplus
 }
 #endif
