@@ -25,7 +25,9 @@ catalog, navigation screens, and modal presentations.
 ```text
 Home
 ├── Text & layout   Text · Button · Text field · Layouts
-├── Inputs          Switch · Checkbox · Radio buttons · Radio group · Date picker
+├── Motion          Frames & opacity · Decoration · Enter & exit · Curves & springs · Page transitions
+├── Containers      View pager · Tabs view · Bottom navigation · Toolbar
+├── Inputs          Switch · Checkbox · Radio buttons · Radio group · Date picker · Tabs
 ├── Values          Slider · Progress · Spinner
 ├── Media           Image · Scroll view
 ├── Lists           Windowed list · Recycled list
@@ -36,8 +38,11 @@ Highlights:
 
 - **Radio group** — the group owns mutual exclusion and reports the selected index through
   `Event::Selected`.
-- **Date picker** — a compact native field and an inline calendar, both reporting `DateValue`
-  through `Event::DateChanged`.
+- **Date picker** — date, time and date-and-time values with compact/inline modes and ranges.
+- **Containers** — a swipeable pager, a tab strip synced to it, a native bottom navigation bar
+  with custom icons, and host-level toolbar actions.
+- **Motion** — implicit frame/opacity/decoration animations, enter/exit transitions, custom
+  curves and native page transitions.
 - **Slider** — a continuous slider and a stepped one; the DSL quantizes the latter to multiples of
   ten before the app sees the value.
 - **Progress** — a determinate bar driven by buttons and an indeterminate spinner.
@@ -139,8 +144,8 @@ The Rust tests cover navigation, presentation and widget state, plus the checkli
 UI tests drive the catalog and the native hosts:
 
 - **Android** (`ShowcaseTest`, `ChecklistTest`, `LayoutTest`) opens the radio group, slider,
-  date picker, tabs, the four animation pages, page transitions, progress, spinner, image and
-  recycled-list pages, checks the indeterminate spinner, the windowed list and system back, then
+  date picker, tabs, the four animation pages, page transitions, the four container pages,
+  progress, spinner, image and recycled-list pages, checks the indeterminate spinner, the windowed list and system back, then
   opens a dialog and the bottom sheet, runs the checklist flow and the frame-registry checks.
 - **iOS** (`ShowcaseUITests`, `ChecklistUITests`) runs the same flow through XCUITest, including
   the radio-group selection, stepped slider, date picker kinds, tab selection, the animation

@@ -2,10 +2,10 @@
 
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::ui::{
-    Align, AnimationCurve, Button, Checkbox, Column, DatePicker, DatePickerMode, DateValue,
-    EdgeInsets, Element, Gradient, Image, ImageScale, ImageSource, Justify, List,
-    ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider, Spacer, Switch, TabBar,
-    Tabs, Text, TextAlign, TextField, TimeValue,
+    Align, AnimationCurve, BottomNavItem, BottomNavigation, Button, Checkbox, Column, DatePicker,
+    DatePickerMode, DateValue, EdgeInsets, Element, Gradient, Icon, Image, ImageScale, ImageSource,
+    Justify, List, Pager, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider,
+    Spacer, Switch, TabBar, Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
 };
 
 use crate::ShowcaseApp;
@@ -74,6 +74,10 @@ pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
         "transition-fade" => "transition-fade",
         "transition-none" => "transition-none",
         "bottom-sheet" => "bottom-sheet",
+        "pager" => "pager",
+        "tabs-view" => "tabs-view",
+        "bottom-navigation" => "bottom-navigation",
+        "toolbar" => "toolbar",
         "slider" => "slider",
         "progress" => "progress",
         "spinner" => "spinner",
@@ -110,6 +114,10 @@ pub(crate) fn title(key: &str) -> &'static str {
         "transition-fade" => "Fade",
         "transition-none" => "Instant",
         "bottom-sheet" => "Bottom sheet",
+        "pager" => "View pager",
+        "tabs-view" => "Tabs view",
+        "bottom-navigation" => "Bottom navigation",
+        "toolbar" => "Toolbar",
         "slider" => "Slider",
         "progress" => "Progress",
         "spinner" => "Spinner",
@@ -146,6 +154,10 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element> {
         "transition-fade" => transition_demo_page("transition-fade"),
         "transition-none" => transition_demo_page("transition-none"),
         "bottom-sheet" => bottom_sheet_page(),
+        "pager" => pager_page(app),
+        "tabs-view" => tabs_view_page(app),
+        "bottom-navigation" => bottom_navigation_page(app),
+        "toolbar" => toolbar_page(app),
         "slider" => slider_page(app),
         "progress" => progress_page(app),
         "spinner" => spinner_page(),
@@ -165,7 +177,7 @@ fn page_button(label: &'static str, action: &'static str) -> Button {
 }
 
 pub(crate) fn home() -> Element {
-    let catalog: [(&str, &[(&str, &str)]); 7] = [
+    let catalog: [(&str, &[(&str, &str)]); 8] = [
         (
             "Text & layout",
             &[
@@ -183,6 +195,15 @@ pub(crate) fn home() -> Element {
                 ("Enter & exit", "page:animation-enter-exit"),
                 ("Curves & springs", "page:animation-curves"),
                 ("Page transitions", "page:transitions"),
+            ],
+        ),
+        (
+            "Containers",
+            &[
+                ("View pager", "page:pager"),
+                ("Tabs view", "page:tabs-view"),
+                ("Bottom navigation", "page:bottom-navigation"),
+                ("Toolbar", "page:toolbar"),
             ],
         ),
         (
@@ -783,6 +804,144 @@ fn bottom_sheet_page() -> Element {
                 "Android uses a Material BottomSheetDialogFragment; iOS uses                  UISheetPresentationController with medium and large detents.",
             ),
             caption("Close it with the sheet's button or drag it down."),
+        ],
+    )
+}
+
+fn pager_page(app: &ShowcaseApp) -> Element {
+    let selected = app.pager_page.min(2);
+    let card = |title: &'static str, body: &'static str, color: u32| -> Element {
+        Column::new()
+            .background(color)
+            .padding(20)
+            .spacing(8)
+            .child(Text::new(title).size(22).bold().color(0xFFFF_FFFF))
+            .child(Text::new(body).size(15).color(0xFFFF_FFFF))
+            .into()
+    };
+    page(
+        "View pager",
+        "Swipe horizontally or let the app change the selected page.",
+        body![
+            Text::new(format!("Page {} of 3", selected + 1))
+                .size(18)
+                .color(COLOR_TEXT),
+            Pager::new()
+                .selected(selected)
+                .action("demo:pager")
+                .height(320)
+                .accessibility_label("View pager")
+                .child(card("One", "The first page.", 0xFF15_65C0))
+                .child(card("Two", "The second page.", 0xFF00_897B))
+                .child(card("Three", "The third page.", 0xFF6A_1B9A)),
+            caption("Swiping reports the settled page through Event::Selected."),
+        ],
+    )
+}
+
+fn tabs_view_page(app: &ShowcaseApp) -> Element {
+    let selected = app.tabs_view.min(2);
+    let page_body = |title: &'static str, detail: &'static str, color: u32| -> Element {
+        Column::new()
+            .background(color)
+            .padding(20)
+            .spacing(8)
+            .child(Text::new(title).size(22).bold().color(0xFFFF_FFFF))
+            .child(Text::new(detail).size(15).color(0xFFFF_FFFF))
+            .into()
+    };
+    page(
+        "Tabs view",
+        "A tab strip and pager share one action and one selected index.",
+        body![
+            Text::new(format!(
+                "Selected: {}",
+                ["Overview", "Details", "Settings"][selected]
+            ))
+            .size(18)
+            .color(COLOR_TEXT),
+            TabsView::new(["Overview", "Details", "Settings"])
+                .selected(selected)
+                .action("demo:tabs-view")
+                .height(360)
+                .child(page_body(
+                    "Overview page",
+                    "The first tab page.",
+                    0xFF15_65C0,
+                ))
+                .child(page_body(
+                    "Details page",
+                    "Details page content.",
+                    0xFF00_897B,
+                ))
+                .child(page_body(
+                    "Settings page",
+                    "Settings page content.",
+                    0xFF6A_1B9A,
+                )),
+            caption("Tapping a tab and swiping the pager both dispatch Event::Selected."),
+        ],
+    )
+}
+
+fn bottom_navigation_page(app: &ShowcaseApp) -> Element {
+    let selected = app.bottom_dest.min(2);
+    let content = match selected {
+        0 => "Home destination",
+        1 => "Search destination",
+        _ => "Settings destination",
+    };
+    Column::new()
+        .padding(24)
+        .spacing(14)
+        .width_percent(1.0)
+        .height_percent(1.0)
+        .child(
+            Text::new("Bottom navigation")
+                .size(28)
+                .bold()
+                .color(COLOR_TEXT),
+        )
+        .child(caption(
+            "The bar is a widget; the application owns the content above it.",
+        ))
+        .child(Text::new(content).size(20).color(COLOR_ACCENT).grow(1.0))
+        .child(
+            BottomNavigation::new([
+                BottomNavItem::new("Home", Icon::new().drawable("ic_home").sf("house.fill")),
+                BottomNavItem::new(
+                    "Search",
+                    Icon::new().drawable("ic_search").sf("magnifyingglass"),
+                ),
+                BottomNavItem::new(
+                    "Settings",
+                    Icon::new().drawable("ic_settings").sf("gearshape.fill"),
+                ),
+            ])
+            .selected(selected)
+            .action("demo:bottom-nav"),
+        )
+        .into()
+}
+
+fn toolbar_page(app: &ShowcaseApp) -> Element {
+    page(
+        "Toolbar",
+        "The native toolbar is configured by the Screen, not by page content.",
+        body![
+            Text::new(format!("Toolbar taps: {}", app.toolbar_taps))
+                .size(18)
+                .color(COLOR_TEXT),
+            Text::new(if app.toolbar_last.is_empty() {
+                "No toolbar action yet.".to_string()
+            } else {
+                format!("Last action: {}", app.toolbar_last)
+            })
+            .size(18)
+            .color(COLOR_ACCENT),
+            caption(
+                "Tap Refresh or Save in the native bar. The subtitle and actions come from the Screen description.",
+            ),
         ],
     )
 }

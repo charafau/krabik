@@ -14,9 +14,9 @@ use std::sync::Arc;
 use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Event, set_app_factory};
-use krabik_ui_dsl::navigation::{Navigation, Screen, ScreenTransition};
+use krabik_ui_dsl::navigation::{Navigation, Screen, ScreenTransition, Toolbar};
 use krabik_ui_dsl::presentation::{Presentation, PresentationKind};
-use krabik_ui_dsl::ui::{DateValue, Element, TimeValue};
+use krabik_ui_dsl::ui::{DateValue, Element, Icon, TimeValue};
 
 mod checklist;
 mod pages;
@@ -41,6 +41,11 @@ pub struct ShowcaseApp {
     decoration_alt: bool,
     cards: usize,
     curves_alt: bool,
+    pager_page: usize,
+    tabs_view: usize,
+    bottom_dest: usize,
+    toolbar_taps: usize,
+    toolbar_last: String,
     date: DateValue,
     inline_date: DateValue,
     time: TimeValue,
@@ -76,6 +81,11 @@ impl ShowcaseApp {
             decoration_alt: true,
             cards: 2,
             curves_alt: false,
+            pager_page: 0,
+            tabs_view: 0,
+            bottom_dest: 0,
+            toolbar_taps: 0,
+            toolbar_last: String::new(),
             date: DateValue::new(2026, 11, 12),
             inline_date: DateValue::new(2026, 11, 12),
             time: TimeValue::new(10, 30),
@@ -132,7 +142,21 @@ impl App for ShowcaseApp {
                         "transition-none" => ScreenTransition::None,
                         _ => ScreenTransition::Slide,
                     };
-                    Screen::new(*key, pages::title(key)).transition(transition)
+                    let mut screen = Screen::new(*key, pages::title(key)).transition(transition);
+                    if *key == "toolbar" {
+                        screen = screen.toolbar(
+                            Toolbar::new()
+                                .subtitle("Host-level native chrome")
+                                .back_title("Back")
+                                .action("toolbar:refresh", "Refresh")
+                                .action_with_icon(
+                                    "toolbar:save",
+                                    "Save",
+                                    Icon::new().drawable("ic_save").sf("square.and.arrow.down"),
+                                ),
+                        );
+                    }
+                    screen
                 })
                 .collect(),
         ))
@@ -271,6 +295,16 @@ impl App for ShowcaseApp {
                     self.curves_alt = !self.curves_alt;
                     true
                 }
+                "toolbar:refresh" => {
+                    self.toolbar_taps += 1;
+                    self.toolbar_last = "Refresh".to_string();
+                    true
+                }
+                "toolbar:save" => {
+                    self.toolbar_taps += 1;
+                    self.toolbar_last = "Save".to_string();
+                    true
+                }
                 "dialog:open" => {
                     self.dialog_open = true;
                     true
@@ -373,6 +407,36 @@ impl App for ShowcaseApp {
                     return false;
                 }
                 self.tab = index;
+                true
+            }
+            Event::Selected {
+                action: "demo:pager",
+                index,
+            } => {
+                if index > 2 || self.pager_page == index {
+                    return false;
+                }
+                self.pager_page = index;
+                true
+            }
+            Event::Selected {
+                action: "demo:tabs-view",
+                index,
+            } => {
+                if index > 2 || self.tabs_view == index {
+                    return false;
+                }
+                self.tabs_view = index;
+                true
+            }
+            Event::Selected {
+                action: "demo:bottom-nav",
+                index,
+            } => {
+                if index > 2 || self.bottom_dest == index {
+                    return false;
+                }
+                self.bottom_dest = index;
                 true
             }
             Event::ValueChanged {
@@ -613,10 +677,122 @@ mod tests {
             "transition-fade",
             "transition-none",
             "bottom-sheet",
+            "pager",
+            "tabs-view",
+            "bottom-navigation",
+            "toolbar",
         ] {
             assert!(pages::screen(&app, key).is_some(), "missing page {key}");
             assert!(pages::screen_key(&format!("page:{key}")).is_some());
         }
+    }
+
+    #[test]
+    fn container_widgets_update_their_state() {
+        let mut app = app();
+        assert!(app.handle(Event::Selected {
+            action: "demo:pager",
+            index: 2,
+        }));
+        assert_eq!(app.pager_page, 2);
+        assert!(app.handle(Event::Selected {
+            action: "demo:tabs-view",
+            index: 1,
+        }));
+        assert_eq!(app.tabs_view, 1);
+        assert!(app.handle(Event::Selected {
+            action: "demo:bottom-nav",
+            index: 2,
+        }));
+        assert_eq!(app.bottom_dest, 2);
+        assert!(app.handle(click("toolbar:refresh")));
+        assert_eq!(app.toolbar_taps, 1);
+        assert_eq!(app.toolbar_last, "Refresh");
+        assert!(app.handle(click("toolbar:save")));
+        assert_eq!(app.toolbar_taps, 2);
+        assert_eq!(app.toolbar_last, "Save");
+    }
+
+    #[test]
+    fn tabs_view_selection_updates_the_existing_tree() {
+        use krabik_ui_dsl::measure::ApproximateMeasure;
+        use krabik_ui_dsl::render::Op;
+        use krabik_ui_dsl::runtime::Runtime;
+        use krabik_ui_dsl::tree::NodeKind;
+        use krabik_ui_dsl::ui::Text;
+
+        let mut app = app();
+        app.stack = vec!["home", "tabs-view"];
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        let viewport = krabik_ui_dsl::geometry::Size::new(390.0, 800.0);
+        runtime.update(
+            &pages::screen(&app, "tabs-view").expect("tabs page"),
+            viewport,
+        );
+        assert!(app.handle(Event::Selected {
+            action: "demo:tabs-view",
+            index: 1,
+        }));
+        let update = runtime.update(
+            &pages::screen(&app, "tabs-view").expect("tabs page"),
+            viewport,
+        );
+        let pager = krabik_ui_dsl::tree::preorder(runtime.tree())
+            .into_iter()
+            .find(|node| matches!(node.kind, NodeKind::Pager(_)))
+            .expect("pager");
+        let NodeKind::Pager(props) = &pager.kind else {
+            unreachable!()
+        };
+        assert_eq!(props.selected, 1);
+        assert!(update.ops.iter().any(|op| match op {
+            Op::Update(node) | Op::Create(node) =>
+                matches!(&node.kind, NodeKind::Pager(p) if p.selected == 1),
+            _ => false,
+        }));
+        assert!(update.ops.iter().any(|op| matches!(
+            op,
+            Op::Update(node) if matches!(&node.kind, NodeKind::TabBar(p) if p.selected == 1)
+        )));
+        let _ = Text::new("unused");
+    }
+
+    #[test]
+    fn tabs_view_selection_reaches_the_pager() {
+        let mut app = app();
+        app.stack = vec!["home", "tabs-view"];
+        assert!(app.handle(Event::Selected {
+            action: "demo:tabs-view",
+            index: 1,
+        }));
+        let element = pages::screen(&app, "tabs-view").expect("tabs page");
+        let tree = krabik_ui_dsl::tree::build(&element);
+        let pager = krabik_ui_dsl::tree::preorder(&tree)
+            .into_iter()
+            .find(|node| matches!(node.kind, krabik_ui_dsl::tree::NodeKind::Pager(_)))
+            .expect("pager");
+        let krabik_ui_dsl::tree::NodeKind::Pager(props) = &pager.kind else {
+            unreachable!()
+        };
+        assert_eq!(props.pages, 3);
+        assert_eq!(props.selected, 1);
+    }
+
+    #[test]
+    fn toolbar_screen_exposes_native_actions() {
+        let mut app = app();
+        app.stack = vec!["home", "toolbar"];
+        let nav = app.navigation().expect("navigation");
+        let toolbar = nav
+            .screens
+            .last()
+            .and_then(|screen| screen.toolbar.as_ref())
+            .expect("toolbar");
+        assert_eq!(
+            toolbar.subtitle.as_deref(),
+            Some("Host-level native chrome")
+        );
+        assert_eq!(toolbar.actions.len(), 2);
     }
 
     #[test]

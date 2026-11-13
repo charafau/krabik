@@ -1,8 +1,13 @@
 package com.example.krabik_ui_dsl
 
 import android.graphics.Color
+import android.view.Gravity
+import android.view.MenuItem
 import android.view.View
 import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toolbar
 import androidx.fragment.app.FragmentActivity
 
@@ -23,12 +28,13 @@ class KrabikHostController(
 ) {
     private val titles = ArrayList<String>()
     private var poppingToRoot = false
+    private var toolbarActions: List<String> = emptyList()
     private val hideNavigation = Runnable {
         navContainer.visibility = View.GONE
     }
 
     init {
-        if (navContainer.id == View.NO_ID) {
+        if (navContainer.id == View.NO_ID || navContainer.id == 0) {
             navContainer.id = View.generateViewId()
         }
         navContainer.setBackgroundColor(Color.WHITE)
@@ -37,6 +43,15 @@ class KrabikHostController(
         toolbar.setNavigationContentDescription("Back")
         toolbar.setNavigationOnClickListener {
             main.onBackPressed()
+        }
+        toolbar.setOnMenuItemClickListener { item ->
+            val action = toolbarActions.getOrNull(item.itemId - ACTION_ID_BASE)
+            if (action != null) {
+                main.onToolbarAction(action)
+                true
+            } else {
+                false
+            }
         }
         setRootVisible(true)
         // Register last: this synchronously syncs the session, which may push
@@ -101,6 +116,74 @@ class KrabikHostController(
         }
     }
 
+    /** Applies the top screen's toolbar metadata. */
+    fun setToolbar(
+        title: String,
+        subtitle: String,
+        backTitle: String,
+        hidden: Boolean,
+        actionIds: Array<String>,
+        actionLabels: Array<String>,
+        actionIcons: Array<String>,
+    ) {
+        toolbarActions = actionIds.toList()
+        toolbar.title = title
+        toolbar.subtitle = subtitle.ifEmpty { null }
+        toolbar.setNavigationContentDescription(backTitle.ifEmpty { "Back" })
+        toolbar.menu.clear()
+        for (index in actionLabels.indices) {
+            val item = toolbar.menu.add(0, ACTION_ID_BASE + index, index, actionLabels[index])
+            item.setShowAsAction(
+                MenuItem.SHOW_AS_ACTION_ALWAYS or MenuItem.SHOW_AS_ACTION_WITH_TEXT,
+            )
+            val icon = actionIcons.getOrNull(index).orEmpty()
+            val resource = if (icon.isNotEmpty()) {
+                activity.resources.getIdentifier(icon, "drawable", activity.packageName)
+            } else {
+                0
+            }
+            if (resource != 0) {
+                // Framework menu items show either the icon or the text. Use a
+                // custom action view so an icon never hides the required label.
+                item.setIcon(resource)
+                val row = LinearLayout(activity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(8), 0, dp(8), 0)
+                    contentDescription = actionLabels[index]
+                    isClickable = true
+                    setOnClickListener {
+                        main.onToolbarAction(toolbarActions[index])
+                    }
+                }
+                row.addView(
+                    ImageView(activity).apply {
+                        setImageResource(resource)
+                        contentDescription = actionLabels[index]
+                    },
+                    LinearLayout.LayoutParams(dp(20), dp(20)),
+                )
+                row.addView(
+                    TextView(activity).apply {
+                        text = actionLabels[index]
+                        setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+                    },
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { marginStart = dp(4) },
+                )
+                item.actionView = row
+                item.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+            }
+        }
+        if (hidden || titles.isEmpty()) {
+            toolbar.visibility = View.GONE
+        } else {
+            toolbar.visibility = View.VISIBLE
+        }
+    }
+
     /** Switches between the main app root and the navigation container. */
     fun setRootVisible(visible: Boolean) {
         navContainer.removeCallbacks(hideNavigation)
@@ -123,6 +206,9 @@ class KrabikHostController(
         }
     }
 
+    private fun dp(value: Int): Int =
+        (value * activity.resources.displayMetrics.density).toInt()
+
     private fun updateChrome() {
         if (titles.isEmpty()) {
             toolbar.visibility = View.GONE
@@ -143,5 +229,6 @@ class KrabikHostController(
         const val TRANSITION_MS = 280L
         const val TRANSITION_FADE = 1
         const val TRANSITION_SLIDE = 0
+        const val ACTION_ID_BASE = 0x1000
     }
 }

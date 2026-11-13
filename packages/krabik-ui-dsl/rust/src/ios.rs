@@ -38,9 +38,10 @@ use objc2_ui_kit::{
     UIDatePicker, UIDatePickerMode, UIDatePickerStyle, UIEdgeInsets, UIFont, UIImage, UIImageView,
     UIKeyboardType, UILabel, UILayoutConstraintAxis, UIProgressView, UIReturnKeyType, UIScrollView,
     UIScrollViewDelegate, UISegmentedControl, UISlider, UISpringTimingParameters, UIStackView,
-    UIStackViewAlignment, UIStackViewDistribution, UISwitch, UITextBorderStyle, UITextField,
-    UITextInputTraits, UITimingCurveProvider, UIView, UIViewAnimating, UIViewAnimatingPosition,
-    UIViewAnimationCurve, UIViewContentMode, UIViewPropertyAnimator,
+    UIStackViewAlignment, UIStackViewDistribution, UISwitch, UITabBar, UITabBarDelegate,
+    UITabBarItem, UITextBorderStyle, UITextField, UITextInputTraits, UITimingCurveProvider, UIView,
+    UIViewAnimating, UIViewAnimatingPosition, UIViewAnimationCurve, UIViewContentMode,
+    UIViewPropertyAnimator,
 };
 
 use crate::app::{App, Event};
@@ -51,10 +52,11 @@ use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Animation, AnimationCurve, Axis, ButtonProps, CheckProps, DatePickerMode, DatePickerProps,
-    DatePickerValue, DateValue, EdgeInsets, Element, FontWeight, GradientDirection, ImageProps,
-    ImageScale, ImageSource, ImeAction, KeyboardType, ProgressProps, RadioGroupProps, SliderProps,
-    SpinnerProps, TabBarProps, TextAlign, TextFieldProps, TextProps, TimeValue, snap_slider_value,
+    Animation, AnimationCurve, Axis, BottomNavigationProps, ButtonProps, CheckProps,
+    DatePickerMode, DatePickerProps, DatePickerValue, DateValue, EdgeInsets, Element, FontWeight,
+    GradientDirection, ImageProps, ImageScale, ImageSource, ImeAction, KeyboardType, ProgressProps,
+    RadioGroupProps, SliderProps, SpinnerProps, TabBarProps, TextAlign, TextFieldProps, TextProps,
+    TimeValue, snap_slider_value,
 };
 
 /// Measures text with an off-screen `UILabel`.
@@ -474,6 +476,19 @@ enum Content {
     },
     DatePicker(Retained<UIDatePicker>),
     TabBar(Retained<UISegmentedControl>),
+    Pager {
+        scroll: Retained<UIScrollView>,
+        _delegate: Retained<PagerDelegate>,
+        pages: usize,
+        selected: usize,
+    },
+    BottomNavigation {
+        bar: Retained<UITabBar>,
+        _delegate: Retained<BottomNavDelegate>,
+        labels: Vec<String>,
+        icons: Vec<String>,
+        items: Vec<Retained<UITabBarItem>>,
+    },
     Slider(Retained<UISlider>),
     Progress(Retained<UIProgressView>),
     Spinner(Retained<UIActivityIndicatorView>),
@@ -506,6 +521,7 @@ impl Content {
         match self {
             Self::Host(host) => host.clone(),
             Self::Scroll { host, .. } => host.clone(),
+            Self::Pager { scroll, .. } => cast_view(scroll.clone()),
             _ => fallback.clone(),
         }
     }
@@ -542,6 +558,106 @@ impl ViewHandle {
     /// The view that hosts the node's native children.
     fn children_host(&self) -> Retained<UIView> {
         self.content.children_host(&self.view)
+    }
+}
+
+/// What a pager delegate remembers about its node.
+struct PagerDelegateIvars {
+    handle: u64,
+    host: u64,
+    id: NodeId,
+}
+
+objc2::define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "KrabikPagerDelegate"]
+    #[ivars = PagerDelegateIvars]
+    struct PagerDelegate;
+
+    unsafe impl NSObjectProtocol for PagerDelegate {}
+
+    unsafe impl UIScrollViewDelegate for PagerDelegate {
+        #[unsafe(method(scrollViewDidEndDecelerating:))]
+        fn scroll_view_did_end_decelerating(&self, scroll_view: &UIScrollView) {
+            report_pager_page(self.ivars(), scroll_view);
+        }
+
+        #[unsafe(method(scrollViewDidEndDragging:willDecelerate:))]
+        fn scroll_view_did_end_dragging(&self, scroll_view: &UIScrollView, will_decelerate: bool) {
+            if !will_decelerate {
+                report_pager_page(self.ivars(), scroll_view);
+            }
+        }
+    }
+);
+
+fn report_pager_page(ivars: &PagerDelegateIvars, scroll_view: &UIScrollView) {
+    let width = scroll_view.bounds().size.width;
+    if width <= 0.0 {
+        return;
+    }
+    let pages = (scroll_view.contentSize().width / width).round().max(1.0) as isize;
+    let page =
+        ((scroll_view.contentOffset().x / width).round() as isize).clamp(0, pages - 1) as usize;
+    let handle = ivars.handle;
+    let host = ivars.host;
+    let id = ivars.id;
+    schedule(move || dispatch_selected(handle, host, id, page));
+}
+
+impl PagerDelegate {
+    fn new(handle: u64, host: u64, id: NodeId, mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(PagerDelegateIvars { handle, host, id });
+        // SAFETY: `NSObject`'s initializer returns an initialized instance of
+        // this class with the ivars already set.
+        unsafe { objc2::msg_send![super(this), init] }
+    }
+}
+
+struct BottomNavDelegateIvars {
+    handle: u64,
+    host: u64,
+    id: NodeId,
+}
+
+objc2::define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "KrabikBottomNavDelegate"]
+    #[ivars = BottomNavDelegateIvars]
+    struct BottomNavDelegate;
+
+    unsafe impl NSObjectProtocol for BottomNavDelegate {}
+
+    unsafe impl UITabBarDelegate for BottomNavDelegate {
+        #[unsafe(method(tabBar:didSelectItem:))]
+        fn tab_bar_did_select_item(&self, tab_bar: &UITabBar, item: &UITabBarItem) {
+            let Some(items) = tab_bar.items() else {
+                return;
+            };
+            let count = items.count();
+            let mut index = 0usize;
+            for candidate in 0..count {
+                if &*items.objectAtIndex(candidate) == item {
+                    index = candidate;
+                    break;
+                }
+            }
+            let handle = self.ivars().handle;
+            let host = self.ivars().host;
+            let id = self.ivars().id;
+            schedule(move || dispatch_selected(handle, host, id, index));
+        }
+    }
+);
+
+impl BottomNavDelegate {
+    fn new(handle: u64, host: u64, id: NodeId, mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(BottomNavDelegateIvars { handle, host, id });
+        // SAFETY: `NSObject`'s initializer returns an initialized instance of
+        // this class with the ivars already set.
+        unsafe { objc2::msg_send![super(this), init] }
     }
 }
 
@@ -1290,6 +1406,48 @@ impl IosState {
                 let view = cast_view(control.clone());
                 ViewHandle::new(view, Content::TabBar(control), node)
             }
+            NodeKind::Pager(props) => {
+                let scroll = UIScrollView::new(mtm);
+                scroll.setPagingEnabled(true);
+                scroll.setShowsHorizontalScrollIndicator(false);
+                scroll.setBounces(false);
+                let delegate = PagerDelegate::new(self.handle, self.host, node.id, mtm);
+                // SAFETY: the delegate is kept alive by the view handle.
+                unsafe { scroll.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
+                let view = cast_view(scroll.clone());
+                ViewHandle::new(
+                    view,
+                    Content::Pager {
+                        scroll,
+                        _delegate: delegate,
+                        pages: props.pages,
+                        selected: props.selected,
+                    },
+                    node,
+                )
+            }
+            NodeKind::BottomNavigation(props) => {
+                let bar = UITabBar::new(mtm);
+                let delegate = BottomNavDelegate::new(self.handle, self.host, node.id, mtm);
+                // SAFETY: the delegate is kept alive by the view handle.
+                bar.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+                let mut labels = Vec::new();
+                let mut icons = Vec::new();
+                let mut items = Vec::new();
+                update_bottom_navigation(&bar, &mut labels, &mut icons, &mut items, props, mtm);
+                let view = cast_view(bar.clone());
+                ViewHandle::new(
+                    view,
+                    Content::BottomNavigation {
+                        bar,
+                        _delegate: delegate,
+                        labels,
+                        icons,
+                        items,
+                    },
+                    node,
+                )
+            }
             NodeKind::Slider(props) => {
                 let slider = UISlider::new(mtm);
                 update_slider(&slider, props);
@@ -1431,6 +1589,16 @@ impl IosState {
         );
         handle.frame = Some(frame);
 
+        let pager = match &handle.content {
+            Content::Pager {
+                scroll,
+                pages,
+                selected,
+                ..
+            } => Some((scroll.clone(), *pages, *selected)),
+            _ => None,
+        };
+
         let frames = LayoutFrames {
             view: handle.view.clone(),
             inset: handle.content.inset_handle(),
@@ -1470,6 +1638,18 @@ impl IosState {
             );
         } else {
             frames.apply();
+        }
+
+        if let Some((scroll, pages, selected)) = pager {
+            let previous = scroll.contentSize().width;
+            let content = CGSize::new(rect.size.width * pages as f64, rect.size.height);
+            scroll.setContentSize(content);
+            if (previous - content.width).abs() > 0.5 {
+                scroll.setContentOffset_animated(
+                    CGPoint::new(rect.size.width * selected as f64, 0.0),
+                    false,
+                );
+            }
         }
     }
 
@@ -1764,6 +1944,14 @@ impl IosState {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
+                NodeKind::Pager(props) if !props.action.is_empty() => {
+                    action.selected = Some(props.action.clone());
+                    any = true;
+                }
+                NodeKind::BottomNavigation(props) if !props.action.is_empty() => {
+                    action.selected = Some(props.action.clone());
+                    any = true;
+                }
                 NodeKind::DatePicker(props) if !props.action.is_empty() => {
                     action.date = Some(props.action.clone());
                     action.date_range = props.date_range;
@@ -1870,6 +2058,40 @@ fn update_content(
             update_date_picker(picker, props);
         }
         (Content::TabBar(control), NodeKind::TabBar(props)) => update_tab_bar(control, props),
+        (
+            Content::BottomNavigation {
+                bar,
+                labels,
+                icons,
+                items,
+                ..
+            },
+            NodeKind::BottomNavigation(props),
+        ) => update_bottom_navigation(bar, labels, icons, items, props, mtm),
+        (
+            Content::Pager {
+                scroll,
+                pages,
+                selected,
+                ..
+            },
+            NodeKind::Pager(props),
+        ) => {
+            *pages = props.pages;
+            let target = if props.pages == 0 {
+                0
+            } else {
+                props.selected.min(props.pages - 1)
+            };
+            if *selected != target {
+                *selected = target;
+                let width = scroll.bounds().size.width;
+                if width > 0.0 {
+                    scroll
+                        .setContentOffset_animated(CGPoint::new(width * target as f64, 0.0), true);
+                }
+            }
+        }
         (Content::Slider(slider), NodeKind::Slider(props)) => update_slider(slider, props),
         (Content::Progress(progress), NodeKind::Progress(props)) => {
             update_progress(progress, props);
@@ -1990,6 +2212,62 @@ fn update_check(button: &UIButton, props: &CheckProps, radio: bool) {
     button.setContentHorizontalAlignment(UIControlContentHorizontalAlignment::Left);
     // SAFETY: the color is retained by the view for as long as it is set.
     unsafe { button.setTintColor(Some(&text_color)) };
+}
+
+fn update_bottom_navigation(
+    bar: &UITabBar,
+    labels: &mut Vec<String>,
+    icons: &mut Vec<String>,
+    items: &mut Vec<Retained<UITabBarItem>>,
+    props: &BottomNavigationProps,
+    mtm: MainThreadMarker,
+) {
+    let new_labels: Vec<String> = props.items.iter().map(|item| item.label.clone()).collect();
+    let new_icons: Vec<String> = props
+        .items
+        .iter()
+        .map(|item| item.icon.ios_name().unwrap_or("").to_string())
+        .collect();
+    if *labels != new_labels || *icons != new_icons {
+        let mut fresh = Vec::with_capacity(props.items.len());
+        for (index, item) in props.items.iter().enumerate() {
+            let name = new_icons.get(index).map(String::as_str).unwrap_or("");
+            let image = if name.is_empty() {
+                None
+            } else {
+                UIImage::systemImageNamed(&NSString::from_str(name))
+                    .or_else(|| UIImage::imageNamed(&NSString::from_str(name)))
+            };
+            let title = NSString::from_str(&item.label);
+            let tab = UITabBarItem::initWithTitle_image_selectedImage(
+                UITabBarItem::alloc(mtm),
+                Some(&title),
+                image.as_deref(),
+                None,
+            );
+            fresh.push(tab);
+        }
+        let array = NSArray::from_retained_slice(&fresh);
+        bar.setItems(Some(&array));
+        *labels = new_labels;
+        *icons = new_icons;
+        *items = fresh;
+    }
+    let selected = if items.is_empty() {
+        None
+    } else {
+        items
+            .get(props.selected.min(items.len() - 1))
+            .map(|item| &**item)
+    };
+    bar.setSelectedItem(selected);
+    // SAFETY: the color is a valid `UIColor` for the lifetime of the call.
+    unsafe { bar.setTintColor(Some(&color(props.color))) };
+    bar.setUnselectedItemTintColor(Some(&color(faded(props.color))));
+}
+
+fn faded(argb: u32) -> u32 {
+    (argb & 0x00FF_FFFF) | 0x8800_0000
 }
 
 fn update_tab_bar(control: &UISegmentedControl, props: &TabBarProps) {
@@ -2892,6 +3170,8 @@ fn dispatch_selected(handle: u64, host: u64, id: NodeId, index: usize) {
                 state
                     .runtime
                     .tab_bar_action(id)
+                    .or_else(|| state.runtime.pager_action(id))
+                    .or_else(|| state.runtime.bottom_navigation_action(id))
                     .or_else(|| state.runtime.radio_group_action(id))
                     .or_else(|| {
                         state
@@ -3010,6 +3290,7 @@ struct IosSession {
     next_host: u64,
     controller: Option<Retained<NSObject>>,
     navigation: Vec<crate::navigation::Screen>,
+    toolbar: Option<crate::navigation::Toolbar>,
     presentation: Option<crate::presentation::Presentation>,
 }
 
@@ -3030,6 +3311,7 @@ impl IosSession {
             next_host: 1,
             controller: None,
             navigation: Vec::new(),
+            toolbar: None,
             presentation: None,
         }
     }
@@ -3075,6 +3357,36 @@ impl IosSession {
             self.sync_presentation(presentation.as_ref());
             self.presentation = presentation;
         }
+        let toolbar = self
+            .navigation
+            .last()
+            .and_then(|screen| screen.toolbar.clone());
+        if toolbar != self.toolbar {
+            self.sync_toolbar(&toolbar);
+            self.toolbar = toolbar;
+        }
+    }
+
+    fn sync_toolbar(&mut self, toolbar: &Option<crate::navigation::Toolbar>) {
+        let Some(controller) = self.controller.as_ref() else {
+            return;
+        };
+        let screen = self.navigation.last();
+        let title = screen.map_or("", |screen| screen.title.as_str());
+        let subtitle = toolbar
+            .as_ref()
+            .and_then(|toolbar| toolbar.subtitle.as_deref())
+            .unwrap_or("");
+        let back_title = toolbar
+            .as_ref()
+            .and_then(|toolbar| toolbar.back_title.as_deref())
+            .unwrap_or("Back");
+        let hidden = screen.is_none() || toolbar.as_ref().is_none_or(|toolbar| toolbar.hidden);
+        let actions = toolbar
+            .as_ref()
+            .map(|toolbar| toolbar.actions.as_slice())
+            .unwrap_or(&[]);
+        controller_set_toolbar(controller, title, subtitle, back_title, hidden, actions);
     }
 
     fn sync_navigation(&mut self, screens: &[crate::navigation::Screen]) {
@@ -3158,6 +3470,47 @@ fn controller_push(controller: &NSObject, host: u64, title: &str, transition: i3
             krabikPush: host as i64,
             title: &*title,
             transition: transition as i64
+        ]
+    };
+}
+
+fn controller_set_toolbar(
+    controller: &NSObject,
+    title: &str,
+    subtitle: &str,
+    back_title: &str,
+    hidden: bool,
+    actions: &[crate::navigation::ToolbarAction],
+) {
+    let title = NSString::from_str(title);
+    let subtitle = NSString::from_str(subtitle);
+    let back_title = NSString::from_str(back_title);
+    let ids: Vec<Retained<NSString>> = actions
+        .iter()
+        .map(|action| NSString::from_str(&action.action))
+        .collect();
+    let labels: Vec<Retained<NSString>> = actions
+        .iter()
+        .map(|action| NSString::from_str(&action.label))
+        .collect();
+    let icons: Vec<Retained<NSString>> = actions
+        .iter()
+        .map(|action| NSString::from_str(action.icon.ios_name().unwrap_or("")))
+        .collect();
+    let ids = NSArray::from_retained_slice(&ids);
+    let labels = NSArray::from_retained_slice(&labels);
+    let icons = NSArray::from_retained_slice(&icons);
+    // SAFETY: the controller is a live Swift object with this @objc method.
+    let _: () = unsafe {
+        objc2::msg_send![
+            controller,
+            krabikSetToolbar: &*title,
+            subtitle: &*subtitle,
+            backTitle: &*back_title,
+            hidden: hidden,
+            actionIds: &*ids,
+            actionLabels: &*labels,
+            actionIcons: &*icons
         ]
     };
 }
@@ -3427,6 +3780,29 @@ pub unsafe extern "C" fn krabik_ios_on_slider_changed(
     value: f64,
 ) {
     dispatch_value(handle, host, NodeId(node_id), value);
+}
+
+/// Dispatches a native toolbar action into the application.
+///
+/// # Safety
+///
+/// `action` must point to a valid NUL-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_toolbar_action(handle: u64, action: *const c_char) {
+    if action.is_null() || MainThreadMarker::new().is_none() {
+        return;
+    }
+    // SAFETY: the caller guarantees a valid NUL-terminated string.
+    let action = unsafe { CStr::from_ptr(action) }
+        .to_string_lossy()
+        .into_owned();
+    guard("toolbar action", || {
+        with_session(handle, |session| {
+            if session.app.handle(Event::Click { action: &action }) {
+                session.render_all();
+            }
+        });
+    });
 }
 
 /// Dispatches the native back action to the application.
