@@ -1,6 +1,5 @@
 package com.example.krabik_ui_dsl
 
-import android.graphics.Color
 import android.view.Gravity
 import android.view.MenuItem
 import android.view.View
@@ -37,7 +36,8 @@ class KrabikHostController(
         if (navContainer.id == View.NO_ID || navContainer.id == 0) {
             navContainer.id = View.generateViewId()
         }
-        navContainer.setBackgroundColor(Color.WHITE)
+        // Screens paint their own opaque background; leaving the container
+        // transparent lets a pop reveal the root underneath.
         navContainer.isClickable = true
         toolbar.visibility = View.GONE
         toolbar.setNavigationContentDescription("Back")

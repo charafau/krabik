@@ -1,5 +1,7 @@
 package com.example.krabik_ui_dsl
 
+import android.content.Context
+import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -15,11 +17,15 @@ class KrabikScreenFragment : Fragment() {
         container: ViewGroup?,
         savedInstanceState: Bundle?,
     ): View {
+        val context = requireContext()
         val view = RustRootView(
-            requireContext(),
+            context,
             requireArguments().getLong(SESSION),
             requireArguments().getLong(HOST),
         )
+        // Screens are opaque, like native destinations. Without this the
+        // outgoing screen shows through the incoming one during a transition.
+        view.setBackgroundColor(themeBackground(context))
         host = view
         return view
     }
@@ -42,5 +48,15 @@ class KrabikScreenFragment : Fragment() {
                     putLong(HOST, host)
                 }
             }
+    }
+}
+
+/** The activity theme's background color, used to back opaque screens. */
+internal fun themeBackground(context: Context): Int {
+    val attributes = context.obtainStyledAttributes(intArrayOf(android.R.attr.colorBackground))
+    return try {
+        attributes.getColor(0, Color.WHITE)
+    } finally {
+        attributes.recycle()
     }
 }
