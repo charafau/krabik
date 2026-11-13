@@ -60,13 +60,13 @@ example-todo/
 └── android/                 # Gradle app shell
     ├── app/src/main/java/   # MainActivity and TodoBridge
     ├── app/src/androidTest/ # Espresso test for the Rust-built UI
-    └── app/build.gradle.kts # Cross-compiles ../rust and wires the shared sources
+    └── app/build.gradle.kts # Application id and dependencies
 ```
 
-Both Android shells in this package (this one, the minimal one and the DSL's dev harness) compile
-the Kotlin view layer from `../../shared/android/src/main/java` through a shared Gradle source set,
-so `RustRootView`, `KrabikActivity` and the custom widgets exist once. Each shell's `MainActivity`
-only loads its own native library and installs its app.
+The shells contain almost nothing of their own. The Android app includes the Kotlin library in
+`../../shared/android` (`RustRootView`, `KrabikActivity`, the native widgets) as the `:krabik-ui`
+module, and the iOS app compiles the Swift host in `../../shared/ios`. `MainActivity` and the App
+struct only load the native library and install the app.
 
 ## Requirements
 
@@ -80,15 +80,9 @@ only loads its own native library and installs its app.
 
 ## Build and run: iOS
 
-Build the static library, then build and run the Xcode project, which links it from
-`../rust/target/…`:
+The Xcode project builds the Rust static library itself in a build phase.
 
-```bash
-cd rust
-cargo build --target aarch64-apple-ios-sim
-```
-
-Then open `ios/KrabikUiDslTodo.xcodeproj` in Xcode and run the `KrabikUiDslTodo` scheme, or from the
+Open `ios/KrabikUiDslTodo.xcodeproj` in Xcode and run the `KrabikUiDslTodo` scheme, or from the
 command line:
 
 ```bash

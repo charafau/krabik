@@ -1,10 +1,14 @@
 # Krabik UI DSL — Roadmap & Status
 
-Based on the architecture defined in [SPEC.md](SPEC.md), here is the current status of the roadmap.
+How the framework works is described in the [guide](README.md#guide). This file tracks status.
 
 ---
 
 ## Done ✅
+
+> The entries below are a log, oldest first. Sections 1 to 5 were written before the
+> restructure at the end of this list: file names such as `rust/src/android.rs`, string actions
+> and `Event::…` in them refer to code that has since been reorganized.
 
 ### 1. Decouple Application Code from Platform Renderer ✅
 
@@ -377,7 +381,7 @@ when the row returns; the runtime does not keep an off-screen cell attached.
 
 ### 3. Expand Native Widget Set ✅
 
-All core widgets from SPEC.md §7.1 are implemented on Android and iOS.
+All core widgets are implemented on Android and iOS.
 
 | Rust component | Android renderer | Platform widget |
 |---|---|---|
@@ -460,6 +464,27 @@ runtime string (for example an item id in a list) as well as a static one.
 Keys must be unique among siblings; a debug build asserts it, because two
 siblings with the same key would hash to the same node identifier.
 
+### 6. Restructure: typed messages, shared session, one module per widget ✅
+
+- **Typed messages and components.** `Component { type Msg; update; view }` replaces string
+  actions and `App::handle`. Widgets carry the message to send (`on_click`, `on_change`, …),
+  `Element::map` composes child components, and `App::back` returns the message for the system
+  back action.
+- **One list of widgets.** `enum Widget` is shared by the description and the node tree and
+  matched exhaustively everywhere, including both platform renderers. `widgets/<name>.rs` holds
+  a widget's properties, builder and intrinsic size.
+- **One session.** `host/` holds the session and the event resolver shared by Android and iOS
+  behind a small `Platform` trait, unit-tested with a fake platform.
+- **Renderers split into modules.** `android/` and `ios/` replace two files of 2,600 and 3,600
+  lines.
+- **Shells exist once.** `shared/android` is an Android library (`dev.krabik.ui`), `shared/ios`
+  the Swift host; each app is `android/` + `ios/` + `rust/`. The gallery is the `harness/` app
+  and the library ships no application.
+- **Android.** Updates reach every widget (RadioGroup, TabBar, Pager, DatePicker and Spinner
+  used to ignore changes after creation); rotation resizes instead of recreating; back is
+  predictive at the root; the app draws edge to edge.
+- **Native chrome.** System alert, content-sized bottom sheet, host-level bottom navigation.
+
 ---
 
 ## Remaining ❌
@@ -473,7 +498,7 @@ disagrees on `platforms;android-37.0` or an action major, adjust the job.
 
 ### Run the instrumented tests in CI ❌
 
-Both example shells have UI tests (XCUITest and Espresso), but only the iOS build runs in CI.
+Every app has UI tests (XCUITest and Espresso), but CI only builds the apps.
 Adding an emulator job (`connectedDebugAndroidTest`) would cover the Android flow, including the
 re-entrant text-input path fixed by the event try-lock.
 
@@ -568,12 +593,19 @@ matters for large lists.
 - CI: verify the existing Android job on a runner, then add the Android
   emulator (`connectedDebugAndroidTest`) and iOS simulator (`xcodebuild test`)
   jobs. Tracked under "Remaining ❌" above.
-- The gallery's recycled form demo deliberately returns `false` from its text
-  handler to avoid a list rebind per keystroke; a real form may want to render
-  on every edit.
+- Every message re-renders, which rebinds the visible rows of a recycled list;
+  typing in a recycled form therefore rebinds per keystroke. A way for
+  `update` to say "nothing visible changed" would avoid that.
+- Proc macros: a `#[derive(Widget)]` for the builder and `Widget` arms that
+  every widget repeats (see guide chapter 7).
+- Group the cached JNI handles in `android/handles.rs` by widget, next to the
+  code that uses them.
+- A dark theme: the shells use `Theme.Material3.Light` and the examples use
+  fixed light colours.
+- iOS device builds: the projects are set up for the simulator target only.
 - `List::revision` is manual. Losing the cached prefix by accident is safe but
   slow; a debug warning when a very large list has no revision would catch it.
 - Benchmark fixtures for large lists (10k+ rows) so prefix/key regressions show
   up in CI rather than in a demo.
 - Document the recycled-row focus rules (restore on rebind, real blur clears)
-  in `SPEC.md`, not only the gallery demo and the API docs.
+  in the guide, not only the gallery demo and the API docs.

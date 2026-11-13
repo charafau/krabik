@@ -1,8 +1,7 @@
 //! The public UI vocabulary: widgets, layout values and decoration.
 //!
 //! Everything an application needs to describe its interface is re-exported
-//! here; the definitions live in [`crate::widgets`], [`crate::style`] and
-//! [`crate::element`].
+//! here; the definitions live in [`crate::widgets`] and [`crate::style`].
 
 pub(crate) use crate::element::ElementKind;
 pub use crate::element::{Element, RawElement};
