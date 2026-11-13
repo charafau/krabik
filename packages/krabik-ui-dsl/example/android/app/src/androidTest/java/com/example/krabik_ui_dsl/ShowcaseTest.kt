@@ -13,11 +13,13 @@ import androidx.test.espresso.action.ViewActions.swipeUp
 import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.isEnabled
 import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hamcrest.Matchers.anyOf
+import org.hamcrest.Matchers.not
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -119,12 +121,19 @@ class ShowcaseTest {
 
             openPage("Image")
             onView(withContentDescription("Krabik app icon")).check(matches(isDisplayed()))
+            onView(withContentDescription("Intrinsic asset icon")).check(matches(isDisplayed()))
             tapBack()
 
             openPage("Recycled list")
             onView(withText("Row taps: 0")).check(matches(isDisplayed()))
             onView(withContentDescription("Tap Recycled row 1")).perform(click())
             onView(withText("Row taps: 1")).check(matches(isDisplayed()))
+            onView(withContentDescription("Shuffle rows")).perform(click())
+            onView(withText("Recycled row 1 · updated")).check(matches(isDisplayed()))
+            tapBack()
+
+            openPage("Styling")
+            onView(withText("Disabled action")).check(matches(not(isEnabled())))
             tapBack()
         }
     }

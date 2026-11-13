@@ -498,6 +498,26 @@ pub enum DatePickerMode {
 /// The default accent color of sliders and progress indicators.
 pub const CONTROL_ACCENT: u32 = 0xFF21_96F3;
 
+/// The alpha multiplier applied to DSL-drawn decoration while a node is
+/// disabled.
+///
+/// Native text and controls dim themselves; this only affects fills, gradients,
+/// borders and shadows that the DSL paints.
+pub const DISABLED_ALPHA: f32 = 0.4;
+
+/// Dims an ARGB color when its node is disabled, preserving the RGB channels.
+///
+/// The explicit opacity of a node is applied separately, so a disabled node
+/// keeps its own alpha and is dimmed on top of it.
+pub fn dim_color(argb: u32, enabled: bool) -> u32 {
+    if enabled {
+        return argb;
+    }
+    let alpha = (argb >> 24) & 0xFF;
+    let alpha = (alpha as f32 * DISABLED_ALPHA).round() as u32;
+    (argb & 0x00FF_FFFF) | (alpha << 24)
+}
+
 /// Platform-independent properties of a slider.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SliderProps {
@@ -928,6 +948,8 @@ pub(crate) struct ListProps {
     pub(crate) buffer: usize,
     /// The item revision, when the application supplies one.
     pub(crate) revision: Option<u64>,
+    /// Cross-fade duration for a holder rebind, in milliseconds.
+    pub(crate) row_transition_ms: u32,
     pub(crate) keys: Arc<dyn Fn(usize) -> String + Send + Sync>,
     pub(crate) rows: Arc<dyn Fn(usize) -> Element + Send + Sync>,
 }
@@ -953,6 +975,7 @@ impl PartialEq for ListProps {
             && self.item_height == other.item_height
             && self.buffer == other.buffer
             && self.revision == other.revision
+            && self.row_transition_ms == other.row_transition_ms
             && Arc::ptr_eq(&self.keys, &other.keys)
     }
 }
@@ -2380,6 +2403,7 @@ pub struct List<T> {
     estimated_height: f32,
     buffer: usize,
     revision: Option<u64>,
+    row_transition_ms: u32,
     key: Option<KeyBuilder<T>>,
     row: Option<RowBuilder<T>>,
 }
@@ -2396,6 +2420,7 @@ impl<T: Send + Sync + 'static> List<T> {
             estimated_height: 56.0,
             buffer: 3,
             revision: None,
+            row_transition_ms: 0,
             key: None,
             row: None,
         }
@@ -2424,6 +2449,16 @@ impl<T: Send + Sync + 'static> List<T> {
     /// when its row is bound again.
     pub fn recycled(mut self) -> Self {
         self.mode = ListMode::Recycled;
+        self
+    }
+
+    /// Cross-fades a recycled row when a holder is rebound to new content.
+    ///
+    /// The fade is visual only: the holder is updated immediately and stays
+    /// available for reuse. `0` (the default) disables it. Windowed lists
+    /// rebuild their rows in place and ignore this.
+    pub fn row_transition(mut self, duration_ms: u32) -> Self {
+        self.row_transition_ms = duration_ms;
         self
     }
 
@@ -2492,6 +2527,7 @@ impl<T: Send + Sync + 'static> From<List<T>> for Element {
             estimated_height: list.estimated_height,
             buffer: list.buffer,
             revision: list.revision,
+            row_transition_ms: list.row_transition_ms,
             keys,
             rows,
         }));
@@ -2837,6 +2873,37 @@ mod tests {
         assert_eq!(props.selected, 1);
         assert_eq!(props.action, "tab");
         assert!(matches!(element.children[1].kind, ElementKind::Text(_)));
+    }
+
+    #[test]
+    fn lists_keep_their_row_transition() {
+        let list: Element = List::new(vec!["a", "b"])
+            .key(|value| value.to_string())
+            .row(|value| Text::new(*value).into())
+            .recycled()
+            .row_transition(180)
+            .into();
+        let ElementKind::List(props) = &list.kind else {
+            panic!("expected list");
+        };
+        assert_eq!(props.row_transition_ms, 180);
+
+        let plain: Element = List::new(vec!["a"])
+            .key(|value| value.to_string())
+            .row(|value| Text::new(*value).into())
+            .into();
+        let ElementKind::List(props) = &plain.kind else {
+            panic!("expected list");
+        };
+        assert_eq!(props.row_transition_ms, 0);
+    }
+
+    #[test]
+    fn disabled_decoration_is_dimmed_without_changing_rgb() {
+        assert_eq!(dim_color(0xFF21_96F3, true), 0xFF21_96F3);
+        assert_eq!(dim_color(0xFF21_96F3, false), 0x6621_96F3);
+        // A translucent color keeps its own alpha as the base.
+        assert_eq!(dim_color(0x8021_96F3, false), 0x3321_96F3);
     }
 
     #[test]

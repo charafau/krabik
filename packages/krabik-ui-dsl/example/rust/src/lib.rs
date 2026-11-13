@@ -59,6 +59,7 @@ pub struct ShowcaseApp {
     list_items: Arc<Vec<String>>,
     recycled_items: Arc<Vec<String>>,
     recycled_taps: usize,
+    recycled_alt: bool,
     dialog_open: bool,
     sheet_open: bool,
 }
@@ -107,6 +108,7 @@ impl ShowcaseApp {
                     .collect(),
             ),
             recycled_taps: 0,
+            recycled_alt: false,
             dialog_open: false,
             sheet_open: false,
         }
@@ -267,6 +269,10 @@ impl App for ShowcaseApp {
                 }
                 "demo:recycled-tap" => {
                     self.recycled_taps += 1;
+                    true
+                }
+                "demo:recycled-shuffle" => {
+                    self.recycled_alt = !self.recycled_alt;
                     true
                 }
                 "demo:animate" => {
@@ -793,6 +799,17 @@ mod tests {
             Some("Host-level native chrome")
         );
         assert_eq!(toolbar.actions.len(), 2);
+    }
+
+    #[test]
+    fn styling_page_contains_a_disabled_control() {
+        let element = pages::screen(&app(), "styling").expect("styling page");
+        let tree = krabik_ui_dsl::tree::build(&element);
+        assert!(
+            krabik_ui_dsl::tree::preorder(&tree)
+                .into_iter()
+                .any(|node| node.style.enabled == Some(false))
+        );
     }
 
     #[test]
