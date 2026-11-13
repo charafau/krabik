@@ -133,13 +133,17 @@ pub trait App: Send + 'static {
         None
     }
 
-    /// The native dialog or bottom sheet currently presented, if any.
-    fn presentation(&self) -> Option<crate::presentation::Presentation> {
+    /// The system alert currently shown, if any.
+    ///
+    /// The alert stays up while this returns `Some`. Each button dispatches
+    /// its action as [`Event::Click`]; the application closes the alert by
+    /// returning `None` afterwards.
+    fn dialog(&self) -> Option<crate::presentation::Dialog> {
         None
     }
 
-    /// Builds the content of the currently presented modal.
-    fn presentation_view(&self) -> Option<Element> {
+    /// The native bottom sheet currently shown, if any.
+    fn sheet(&self) -> Option<crate::presentation::BottomSheet> {
         None
     }
 }

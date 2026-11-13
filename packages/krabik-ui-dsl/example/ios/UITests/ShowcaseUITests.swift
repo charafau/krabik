@@ -113,17 +113,36 @@ final class ShowcaseUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Display 34 / bold"].waitForExistence(timeout: 5))
         backToCatalog()
 
+        // The dialog is the system alert, so it is found as an alert.
         open("Dialog")
-        XCTAssertTrue(app.staticTexts["Delete task?"].waitForExistence(timeout: 5))
-        app.buttons["Cancel"].tap()
-        XCTAssertFalse(app.staticTexts["Delete task?"].exists)
+        let alert = app.alerts["Delete task?"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(alert.staticTexts["This cannot be undone."].exists)
+        alert.buttons["Cancel"].tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
+
+        open("Dialog")
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.buttons["Delete"].tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
 
         open("Bottom sheet")
         XCTAssertTrue(app.buttons["Open bottom sheet"].waitForExistence(timeout: 5))
         tapButton("Open bottom sheet")
-        XCTAssertTrue(app.staticTexts["Filters"].waitForExistence(timeout: 5))
+        let filters = app.staticTexts["Filters"]
+        XCTAssertTrue(filters.waitForExistence(timeout: 5))
         app.buttons["Close"].tap()
-        XCTAssertFalse(app.staticTexts["Filters"].exists)
+        XCTAssertTrue(filters.waitForNonExistence(timeout: 5))
+
+        // Swiping the sheet away reaches Rust, so it can be opened again.
+        tapButton("Open bottom sheet")
+        XCTAssertTrue(filters.waitForExistence(timeout: 5))
+        filters.swipeDown(velocity: .fast)
+        XCTAssertTrue(filters.waitForNonExistence(timeout: 5))
+        tapButton("Open bottom sheet")
+        XCTAssertTrue(filters.waitForExistence(timeout: 5))
+        app.buttons["Close"].tap()
+        XCTAssertTrue(filters.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Open bottom sheet"].waitForExistence(timeout: 5))
         backToCatalog()
     }
@@ -144,7 +163,11 @@ final class ShowcaseUITests: XCTestCase {
 
         open("Bottom navigation")
         XCTAssertTrue(app.staticTexts["Home destination"].waitForExistence(timeout: 5))
-        app.tabBars.buttons["Search"].tap()
+        // The system tab bar reaches the bottom edge of the screen.
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertEqual(tabBar.frame.maxY, app.frame.maxY, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(tabBar.frame.height, 49)
+        tabBar.buttons["Search"].tap()
         XCTAssertTrue(app.staticTexts["Search destination"].waitForExistence(timeout: 5))
         backToCatalog()
 

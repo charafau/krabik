@@ -41,6 +41,8 @@ pub struct Screen {
     pub transition: ScreenTransition,
     /// Extra native toolbar configuration, when the screen needs it.
     pub toolbar: Option<Toolbar>,
+    /// The native bottom navigation bar shown under this screen, if any.
+    pub bottom_navigation: Option<BottomNavigation>,
 }
 
 impl Screen {
@@ -51,6 +53,7 @@ impl Screen {
             title: title.into(),
             transition: ScreenTransition::Slide,
             toolbar: None,
+            bottom_navigation: None,
         }
     }
 
@@ -63,6 +66,72 @@ impl Screen {
     /// Configures the native toolbar for this screen.
     pub fn toolbar(mut self, toolbar: Toolbar) -> Self {
         self.toolbar = Some(toolbar);
+        self
+    }
+
+    /// Shows a native bottom navigation bar under this screen.
+    ///
+    /// Give every top-level destination the same bar so it stays in place
+    /// while the content changes.
+    pub fn bottom_navigation(mut self, bar: BottomNavigation) -> Self {
+        self.bottom_navigation = Some(bar);
+        self
+    }
+}
+
+/// One destination in a [`BottomNavigation`] bar.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BottomNavItem {
+    /// The text label.
+    pub label: String,
+    /// The icon.
+    pub icon: Icon,
+}
+
+impl BottomNavItem {
+    /// Creates an item with a label and an icon.
+    pub fn new(label: impl Into<String>, icon: Icon) -> Self {
+        Self {
+            label: label.into(),
+            icon,
+        }
+    }
+}
+
+/// The host-level native bottom navigation bar.
+///
+/// iOS shows a system tab bar and Android a Material bottom navigation bar,
+/// each at its platform height and pinned to the bottom edge of the screen.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BottomNavigation {
+    /// The destinations in display order.
+    pub items: Vec<BottomNavItem>,
+    /// The index of the selected destination.
+    pub selected: usize,
+    /// The action dispatched as [`Event::Selected`](crate::app::Event::Selected)
+    /// when the user picks a destination.
+    pub action: String,
+}
+
+impl BottomNavigation {
+    /// Creates a bar with the given destinations.
+    pub fn new(items: impl IntoIterator<Item = BottomNavItem>) -> Self {
+        Self {
+            items: items.into_iter().collect(),
+            selected: 0,
+            action: String::new(),
+        }
+    }
+
+    /// Sets the selected destination.
+    pub fn selected(mut self, index: usize) -> Self {
+        self.selected = index;
+        self
+    }
+
+    /// Sets the action dispatched when the selection changes.
+    pub fn action(mut self, action: impl Into<String>) -> Self {
+        self.action = action.into();
         self
     }
 }
@@ -199,6 +268,23 @@ mod tests {
         assert_eq!(toolbar.actions.len(), 2);
         assert_eq!(toolbar.actions[0].label, "Edit");
         assert_eq!(toolbar.actions[1].icon.ios_name(), Some("magnifyingglass"));
+    }
+
+    #[test]
+    fn screens_can_show_bottom_navigation() {
+        let screen = Screen::new("home", "Home").bottom_navigation(
+            BottomNavigation::new([
+                BottomNavItem::new("Home", Icon::new().drawable("ic_home").sf("house.fill")),
+                BottomNavItem::new("Search", Icon::new().shared("search")),
+            ])
+            .selected(1)
+            .action("tab"),
+        );
+        let bar = screen.bottom_navigation.expect("bottom navigation");
+        assert_eq!(bar.selected, 1);
+        assert_eq!(bar.action, "tab");
+        assert_eq!(bar.items[0].icon.android_name(), Some("ic_home"));
+        assert_eq!(bar.items[1].icon.ios_name(), Some("search"));
     }
 
     #[test]

@@ -169,25 +169,32 @@ The runtime now supports multiple native hosts per application session:
 - **Session/host core** — one `App` instance, one `RustRootView`/host per main
   screen, navigation screen and modal. Events carry a host id; each host owns
   its runtime, scroll/focus and recycled-row state.
-- **Dialog and BottomSheet** — the DSL builds content; the native host owns the
-  presentation. Android uses `DialogFragment` and a Material
-  `BottomSheetDialogFragment`; iOS uses an over-full-screen `UIViewController`
-  and `UISheetPresentationController`.
+- **Dialog** — `App::dialog` returns a structured `Dialog` (title, message,
+  buttons with default/cancel/destructive roles) shown as the system alert:
+  `UIAlertController` on iOS, a Material alert dialog on Android. Buttons
+  dispatch `Event::Click`.
+- **BottomSheet** — `App::sheet` returns a `BottomSheet` with Rust content. The
+  platform supplies the surface and sizes the sheet to its content: a Material
+  `BottomSheetDialogFragment` on Android, `UISheetPresentationController` on
+  iOS. Swiping it away dispatches the sheet's dismiss action.
 - **Navigation** — the app implements `navigation()` and `screen(key)`; Android
   mirrors the stack with AndroidX fragments and a toolbar, iOS with
-  `UINavigationController`. Rust remains the source of truth for the stack.
+  `UINavigationController`. Rust remains the source of truth for the stack:
+  Android does not use the fragment back stack, and a covered screen keeps its
+  view, so popping reveals it as the user left it.
 - **Back** — Android's system/toolbar back dispatches `Event::Back` through the
   AndroidX `OnBackPressedDispatcher`; the app pops a screen, closes a modal or
   returns to the catalog before the Activity exits. iOS navigation uses the
   native bar's Back item.
 - **Transitions** — each `Screen` carries a `ScreenTransition::Slide`, `Fade`
-  or `None`. Android uses shared slide/fade fragment animation resources; iOS
+  or `None`. Android uses shared slide/fade fragment animation resources, with
+  the entering screen above on push and the leaving screen above on pop; iOS
   keeps the native navigation push for slides and uses a native `CATransition`
   cross-fade otherwise. The Motion section has a Page transitions demo, and
   the Bottom sheet catalog entry is now a page with an Open button.
 
 The widget showcase itself is now a native navigation stack: every widget page
-is a screen, Dialog and Bottom sheet are modal hosts. Android instrumented
+is a screen, Dialog is the system alert and Bottom sheet is a modal host. Android instrumented
 tests and iOS XCUITests cover push/pop, system back, dialog dismissal and sheet
 dismissal.
 
@@ -246,9 +253,12 @@ Four container/navigation widgets round out the native set:
   native pager at the requested offset.
 - **TabsView** — a `TabBar` above a `Pager`; tab taps and page swipes share one
   action and one selected index.
-- **BottomNavigation** — a widget-level icon+text bar (`BottomNavigationView`
-  on Android, `UITabBar` on iOS). Items use custom `Icon` values with optional
-  platform-specific names (`drawable` / `sf`) and a shared fallback.
+- **BottomNavigation** — host-level chrome configured by
+  `Screen::bottom_navigation`, like the toolbar: a Material
+  `BottomNavigationView` on Android and a system `UITabBar` on iOS, each at
+  its platform height and pinned to the bottom edge. Items use custom `Icon`
+  values with optional platform-specific names (`drawable` / `sf`) and a
+  shared fallback.
 - **Toolbar** — host-level chrome configured by `Screen::toolbar`: subtitle,
   back title, hidden flag, and text actions with optional icons. Android uses
   the framework `Toolbar`; iOS uses the native navigation item. Toolbar
@@ -385,8 +395,8 @@ All core widgets from SPEC.md §7.1 are implemented on Android and iOS.
 | `TabBar` | [`update_tab_bar()`](rust/src/android.rs) | Custom `KrabikTabBar` (horizontal `LinearLayout`) |
 | `Pager` | [`update_pager()`](rust/src/android.rs) | Custom `KrabikPager` (`FrameLayout` + `OverScroller`) |
 | `TabsView` | [`TabsView`](rust/src/ui.rs) | `TabBar` + `Pager` composition |
-| `BottomNavigation` | [`update_bottom_navigation()`](rust/src/android.rs) | Material `BottomNavigationView` |
-| Host toolbar | [`sync_toolbar()`](rust/src/android.rs) | Framework `Toolbar` with menu/custom action views |
+| Host bottom navigation | [`sync_chrome()`](rust/src/android.rs) | Material `BottomNavigationView` |
+| Host toolbar | [`sync_chrome()`](rust/src/android.rs) | Framework `Toolbar` with menu/custom action views |
 | `Image` | [`update_image()`](rust/src/android.rs) | `ImageView` (assets + URLs) |
 | `ScrollView` | [`create_scroll()`](rust/src/android.rs) | Custom scroll container (vertical + horizontal) |
 

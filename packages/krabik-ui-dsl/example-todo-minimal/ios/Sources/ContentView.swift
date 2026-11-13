@@ -11,6 +11,9 @@ private struct HostView: UIViewControllerRepresentable {
 
 struct ContentView: View {
     var body: some View {
+        // The host reaches the screen edges so the tab bar can cover the
+        // home-indicator area; each screen keeps its content in the safe area.
         HostView()
+            .ignoresSafeArea(.container)
     }
 }

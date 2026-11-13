@@ -443,17 +443,6 @@ impl Runtime {
         }
     }
 
-    /// Returns the action of the bottom navigation bar with the given identifier, if any.
-    pub fn bottom_navigation_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
-        let node = tree::find(&self.tree, id)?;
-        match &node.kind {
-            NodeKind::BottomNavigation(props) if !props.action.is_empty() => {
-                Some(props.action.clone())
-            }
-            _ => None,
-        }
-    }
-
     /// Returns the action of the pager with the given identifier, if any.
     pub fn pager_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;
@@ -532,6 +521,20 @@ impl Runtime {
         &self.layout.frames
     }
 
+    /// The height the content needs, regardless of the viewport's height:
+    /// the bottom edge of the lowest top-level node.
+    ///
+    /// The synthetic root always fills the viewport, so a host that should
+    /// wrap its content, such as a bottom sheet, asks for this instead.
+    pub fn content_height(&self) -> f32 {
+        self.tree
+            .children
+            .iter()
+            .filter_map(|child| self.layout.frames.get(&child.id))
+            .map(|frame| frame.y + frame.height)
+            .fold(0.0, f32::max)
+    }
+
     /// The scrollable content sizes of the last layout pass.
     pub fn content_sizes(&self) -> &HashMap<NodeId, Size> {
         &self.layout.content_sizes
@@ -569,6 +572,19 @@ mod tests {
                 "layout operations must come last: {ops:?}"
             );
         }
+    }
+
+    #[test]
+    fn content_height_ignores_the_viewport_height() {
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        let element: Element = Column::new()
+            .padding(10)
+            .child(Text::new("one"))
+            .child(Text::new("two"))
+            .into();
+        runtime.update(&element, Size::new(320.0, 900.0));
+        let height = runtime.content_height();
+        assert!(height > 0.0 && height < 900.0, "content height {height}");
     }
 
     #[test]

@@ -10,10 +10,9 @@ use std::collections::HashMap;
 
 use crate::geometry::Size;
 use crate::ui::{
-    Axis, BottomNavigationProps, ButtonProps, CheckProps, DatePickerProps, Element, ElementKind,
-    ImageProps, Length, ListMode, ListProps, PagerProps, ProgressProps, RadioGroupProps,
-    ScrollProps, SliderProps, SpinnerProps, Style, SwitchProps, TabBarProps, TextFieldProps,
-    TextProps,
+    Axis, ButtonProps, CheckProps, DatePickerProps, Element, ElementKind, ImageProps, Length,
+    ListMode, ListProps, PagerProps, ProgressProps, RadioGroupProps, ScrollProps, SliderProps,
+    SpinnerProps, Style, SwitchProps, TabBarProps, TextFieldProps, TextProps,
 };
 
 /// The identifier of the synthetic root node.
@@ -55,7 +54,6 @@ pub enum NodeKind {
     /// A native date picker.
     DatePicker(DatePickerProps),
     /// A native bottom navigation bar.
-    BottomNavigation(BottomNavigationProps),
     /// A native slider.
     Slider(SliderProps),
     /// A native determinate progress indicator.
@@ -85,7 +83,6 @@ impl NodeKind {
                 | Self::TabBar(_)
                 | Self::Pager(_)
                 | Self::DatePicker(_)
-                | Self::BottomNavigation(_)
                 | Self::Slider(_)
                 | Self::Progress(_)
                 | Self::Spinner(_)
@@ -456,7 +453,6 @@ fn build_node(element: &Element, parent: NodeId, index: usize, cx: &mut BuildCon
             ..props.clone()
         }),
         ElementKind::DatePicker(props) => NodeKind::DatePicker(props.clone()),
-        ElementKind::BottomNavigation(props) => NodeKind::BottomNavigation(props.clone()),
         ElementKind::Slider(props) => NodeKind::Slider(props.clone()),
         ElementKind::Progress(props) => NodeKind::Progress(props.clone()),
         ElementKind::Spinner(props) => NodeKind::Spinner(props.clone()),

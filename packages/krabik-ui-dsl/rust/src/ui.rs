@@ -835,78 +835,6 @@ impl From<TabsView> for Element {
     }
 }
 
-/// One item in a [`BottomNavigation`] bar.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BottomNavItem {
-    /// The text label.
-    pub label: String,
-    /// The optional icon.
-    pub icon: Icon,
-}
-
-impl BottomNavItem {
-    /// Creates an item with a label and an icon.
-    pub fn new(label: impl Into<String>, icon: Icon) -> Self {
-        Self {
-            label: label.into(),
-            icon,
-        }
-    }
-}
-
-/// Platform-independent properties of a bottom navigation bar.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BottomNavigationProps {
-    /// The items in display order.
-    pub items: Vec<BottomNavItem>,
-    /// The index of the selected destination.
-    pub selected: usize,
-    /// The action dispatched when the selection changes.
-    pub action: Cow<'static, str>,
-    /// ARGB color of the selected item.
-    pub color: u32,
-}
-
-/// A native bottom navigation bar with icons and labels.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BottomNavigation(pub(crate) Element);
-
-impl BottomNavigation {
-    /// Creates a bottom navigation bar with the given items.
-    pub fn new(items: impl IntoIterator<Item = BottomNavItem>) -> Self {
-        Self(Element::leaf(ElementKind::BottomNavigation(
-            BottomNavigationProps {
-                items: items.into_iter().collect(),
-                selected: 0,
-                action: Cow::Borrowed(""),
-                color: CONTROL_ACCENT,
-            },
-        )))
-    }
-
-    /// Sets the selected destination.
-    pub fn selected(mut self, index: usize) -> Self {
-        if let ElementKind::BottomNavigation(props) = &mut self.0.kind {
-            props.selected = index;
-        }
-        self
-    }
-
-    /// Sets the action dispatched when the selection changes.
-    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
-        if let ElementKind::BottomNavigation(props) = &mut self.0.kind {
-            props.action = action.into();
-        }
-        self
-    }
-}
-
-impl From<BottomNavigation> for Element {
-    fn from(component: BottomNavigation) -> Self {
-        component.0
-    }
-}
-
 /// The axis a scroll container scrolls along.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Axis {
@@ -1371,7 +1299,6 @@ pub(crate) enum ElementKind {
     TabBar(TabBarProps),
     Pager(PagerProps),
     DatePicker(DatePickerProps),
-    BottomNavigation(BottomNavigationProps),
     Slider(SliderProps),
     Progress(ProgressProps),
     Spinner(SpinnerProps),
@@ -1400,7 +1327,6 @@ impl ElementKind {
             Self::TabBar(_) => 19,
             Self::Pager(_) => 20,
             Self::DatePicker(_) => 18,
-            Self::BottomNavigation(_) => 21,
             Self::Slider(_) => 14,
             Self::Progress(_) => 15,
             Self::Spinner(_) => 17,
@@ -2611,7 +2537,6 @@ impl Element {
             ElementKind::RadioGroup(props) => props.color = color,
             ElementKind::TabBar(props) => props.color = color,
             ElementKind::DatePicker(props) => props.color = color,
-            ElementKind::BottomNavigation(props) => props.color = color,
             _ => {}
         }
     }
@@ -2644,7 +2569,6 @@ style_builder!(TabBar);
 style_builder!(Pager);
 style_builder!(TabsView);
 style_builder!(DatePicker);
-style_builder!(BottomNavigation);
 style_builder!(Slider);
 style_builder!(ProgressIndicator);
 style_builder!(Image);
@@ -2991,27 +2915,6 @@ mod tests {
         let icon = Icon::new().shared("home").sf("house.fill");
         assert_eq!(icon.android_name(), Some("home"));
         assert_eq!(icon.ios_name(), Some("house.fill"));
-    }
-
-    #[test]
-    fn bottom_navigation_keeps_icons_and_selection() {
-        let items = [
-            BottomNavItem::new("Home", Icon::new().drawable("ic_home").sf("house.fill")),
-            BottomNavItem::new("Search", Icon::new().shared("search")),
-        ];
-        let element: Element = BottomNavigation::new(items)
-            .selected(1)
-            .action("tab")
-            .into();
-        let ElementKind::BottomNavigation(props) = &element.kind else {
-            panic!("expected bottom navigation");
-        };
-        assert_eq!(props.selected, 1);
-        assert_eq!(props.action, "tab");
-        assert_eq!(props.items[0].icon.android_name(), Some("ic_home"));
-        assert_eq!(props.items[0].icon.ios_name(), Some("house.fill"));
-        assert_eq!(props.items[1].icon.android_name(), Some("search"));
-        assert_eq!(props.items[1].icon.ios_name(), Some("search"));
     }
 
     #[test]
