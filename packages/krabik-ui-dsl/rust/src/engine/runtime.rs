@@ -4,18 +4,14 @@
 //! tree, reconciles it with the previous one, lays it out, and emits one batch
 //! of operations for the platform renderer.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::geometry::{Rect, Size};
 use crate::layout::{self, LayoutResult};
 use crate::measure::Measure;
 use crate::render::{self, Op, Renderer};
-use crate::tree::{
-    self, BuildInfo, ListExtent, ListMeasurements, NodeId, NodeKind, ROOT_ID, UiNode,
-};
+use crate::tree::{self, BuildInfo, ListExtent, ListMeasurements, NodeId, ROOT_ID, UiNode};
 use crate::ui::{Element, ListProps};
-use crate::widgets::Widget;
 
 /// The result of rebuilding the UI: the used size and the operations to apply.
 #[derive(Clone, Debug, Default)]
@@ -392,142 +388,6 @@ impl Runtime {
         update.size
     }
 
-    /// Returns the action of the button with the given identifier, if any.
-    pub fn click(&self, id: NodeId) -> Option<Cow<'static, str>> {
-        let node = tree::find(&self.tree, id)?;
-        match &node.kind {
-            NodeKind::Widget(Widget::Button(props)) if !props.action.is_empty() => {
-                Some(props.action.clone())
-            }
-            _ => None,
-        }
-    }
-
-    /// Returns the action of a switch, checkbox or radio button.
-    pub fn toggle_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
-        let node = tree::find(&self.tree, id)?;
-        match &node.kind {
-            NodeKind::Widget(Widget::Switch(props)) if !props.action.is_empty() => {
-                Some(props.action.clone())
-            }
-            NodeKind::Widget(Widget::Checkbox(props)) if !props.action.is_empty() => {
-                Some(props.action.clone())
-            }
-            NodeKind::Widget(Widget::RadioButton(props)) if !props.action.is_empty() => {
-                Some(props.action.clone())
-            }
-            _ => None,
-        }
-    }
-
-    /// Returns the action of the switch with the given identifier, if any.
-    pub fn switch_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
-        self.toggle_action(id)
-    }
-
-    /// Returns the action of the slider with the given identifier, if any.
-    pub fn slider_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
-        let node = tree::find(&self.tree, id)?;
-        match &node.kind {
-            NodeKind::Widget(Widget::Slider(props)) if !props.action.is_empty() => {
-                Some(props.action.clone())
-            }
-            _ => None,
-        }
-    }
-
-    /// Returns the range and quantization step of the slider with the given identifier.
-    pub fn slider_config(&self, id: NodeId) -> Option<(f32, f32, Option<f32>)> {
-        let node = tree::find(&self.tree, id)?;
-        match &node.kind {
-            NodeKind::Widget(Widget::Slider(props)) => Some((props.min, props.max, props.step)),
-            _ => None,
-        }
-    }
-
-    /// Returns the action of the radio group with the given identifier, if any.
-    pub fn radio_group_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
-        let node = tree::find(&self.tree, id)?;
-        match &node.kind {
-            NodeKind::Widget(Widget::RadioGroup(props)) if !props.action.is_empty() => {
-                Some(props.action.clone())
-            }
-            _ => None,
-        }
-    }
-
-    /// Returns the action of the pager with the given identifier, if any.
-    pub fn pager_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
-        let node = tree::find(&self.tree, id)?;
-        match &node.kind {
-            NodeKind::Pager(props) if !props.action.is_empty() => Some(props.action.clone()),
-            _ => None,
-        }
-    }
-
-    /// Returns the action of the tab bar with the given identifier, if any.
-    pub fn tab_bar_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
-        let node = tree::find(&self.tree, id)?;
-        match &node.kind {
-            NodeKind::Widget(Widget::TabBar(props)) if !props.action.is_empty() => {
-                Some(props.action.clone())
-            }
-            _ => None,
-        }
-    }
-
-    /// Returns the action and ranges of the date picker with the given identifier.
-    #[allow(clippy::type_complexity)]
-    pub fn date_picker_config(
-        &self,
-        id: NodeId,
-    ) -> Option<(
-        Cow<'static, str>,
-        Option<(crate::ui::DateValue, crate::ui::DateValue)>,
-        Option<(crate::ui::TimeValue, crate::ui::TimeValue)>,
-    )> {
-        let node = tree::find(&self.tree, id)?;
-        match &node.kind {
-            NodeKind::Widget(Widget::DatePicker(props)) if !props.action.is_empty() => {
-                Some((props.action.clone(), props.date_range, props.time_range))
-            }
-            _ => None,
-        }
-    }
-
-    /// Returns the action of the text input with the given identifier, if any.
-    pub fn text_field_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
-        let node = tree::find(&self.tree, id)?;
-        match &node.kind {
-            NodeKind::Widget(Widget::TextField(props)) if !props.action.is_empty() => {
-                Some(props.action.clone())
-            }
-            _ => None,
-        }
-    }
-
-    /// Returns the submit action of the text input with the given identifier.
-    pub fn text_field_submit_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
-        let node = tree::find(&self.tree, id)?;
-        match &node.kind {
-            NodeKind::Widget(Widget::TextField(props)) if !props.submit_action.is_empty() => {
-                Some(props.submit_action.clone())
-            }
-            _ => None,
-        }
-    }
-
-    /// Returns the focus action of the text input with the given identifier.
-    pub fn text_field_focus_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
-        let node = tree::find(&self.tree, id)?;
-        match &node.kind {
-            NodeKind::Widget(Widget::TextField(props)) if !props.focus_action.is_empty() => {
-                Some(props.focus_action.clone())
-            }
-            _ => None,
-        }
-    }
-
     /// The current tree.
     pub fn tree(&self) -> &UiNode {
         &self.tree
@@ -562,11 +422,21 @@ impl Runtime {
 mod tests {
     use super::*;
     use crate::geometry::Constraints;
+    use crate::host::Actions;
     use crate::measure::ApproximateMeasure;
     use crate::render::RecordingRenderer;
+    use crate::tree::NodeKind;
+    use crate::widgets::Widget;
     use std::sync::Arc;
 
     use crate::ui::{Button, Column, Length, List, Switch, Text, TextField, TextProps};
+
+    /// What the widget `id` asks to be told about.
+    fn actions(runtime: &Runtime, id: NodeId) -> Actions {
+        tree::find(runtime.tree(), id)
+            .and_then(Actions::of)
+            .unwrap_or_default()
+    }
 
     fn viewport() -> Size {
         Size::new(300.0, 600.0)
@@ -686,8 +556,8 @@ mod tests {
             .find(|node| matches!(node.kind, NodeKind::Widget(Widget::Button(_))))
             .unwrap();
 
-        assert_eq!(runtime.click(button.id).as_deref(), Some("click"));
-        assert_eq!(runtime.click(ROOT_ID), None);
+        assert_eq!(actions(&runtime, button.id).click.as_deref(), Some("click"));
+        assert_eq!(actions(&runtime, ROOT_ID), Actions::default());
     }
 
     #[test]
@@ -699,8 +569,8 @@ mod tests {
         runtime.update(&element, viewport());
 
         let field = runtime.tree().children[0].children[0].id;
-        assert_eq!(runtime.text_field_action(field).as_deref(), Some("name"));
-        assert_eq!(runtime.click(field), None);
+        assert_eq!(actions(&runtime, field).text.as_deref(), Some("name"));
+        assert_eq!(actions(&runtime, field).click, None);
     }
 
     #[test]
@@ -713,10 +583,9 @@ mod tests {
 
         let switch = runtime.tree().children[0].children[0].id;
         assert_eq!(
-            runtime.switch_action(switch).as_deref(),
+            actions(&runtime, switch).toggle.as_deref(),
             Some("notifications")
         );
-        assert_eq!(runtime.switch_action(ROOT_ID), None);
     }
 
     #[test]
@@ -729,8 +598,10 @@ mod tests {
         runtime.update(&element, viewport());
 
         let button = runtime.tree().children[0].children[0].id;
-        assert_eq!(runtime.click(button).as_deref(), Some("note:delete:2"));
-        assert_eq!(runtime.click(ROOT_ID), None);
+        assert_eq!(
+            actions(&runtime, button).click.as_deref(),
+            Some("note:delete:2")
+        );
     }
 
     #[test]

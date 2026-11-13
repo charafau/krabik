@@ -8,7 +8,11 @@
 pub mod app;
 pub(crate) mod element;
 pub mod engine;
+// Only the platform renderers drive a session; it stays compiled everywhere
+// so its tests run on the host.
 pub mod gallery;
+#[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+mod host;
 pub mod navigation;
 pub mod presentation;
 pub mod style;
