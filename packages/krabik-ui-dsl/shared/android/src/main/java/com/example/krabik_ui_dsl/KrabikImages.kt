@@ -1,5 +1,7 @@
 package com.example.krabik_ui_dsl
 
+import android.content.Context
+import android.graphics.BitmapFactory
 import android.widget.ImageView
 import coil3.load
 import coil3.request.crossfade
@@ -32,6 +34,33 @@ object KrabikImages {
         val data = if (isAsset) "file:///android_asset/$source" else source
         view.load(data) {
             crossfade(true)
+        }
+    }
+
+    /**
+     * Returns the pixel dimensions of a bundled asset, packed as
+     * `(width shl 32) or height`, or zero when the source is remote or cannot
+     * be decoded.
+     *
+     * Only the header is read, so layout never decodes the full bitmap.
+     */
+    @JvmStatic
+    fun size(context: Context, source: String): Long {
+        if (source.isEmpty() || source.startsWith("http://") || source.startsWith("https://")) {
+            return 0L
+        }
+        return try {
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.assets.open(source).use { stream ->
+                BitmapFactory.decodeStream(stream, null, options)
+            }
+            if (options.outWidth <= 0 || options.outHeight <= 0) {
+                0L
+            } else {
+                (options.outWidth.toLong() shl 32) or (options.outHeight.toLong() and 0xffffffffL)
+            }
+        } catch (_: Exception) {
+            0L
         }
     }
 }

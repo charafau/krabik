@@ -34,10 +34,6 @@ const BUTTON_PADDING_X: f32 = 16.0;
 const BUTTON_PADDING_Y: f32 = 12.0;
 /// The smallest height a button is allowed to have.
 const BUTTON_MIN_HEIGHT: f32 = 20.0;
-/// The default intrinsic width of a switch in logical points.
-const SWITCH_WIDTH: f32 = 52.0;
-/// The default intrinsic height of a switch in logical points.
-const SWITCH_HEIGHT: f32 = 32.0;
 /// The side of a checkbox or radio indicator in logical points.
 const CHECK_INDICATOR: f32 = 20.0;
 /// The space reserved between a check indicator and its label.
@@ -260,6 +256,31 @@ fn margin(value: f32) -> LengthPercentageAuto {
     LengthPercentageAuto::length(value)
 }
 
+/// Sizes an image whose natural dimensions are known.
+///
+/// An absolute size on one axis derives the other from the natural aspect
+/// ratio; axes without an explicit size use the natural size, clamped to the
+/// available width.
+fn image_content_size(node: &UiNode, natural: Size, max_width: Option<f32>) -> Size {
+    let width = match node.style.width {
+        Length::Points(value) => Some(value),
+        _ => None,
+    };
+    let height = match node.style.height {
+        Length::Points(value) => Some(value),
+        _ => None,
+    };
+    match (width, height) {
+        (Some(width), Some(height)) => Size::new(width, height),
+        (Some(width), None) => Size::new(width, width * natural.height / natural.width),
+        (None, Some(height)) => Size::new(height * natural.width / natural.height, height),
+        (None, None) => {
+            let width = max_width.map_or(natural.width, |max| natural.width.min(max));
+            Size::new(width, natural.height * width / natural.width)
+        }
+    }
+}
+
 fn align_items(align: Align) -> AlignItems {
     match align {
         Align::Start => AlignItems::FLEX_START,
@@ -355,12 +376,15 @@ fn content_size(
                 },
             )
         }
-        // Switches have a platform-defined intrinsic size. The default matches
-        // the Material track and is overridable with an explicit dimension.
-        NodeKind::Switch(_) => Size::new(
-            max_width.map_or(SWITCH_WIDTH, |width| width.min(SWITCH_WIDTH)),
-            SWITCH_HEIGHT,
-        ),
+        // Switches have a platform-defined intrinsic size. The measurer keeps
+        // the native control's size; an explicit dimension still overrides it.
+        NodeKind::Switch(_) => {
+            let size = measurer.switch_size();
+            Size::new(
+                max_width.map_or(size.width, |width| width.min(size.width)),
+                size.height,
+            )
+        }
         NodeKind::Checkbox(props) | NodeKind::RadioButton(props) => {
             let inner_width = max_width.map(|width| (width - CHECK_INDICATOR - CHECK_GAP).max(0.0));
             let label = TextProps {
@@ -437,7 +461,12 @@ fn content_size(
         NodeKind::Progress(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), PROGRESS_HEIGHT),
         NodeKind::Spinner(_) => Size::new(SPINNER_SIZE, SPINNER_SIZE),
         // Images are sized explicitly by the application in this milestone.
-        NodeKind::Image(_) => Size::ZERO,
+        NodeKind::Image(props) => match measurer.image_size(props) {
+            Some(natural) if natural.width > 0.0 && natural.height > 0.0 => {
+                image_content_size(node, natural, max_width)
+            }
+            _ => Size::ZERO,
+        },
         _ => Size::ZERO,
     }
 }
@@ -935,6 +964,68 @@ mod tests {
         assert_eq!(compact_date.height, 48.0);
         assert_eq!(inline_date.width, 300.0);
         assert_eq!(inline_date.height, 320.0);
+    }
+
+    /// Reports platform-like switch and asset sizes.
+    struct PlatformMeasure;
+
+    impl Measure for PlatformMeasure {
+        fn measure(&self, text: &TextProps, constraints: Constraints) -> Size {
+            ApproximateMeasure.measure(text, constraints)
+        }
+
+        fn switch_size(&self) -> Size {
+            Size::new(44.0, 26.0)
+        }
+
+        fn image_size(&self, props: &crate::ui::ImageProps) -> Option<Size> {
+            match &props.source {
+                ImageSource::Asset(path) if path == "logo.png" => Some(Size::new(120.0, 60.0)),
+                _ => None,
+            }
+        }
+    }
+
+    #[test]
+    fn switches_and_assets_use_platform_intrinsic_sizes() {
+        let element: Element = Column::new()
+            .width(600)
+            .align_items(Align::Start)
+            .child(Switch::new(false))
+            .child(Image::new(ImageSource::asset("logo.png")))
+            .child(Image::new(ImageSource::asset("logo.png")).width(240))
+            .child(Image::new(ImageSource::url("https://example.com/x.png")))
+            .into();
+
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(600.0, 600.0), &PlatformMeasure).frames;
+        let column = &tree.children[0];
+
+        assert_eq!(
+            frames[&column.children[0].id],
+            Rect::new(0.0, 0.0, 44.0, 26.0)
+        );
+        assert_eq!(
+            frames[&column.children[1].id],
+            Rect::new(0.0, 26.0, 120.0, 60.0)
+        );
+        // A fixed width derives the height from the natural aspect ratio.
+        assert_eq!(
+            frames[&column.children[2].id],
+            Rect::new(0.0, 86.0, 240.0, 120.0)
+        );
+        // Remote images keep the explicit-size fallback.
+        let remote = frames[&column.children[3].id];
+        assert_eq!((remote.width, remote.height), (0.0, 0.0));
+    }
+
+    #[test]
+    fn a_platform_switch_shrinks_to_the_available_width() {
+        let element: Element = Row::new().width(60).child(Switch::new(false)).into();
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(60.0, 100.0), &PlatformMeasure).frames;
+
+        assert_eq!(frames[&tree.children[0].children[0].id].width, 44.0);
     }
 
     #[test]

@@ -1022,6 +1022,11 @@ fn image_page() -> Element {
                 .corner_radius(18)
                 .accessibility_label("Krabik app icon"),
             caption("Bundled asset, 96×96 with rounded corners."),
+            Image::new(ImageSource::asset("krabik.webp"))
+                .width(72)
+                .corner_radius(12)
+                .accessibility_label("Intrinsic asset icon"),
+            caption("Bundled asset sized from its intrinsic aspect ratio."),
             Image::new(ImageSource::url("https://picsum.photos/600/300"))
                 .width_percent(1.0)
                 .aspect_ratio(2.0)
@@ -1122,6 +1127,7 @@ fn list_page(app: &ShowcaseApp) -> Element {
 
 fn recycled_list_page(app: &ShowcaseApp) -> Element {
     let items = app.recycled_items.clone();
+    let alt = app.recycled_alt;
     Column::new()
         .padding(24)
         .spacing(12)
@@ -1133,17 +1139,35 @@ fn recycled_list_page(app: &ShowcaseApp) -> Element {
             "A native recycler builds and reuses rows on demand.",
         ))
         .child(
-            Text::new(format!("Row taps: {}", app.recycled_taps))
-                .size(16)
-                .color(COLOR_ACCENT),
+            Row::new()
+                .width_percent(1.0)
+                .spacing(12)
+                .align_items(Align::Center)
+                .child(
+                    Text::new(format!("Row taps: {}", app.recycled_taps))
+                        .size(16)
+                        .color(COLOR_ACCENT)
+                        .grow(1.0),
+                )
+                .child(
+                    Button::new("Shuffle")
+                        .action("demo:recycled-shuffle")
+                        .accessibility_label("Shuffle rows"),
+                ),
         )
         .child(
             List::new(items)
                 .item_height(56)
                 .buffer(3)
                 .recycled()
+                .row_transition(180)
                 .key(|row| row.clone())
-                .row(|row| {
+                .row(move |row| {
+                    let label = if alt {
+                        format!("{row} · updated")
+                    } else {
+                        row.clone()
+                    };
                     Row::new()
                         .width_percent(1.0)
                         .height(56)
@@ -1152,7 +1176,7 @@ fn recycled_list_page(app: &ShowcaseApp) -> Element {
                         .align_items(Align::Center)
                         .background(COLOR_SURFACE)
                         .corner_radius(8)
-                        .child(Text::new(row.clone()).size(15).grow(1.0))
+                        .child(Text::new(label).size(15).grow(1.0))
                         .child(
                             Button::new("Tap")
                                 .action("demo:recycled-tap")
@@ -1232,6 +1256,24 @@ fn styling_page() -> Element {
                 .elevation(4)
                 .padding_each(EdgeInsets::symmetric(14, 10))
                 .corner_radius(12),
+            Button::new("Disabled action")
+                .action("demo:noop")
+                .enabled(false)
+                .color(0xFFFF_FFFF)
+                .background(COLOR_ACCENT)
+                .padding_each(EdgeInsets::symmetric(14, 10))
+                .corner_radius(12),
+            Text::new(
+                "Disabled decoration dims its fill, border and shadow; native text dims itself."
+            )
+            .size(16)
+            .color(COLOR_TEXT)
+            .background(0xFFFF_FFFF)
+            .border(2, COLOR_BORDER)
+            .elevation(4)
+            .enabled(false)
+            .padding_each(EdgeInsets::symmetric(14, 10))
+            .corner_radius(12),
         ],
     )
 }

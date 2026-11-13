@@ -21,15 +21,16 @@ use crate::app::{App, Event};
 use crate::frame_batch::FrameBatch;
 use crate::geometry::{Constraints, Rect, Size};
 use crate::layout::LayoutResult;
-use crate::measure::Measure;
+use crate::measure::{DEFAULT_SWITCH_HEIGHT, DEFAULT_SWITCH_WIDTH, Measure};
 use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Axis, BottomNavigationProps, CheckProps, DatePickerMode, DatePickerProps, DatePickerValue,
-    DateValue, EdgeInsets, FontWeight, GradientDirection, ImageProps, ImageScale, ImageSource,
-    ImeAction, KeyboardType, PagerProps, ProgressProps, RadioGroupProps, SliderProps, SwitchProps,
-    TabBarProps, TextAlign, TextFieldProps, TextProps, TimeValue, snap_slider_value,
+    Axis, Border, BottomNavigationProps, CheckProps, DatePickerMode, DatePickerProps,
+    DatePickerValue, DateValue, EdgeInsets, FontWeight, Gradient, GradientDirection, ImageProps,
+    ImageScale, ImageSource, ImeAction, KeyboardType, PagerProps, ProgressProps, RadioGroupProps,
+    SliderProps, SwitchProps, TabBarProps, TextAlign, TextFieldProps, TextProps, TimeValue,
+    dim_color, snap_slider_value,
 };
 
 mod handles;
@@ -53,6 +54,8 @@ const KRABIK_STYLE_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSt
 const RUST_ROOT_VIEW_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/RustRootView");
 const TEXT_INPUT_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikTextInput");
 const SWITCH_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSwitch");
+/// The framework switch, measured only for its intrinsic size.
+const PLAIN_SWITCH_CLASS: &JNIStr = jni_str!("android/widget/Switch");
 const CHECKBOX_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikCheckBox");
 const RADIO_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioButton");
 const RADIO_GROUP_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioGroup");
@@ -63,6 +66,7 @@ const DATE_PICKER_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikDat
 const SEEK_BAR_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSeekBar");
 const PROGRESS_BAR_CLASS: &JNIStr = jni_str!("android/widget/ProgressBar");
 const KRABIK_IMAGES_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikImages");
+const KRABIK_ROWS_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRows");
 const KRABIK_VIEWS_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikViews");
 const KRABIK_RECYCLERS_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRecyclers");
 
@@ -124,9 +128,12 @@ where
 /// times per layout pass.
 struct AndroidMeasure {
     vm: JavaVM,
+    context: Global<JObject<'static>>,
     text_view: Global<JObject<'static>>,
     density: f32,
     cache: Mutex<HashMap<MeasureKey, Size>>,
+    switch_size: Mutex<Option<Size>>,
+    image_sizes: Mutex<HashMap<String, Option<Size>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -171,9 +178,12 @@ impl AndroidMeasure {
 
         Ok(Self {
             vm: vm.clone(),
+            context: jcall!(env, env.new_global_ref(context))?,
             text_view: jcall!(env, env.new_global_ref(&view))?,
             density,
             cache: Mutex::new(HashMap::new()),
+            switch_size: Mutex::new(None),
+            image_sizes: Mutex::new(HashMap::new()),
         })
     }
 
@@ -219,6 +229,54 @@ impl AndroidMeasure {
             measured_height as f32 / self.density,
         ))
     }
+
+    /// Measures a framework switch with wrap-content specs.
+    fn measure_switch(&self) -> JniResult<Size> {
+        self.vm.attach_current_thread(|env| {
+            let ids = jni_handles(env)?;
+            let view = ids.plain_switch_ctor.construct(
+                env,
+                &ids.plain_switch,
+                &[JValue::Object(self.context.as_obj())],
+            )?;
+            let width = measure_spec(env, 0, MEASURE_UNSPECIFIED)?;
+            let height = measure_spec(env, 0, MEASURE_UNSPECIFIED)?;
+            ids.measure
+                .call_void(env, &view, &[JValue::Int(width), JValue::Int(height)])?;
+            let width = ids.measured_width.call(env, &view, &[])?.i()?;
+            let height = ids.measured_height.call(env, &view, &[])?.i()?;
+            Ok(Size::new(
+                width as f32 / self.density,
+                height as f32 / self.density,
+            ))
+        })
+    }
+
+    /// Reads the header dimensions of a bundled asset.
+    fn measure_image(&self, path: &str) -> JniResult<Option<Size>> {
+        self.vm.attach_current_thread(|env| {
+            let ids = jni_handles(env)?;
+            let source = jcall!(env, env.new_string(path))?;
+            let packed = ids
+                .image_size
+                .call(
+                    env,
+                    &ids.krabik_images,
+                    &[
+                        JValue::Object(self.context.as_obj()),
+                        JValue::Object(source.as_ref()),
+                    ],
+                )?
+                .j()?;
+            if packed == 0 {
+                return Ok(None);
+            }
+            let packed = packed as u64;
+            let width = (packed >> 32) as u32 as f32 / self.density;
+            let height = (packed as u32) as f32 / self.density;
+            Ok(Some(Size::new(width, height)))
+        })
+    }
 }
 
 impl Measure for AndroidMeasure {
@@ -255,6 +313,42 @@ impl Measure for AndroidMeasure {
             .expect("measurement cache")
             .insert(key, measured);
         measured
+    }
+
+    fn switch_size(&self) -> Size {
+        if let Some(size) = *self.switch_size.lock().expect("switch size cache") {
+            return size;
+        }
+        let size = self.measure_switch().unwrap_or_else(|error| {
+            eprintln!("switch measurement failed: {error}");
+            Size::new(DEFAULT_SWITCH_WIDTH, DEFAULT_SWITCH_HEIGHT)
+        });
+        *self.switch_size.lock().expect("switch size cache") = Some(size);
+        size
+    }
+
+    fn image_size(&self, props: &ImageProps) -> Option<Size> {
+        let ImageSource::Asset(path) = &props.source else {
+            return None;
+        };
+        if let Some(cached) = self
+            .image_sizes
+            .lock()
+            .expect("image size cache")
+            .get(path)
+            .copied()
+        {
+            return cached;
+        }
+        let size = self.measure_image(path).unwrap_or_else(|error| {
+            eprintln!("image measurement failed: {error}");
+            None
+        });
+        self.image_sizes
+            .lock()
+            .expect("image size cache")
+            .insert(path.clone(), size);
+        size
     }
 }
 
@@ -836,14 +930,14 @@ impl AndroidState {
         host: &JObject<'_>,
         width_px: jint,
     ) -> JniResult<jint> {
-        let element = {
+        let (transition_ms, element) = {
             let Some(source) = self.runtime.row_source(list) else {
                 return Ok(0);
             };
             if index >= source.item_count {
                 return Ok(0);
             }
-            (source.rows)(index)
+            (source.row_transition_ms, (source.rows)(index))
         };
 
         let root = tree::row_root(list, index);
@@ -853,6 +947,7 @@ impl AndroidState {
                 .layout_subtree(&element, root, Size::new(width, 100_000.0));
 
         let previous = self.row_states.remove(&(list, holder));
+        let had_previous = previous.is_some();
         let (old_tree, old_layout, mut views) = if let Some(mut state) = previous {
             self.clear_row_actions(list, state.index);
             if state.index != index
@@ -879,8 +974,38 @@ impl AndroidState {
         let mut ops = render::diff(&old_tree, &tree);
         ops.extend(render::diff_layout(&old_tree, &tree, &old_layout, &layout));
 
+        // The overlay is captured before the new content is inserted, so it
+        // shows exactly what this holder displayed a moment ago.
+        let overlay = if transition_ms > 0 && had_previous && !ops.is_empty() {
+            let ids = jni_handles(env)?;
+            let overlay = ids
+                .snapshot_row
+                .call(env, &ids.krabik_rows, &[JValue::Object(host)])?
+                .l()?;
+            if overlay.is_null() {
+                None
+            } else {
+                Some(jcall!(env, env.new_global_ref(&overlay))?)
+            }
+        } else {
+            None
+        };
+
         for op in ops {
             self.apply_op(env, op, &mut views, host, false, None)?;
+        }
+
+        if let Some(overlay) = overlay {
+            let ids = jni_handles(env)?;
+            ids.fade_row.call_void(
+                env,
+                &ids.krabik_rows,
+                &[
+                    JValue::Object(host),
+                    JValue::Object(overlay.as_obj()),
+                    JValue::Int(transition_ms.min(i32::MAX as u32) as jint),
+                ],
+            )?;
         }
 
         self.record_row_actions(list, index, &tree);
@@ -1576,10 +1701,21 @@ fn apply_style(
     animate: bool,
 ) -> JniResult<()> {
     let ids = jni_handles(env)?;
-    let background = node.style.background;
-    let gradient = node.style.gradient;
+    // Native text and controls dim themselves; only the decoration the DSL
+    // paints is dimmed here.
+    let enabled = node.style.enabled.unwrap_or(true);
+    let background = node.style.background.map(|value| dim_color(value, enabled));
+    let gradient = node.style.gradient.map(|gradient| Gradient {
+        start: dim_color(gradient.start, enabled),
+        end: dim_color(gradient.end, enabled),
+        ..gradient
+    });
     let radii = node.style.corner_radii();
-    let border = node.style.border;
+    let border = node.style.border.map(|border| Border {
+        color: dim_color(border.color, enabled),
+        ..border
+    });
+    let elevation = if enabled { node.style.elevation } else { 0.0 };
     let ripple = matches!(node.kind, NodeKind::Button(_));
     let animation = animate
         .then_some(node.style.animation.as_ref())
@@ -1612,7 +1748,7 @@ fn apply_style(
             JValue::Bool(border.is_some()),
             JValue::Float(node.style.opacity.unwrap_or(1.0)),
             JValue::Bool(ripple),
-            JValue::Float(node.style.elevation),
+            JValue::Float(elevation),
             JValue::Int(animation.map_or(0, |animation| {
                 animation.duration_ms.min(i32::MAX as u32) as jint
             })),

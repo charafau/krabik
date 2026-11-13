@@ -88,12 +88,23 @@ final class ShowcaseUITests: XCTestCase {
 
         open("Image")
         XCTAssertTrue(app.images["Krabik app icon"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.images["Intrinsic asset icon"].waitForExistence(timeout: 5))
         backToCatalog()
 
         open("Recycled list")
         XCTAssertTrue(app.staticTexts["Row taps: 0"].waitForExistence(timeout: 5))
         tapButton("Tap Recycled row 1")
         XCTAssertTrue(app.staticTexts["Row taps: 1"].waitForExistence(timeout: 5))
+        tapButton("Shuffle rows")
+        XCTAssertTrue(
+            app.staticTexts["Recycled row 1 · updated"].waitForExistence(timeout: 5)
+        )
+        backToCatalog()
+
+        open("Styling")
+        let disabled = app.buttons["Disabled action"]
+        XCTAssertTrue(disabled.waitForExistence(timeout: 5))
+        XCTAssertFalse(disabled.isEnabled)
         backToCatalog()
     }
 

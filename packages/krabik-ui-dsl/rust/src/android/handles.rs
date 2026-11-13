@@ -37,14 +37,15 @@ use jni::{Env, jni_sig, jni_str};
 use super::{
     BOTTOM_NAV_CLASS, BUTTON_CLASS, CHECKBOX_CLASS, DATE_PICKER_CLASS, FRAME_LAYOUT_CLASS,
     FRAME_PARAMS_CLASS, IMAGE_VIEW_CLASS, KRABIK_IMAGES_CLASS, KRABIK_RECYCLERS_CLASS,
-    KRABIK_STYLE_CLASS, KRABIK_VIEWS_CLASS, LAYOUT_PARAMS_CLASS, LONG_CLASS, MEASURE_SPEC_CLASS,
-    PAGER_CLASS, PROGRESS_BAR_CLASS, RADIO_CLASS, RADIO_GROUP_CLASS, RUST_ROOT_VIEW_CLASS,
-    SEEK_BAR_CLASS, SWITCH_CLASS, TAB_BAR_CLASS, TEXT_INPUT_CLASS, TEXT_UTILS_CLASS,
-    TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
+    KRABIK_ROWS_CLASS, KRABIK_STYLE_CLASS, KRABIK_VIEWS_CLASS, LAYOUT_PARAMS_CLASS, LONG_CLASS,
+    MEASURE_SPEC_CLASS, PAGER_CLASS, PLAIN_SWITCH_CLASS, PROGRESS_BAR_CLASS, RADIO_CLASS,
+    RADIO_GROUP_CLASS, RUST_ROOT_VIEW_CLASS, SEEK_BAR_CLASS, SWITCH_CLASS, TAB_BAR_CLASS,
+    TEXT_INPUT_CLASS, TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
 };
 
 const VOID: JavaType = JavaType::Primitive(Primitive::Void);
 const INT: JavaType = JavaType::Primitive(Primitive::Int);
+const LONG: JavaType = JavaType::Primitive(Primitive::Long);
 const BOOLEAN: JavaType = JavaType::Primitive(Primitive::Boolean);
 const OBJECT: JavaType = JavaType::Object;
 
@@ -206,6 +207,7 @@ pub(super) struct Jni {
     pub(super) frame_layout: Global<JClass<'static>>,
     pub(super) text_input: Global<JClass<'static>>,
     pub(super) switch: Global<JClass<'static>>,
+    pub(super) plain_switch: Global<JClass<'static>>,
     pub(super) checkbox: Global<JClass<'static>>,
     pub(super) radio_button: Global<JClass<'static>>,
     pub(super) radio_group: Global<JClass<'static>>,
@@ -224,6 +226,7 @@ pub(super) struct Jni {
     pub(super) krabik_style: Global<JClass<'static>>,
     pub(super) krabik_views: Global<JClass<'static>>,
     pub(super) krabik_images: Global<JClass<'static>>,
+    pub(super) krabik_rows: Global<JClass<'static>>,
     pub(super) krabik_recyclers: Global<JClass<'static>>,
     /// Only keeps `RustRootView` loaded for the cached `applyFrame` ID.
     pub(super) _rust_root_view: Global<JClass<'static>>,
@@ -294,8 +297,11 @@ pub(super) struct Jni {
     pub(super) long_value_of: StaticMethod,
     pub(super) create_scroll: StaticMethod,
     pub(super) load_image: StaticMethod,
+    pub(super) image_size: StaticMethod,
     pub(super) create_recycler: StaticMethod,
     pub(super) update_recycler: StaticMethod,
+    pub(super) snapshot_row: StaticMethod,
+    pub(super) fade_row: StaticMethod,
     pub(super) create_progress: StaticMethod,
     pub(super) update_progress: StaticMethod,
     pub(super) update_spinner: StaticMethod,
@@ -312,6 +318,7 @@ pub(super) struct Jni {
     pub(super) frame_layout_ctor: Ctor,
     pub(super) text_input_ctor: Ctor,
     pub(super) switch_ctor: Ctor,
+    pub(super) plain_switch_ctor: Ctor,
     pub(super) checkbox_ctor: Ctor,
     pub(super) radio_ctor: Ctor,
     pub(super) radio_group_ctor: Ctor,
@@ -335,6 +342,7 @@ impl Jni {
         let frame_layout = class(env, FRAME_LAYOUT_CLASS)?;
         let text_input = class(env, TEXT_INPUT_CLASS)?;
         let switch = class(env, SWITCH_CLASS)?;
+        let plain_switch = class(env, PLAIN_SWITCH_CLASS)?;
         let checkbox = class(env, CHECKBOX_CLASS)?;
         let radio_button = class(env, RADIO_CLASS)?;
         let radio_group = class(env, RADIO_GROUP_CLASS)?;
@@ -353,6 +361,7 @@ impl Jni {
         let krabik_style = class(env, KRABIK_STYLE_CLASS)?;
         let krabik_views = class(env, KRABIK_VIEWS_CLASS)?;
         let krabik_images = class(env, KRABIK_IMAGES_CLASS)?;
+        let krabik_rows = class(env, KRABIK_ROWS_CLASS)?;
         let krabik_recyclers = class(env, KRABIK_RECYCLERS_CLASS)?;
         let rust_root_view = class(env, RUST_ROOT_VIEW_CLASS)?;
 
@@ -560,6 +569,27 @@ impl Jni {
                 "(Landroid/widget/ImageView;Ljava/lang/String;ZZ)V",
                 VOID
             ),
+            image_size: static_method!(
+                env,
+                &krabik_images,
+                "size",
+                "(Landroid/content/Context;Ljava/lang/String;)J",
+                LONG
+            ),
+            snapshot_row: static_method!(
+                env,
+                &krabik_rows,
+                "snapshot",
+                "(Landroid/view/ViewGroup;)Landroid/widget/ImageView;",
+                OBJECT
+            ),
+            fade_row: static_method!(
+                env,
+                &krabik_rows,
+                "fadeOut",
+                "(Landroid/view/ViewGroup;Landroid/view/View;I)V",
+                VOID
+            ),
             create_recycler: static_method!(
                 env,
                 &krabik_recyclers,
@@ -639,6 +669,7 @@ impl Jni {
                 &switch,
                 "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
             ),
+            plain_switch_ctor: ctor!(env, &plain_switch, "(Landroid/content/Context;)V"),
             checkbox_ctor: ctor!(
                 env,
                 &checkbox,
@@ -691,6 +722,7 @@ impl Jni {
             frame_layout,
             text_input,
             switch,
+            plain_switch,
             checkbox,
             radio_button,
             radio_group,
@@ -709,6 +741,7 @@ impl Jni {
             krabik_style,
             krabik_views,
             krabik_images,
+            krabik_rows,
             krabik_recyclers,
             _rust_root_view: rust_root_view,
         })
