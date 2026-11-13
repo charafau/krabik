@@ -50,6 +50,25 @@ abstract class KrabikActivity : FragmentActivity() {
             )
         }
         val navContainer = FrameLayout(this)
+        // The root and the navigation container overlap, so revealing the root
+        // during a pop does not resize the outgoing screen. The navigation
+        // container is added last and therefore draws above the root.
+        val content = FrameLayout(this).apply {
+            addView(
+                mainContainer,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            addView(
+                navContainer,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+        }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(
@@ -60,15 +79,7 @@ abstract class KrabikActivity : FragmentActivity() {
                 ),
             )
             addView(
-                mainContainer,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    0,
-                    1f,
-                ),
-            )
-            addView(
-                navContainer,
+                content,
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     0,
