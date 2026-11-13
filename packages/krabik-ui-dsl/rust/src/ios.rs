@@ -45,10 +45,14 @@ use objc2_ui_kit::{
 };
 
 use crate::animation::ease_curve;
-use crate::app::{App, Event};
+use std::convert::Infallible;
+
 use crate::geometry::{Constraints, Rect, Size};
+use crate::host::{Actions, Controller, Host, HostKind, NodeEvent, Platform, Session};
 use crate::layout::LayoutResult;
 use crate::measure::{DEFAULT_SWITCH_HEIGHT, DEFAULT_SWITCH_WIDTH, Measure};
+use crate::navigation::{Screen, ScreenTransition};
+use crate::presentation::Dialog;
 use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
@@ -675,24 +679,6 @@ struct ImageLoader {
     expected: HashMap<NodeId, String>,
 }
 
-/// The actions of one recycled row, keyed by the node ids it created.
-#[derive(Clone, Default)]
-struct RowAction {
-    click: Option<Cow<'static, str>>,
-    text: Option<Cow<'static, str>>,
-    submit: Option<Cow<'static, str>>,
-    focus: Option<Cow<'static, str>>,
-    toggle: Option<Cow<'static, str>>,
-    selected: Option<Cow<'static, str>>,
-    date: Option<Cow<'static, str>>,
-    date_range: Option<(crate::ui::DateValue, crate::ui::DateValue)>,
-    time_range: Option<(crate::ui::TimeValue, crate::ui::TimeValue)>,
-    value: Option<Cow<'static, str>>,
-    value_min: f32,
-    value_max: f32,
-    value_step: Option<f32>,
-}
-
 /// One recycled row currently bound to a collection-view cell.
 ///
 /// Cells are reused by UIKit, so the state is keyed by the cell's identity and
@@ -703,14 +689,6 @@ struct IosRowState {
     tree: UiNode,
     layout: LayoutResult,
     views: HashMap<NodeId, ViewHandle>,
-}
-
-/// What one native iOS host renders.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum IosHostKind {
-    Main,
-    Screen(String),
-    Modal,
 }
 
 /// The views and frames updated by one layout operation.
@@ -1190,7 +1168,7 @@ fn animate_style_change(
 struct IosState {
     handle: u64,
     host: u64,
-    kind: IosHostKind,
+    kind: HostKind,
     runtime: Runtime,
     /// A weak reference so the Rust state does not keep the Swift host view
     /// alive and prevent its `deinit` from destroying the state.
@@ -1198,7 +1176,7 @@ struct IosState {
     views: HashMap<NodeId, ViewHandle>,
     images: ImageLoader,
     /// Actions of the rows currently bound in recycled lists.
-    row_actions: HashMap<NodeId, RowAction>,
+    row_actions: HashMap<NodeId, Actions>,
     /// The node ids a (list, row) binding created, for clearing on rebind.
     row_action_ids: HashMap<(NodeId, usize), Vec<NodeId>>,
     /// The rows currently bound to collection-view cells, by cell identity.
@@ -1219,7 +1197,7 @@ impl IosState {
     fn new(
         handle: u64,
         host: u64,
-        kind: IosHostKind,
+        kind: HostKind,
         root: &Retained<UIView>,
         mtm: MainThreadMarker,
     ) -> Self {
@@ -1416,7 +1394,7 @@ impl IosState {
                                 view.removeFromSuperview();
                                 schedule(move || {
                                     with_session(handle, |session| {
-                                        if let Some(state) = session.hosts.get_mut(&host)
+                                        if let Some(state) = session.host_mut(host)
                                             && state.pending_exits.get(&id).is_some_and(|view| {
                                                 Retained::as_ptr(view) as usize == token
                                             })
@@ -2081,68 +2059,8 @@ impl IosState {
     fn record_row_actions(&mut self, list: NodeId, index: usize, tree: &UiNode) {
         let mut ids = Vec::new();
         for node in tree::preorder(tree) {
-            let mut action = RowAction::default();
-            let mut any = false;
-            match &node.kind {
-                NodeKind::Widget(Widget::Button(props)) if !props.action.is_empty() => {
-                    action.click = Some(props.action.clone());
-                    any = true;
-                }
-                NodeKind::Widget(Widget::Switch(props)) if !props.action.is_empty() => {
-                    action.toggle = Some(props.action.clone());
-                    any = true;
-                }
-                NodeKind::Widget(Widget::Checkbox(props)) if !props.action.is_empty() => {
-                    action.toggle = Some(props.action.clone());
-                    any = true;
-                }
-                NodeKind::Widget(Widget::RadioButton(props)) if !props.action.is_empty() => {
-                    action.toggle = Some(props.action.clone());
-                    any = true;
-                }
-                NodeKind::Widget(Widget::RadioGroup(props)) if !props.action.is_empty() => {
-                    action.selected = Some(props.action.clone());
-                    any = true;
-                }
-                NodeKind::Widget(Widget::TabBar(props)) if !props.action.is_empty() => {
-                    action.selected = Some(props.action.clone());
-                    any = true;
-                }
-                NodeKind::Pager(props) if !props.action.is_empty() => {
-                    action.selected = Some(props.action.clone());
-                    any = true;
-                }
-                NodeKind::Widget(Widget::DatePicker(props)) if !props.action.is_empty() => {
-                    action.date = Some(props.action.clone());
-                    action.date_range = props.date_range;
-                    action.time_range = props.time_range;
-                    any = true;
-                }
-                NodeKind::Widget(Widget::Slider(props)) if !props.action.is_empty() => {
-                    action.value = Some(props.action.clone());
-                    action.value_min = props.min;
-                    action.value_max = props.max;
-                    action.value_step = props.step;
-                    any = true;
-                }
-                NodeKind::Widget(Widget::TextField(props)) => {
-                    if !props.action.is_empty() {
-                        action.text = Some(props.action.clone());
-                        any = true;
-                    }
-                    if !props.submit_action.is_empty() {
-                        action.submit = Some(props.submit_action.clone());
-                        any = true;
-                    }
-                    if !props.focus_action.is_empty() {
-                        action.focus = Some(props.focus_action.clone());
-                        any = true;
-                    }
-                }
-                _ => {}
-            }
-            if any {
-                self.row_actions.insert(node.id, action);
+            if let Some(actions) = Actions::of(node) {
+                self.row_actions.insert(node.id, actions);
                 ids.push(node.id);
             }
         }
@@ -3059,7 +2977,7 @@ fn with_state<T>(handle: u64, host: u64, body: impl FnOnce(&mut IosState) -> T) 
     let mut states = states().lock().expect("ios states");
     states
         .get_mut(&handle)
-        .and_then(|session| session.hosts.get_mut(&host))
+        .and_then(|session| session.host_mut(host))
         .map(body)
 }
 
@@ -3081,252 +2999,62 @@ fn guard(label: &str, body: impl FnOnce()) {
     }
 }
 
-fn dispatch_click(handle: u64, host: u64, id: NodeId) {
-    guard("click", || {
+/// Hands an event on one widget to the session.
+fn dispatch(handle: u64, host: u64, id: NodeId, event: NodeEvent) {
+    // SAFETY: events are delivered on the main queue.
+    let mut mtm = unsafe { MainThreadMarker::new_unchecked() };
+    guard("event", || {
         with_session(handle, |session| {
-            let action = session.hosts.get(&host).and_then(|state| {
-                state
-                    .runtime
-                    .click(id)
-                    .or_else(|| state.row_actions.get(&id).and_then(|row| row.click.clone()))
-            });
-            if let Some(action) = action
-                && session.app.handle(Event::Click { action: &action })
-            {
-                session.render_all();
-            }
+            infallible(session.node_event(&mut mtm, host, id, event));
         });
     });
+}
+
+fn dispatch_click(handle: u64, host: u64, id: NodeId) {
+    dispatch(handle, host, id, NodeEvent::Click);
 }
 
 fn dispatch_text(handle: u64, host: u64, id: NodeId, value: &str) {
-    guard("text", || {
-        with_session(handle, |session| {
-            let action = session.hosts.get(&host).and_then(|state| {
-                state
-                    .runtime
-                    .text_field_action(id)
-                    .or_else(|| state.row_actions.get(&id).and_then(|row| row.text.clone()))
-            });
-            if let Some(action) = action
-                && session.app.handle(Event::TextChanged {
-                    action: &action,
-                    value,
-                })
-            {
-                session.render_all();
-            }
-        });
-    });
+    dispatch(handle, host, id, NodeEvent::Text(value.to_owned()));
 }
 
 fn dispatch_submitted(handle: u64, host: u64, id: NodeId) {
-    guard("submitted", || {
-        with_session(handle, |session| {
-            let action = session.hosts.get(&host).and_then(|state| {
-                state.runtime.text_field_submit_action(id).or_else(|| {
-                    state
-                        .row_actions
-                        .get(&id)
-                        .and_then(|row| row.submit.clone())
-                })
-            });
-            if let Some(action) = action
-                && session.app.handle(Event::Submitted { action: &action })
-            {
-                session.render_all();
-            }
-        });
-    });
+    dispatch(handle, host, id, NodeEvent::Submit);
 }
 
 fn dispatch_focus(handle: u64, host: u64, id: NodeId, focused: bool) {
-    guard("focus", || {
-        with_session(handle, |session| {
-            let Some(state) = session.hosts.get_mut(&host) else {
-                return;
-            };
-            let row = state.row_nodes.get(&id).copied();
-            let focus_changed = if focused {
-                match row {
-                    Some((list, index)) => state.runtime.set_row_focus(list, index, id, true),
-                    None => state.runtime.set_focus(id, true),
-                }
-            } else if let Some((list, index)) = row {
-                if state.field_attached(id) {
-                    state.runtime.set_row_focus(list, index, id, false)
-                } else {
-                    // The cell left the hierarchy; keep the logical focus so
-                    // it can be restored when the row comes back.
-                    state.runtime.park_row_focus(id);
-                    false
-                }
-            } else if state
-                .runtime
-                .row_focus()
-                .is_some_and(|focus| focus.field == id)
-            {
-                state.runtime.park_row_focus(id);
-                false
-            } else {
-                state.runtime.set_focus(id, false)
-            };
-            let action = state
-                .runtime
-                .text_field_focus_action(id)
-                .or_else(|| state.row_actions.get(&id).and_then(|row| row.focus.clone()));
-            let handled = action.is_some_and(|action| {
-                session.app.handle(Event::FocusChanged {
-                    action: &action,
-                    focused,
-                })
-            });
-            if focus_changed || handled {
-                session.render_all();
-            }
-        });
-    });
+    // A field that lost focus because its cell left the hierarchy keeps its
+    // logical focus, so it can be restored when the row comes back.
+    let attached = with_state(handle, host, |state| state.field_attached(id)).unwrap_or(true);
+    dispatch(handle, host, id, NodeEvent::Focus { focused, attached });
 }
 
 fn dispatch_checked(handle: u64, host: u64, id: NodeId, checked: bool) {
-    guard("checked", || {
-        with_session(handle, |session| {
-            let action = session.hosts.get(&host).and_then(|state| {
-                state.runtime.toggle_action(id).or_else(|| {
-                    state
-                        .row_actions
-                        .get(&id)
-                        .and_then(|row| row.toggle.clone())
-                })
-            });
-            if let Some(action) = action
-                && session.app.handle(Event::Toggled {
-                    action: &action,
-                    checked,
-                })
-            {
-                session.render_all();
-            }
-        });
-    });
+    dispatch(handle, host, id, NodeEvent::Toggle(checked));
 }
 
 fn dispatch_value(handle: u64, host: u64, id: NodeId, value: f64) {
-    guard("slider", || {
-        with_session(handle, |session| {
-            let (action, config) = session
-                .hosts
-                .get(&host)
-                .map(|state| {
-                    let action = state
-                        .runtime
-                        .slider_action(id)
-                        .or_else(|| state.row_actions.get(&id).and_then(|row| row.value.clone()));
-                    let config = state.runtime.slider_config(id).or_else(|| {
-                        state
-                            .row_actions
-                            .get(&id)
-                            .map(|row| (row.value_min, row.value_max, row.value_step))
-                    });
-                    (action, config)
-                })
-                .unwrap_or((None, None));
-            let value = match config {
-                Some((min, max, step)) => snap_slider_value(value as f32, min, max, step),
-                None => value as f32,
-            };
-            if let Some(action) = action
-                && session.app.handle(Event::ValueChanged {
-                    action: &action,
-                    value,
-                })
-            {
-                session.render_all();
-            }
-        });
-    });
+    dispatch(handle, host, id, NodeEvent::Slider(value as f32));
 }
 
 fn dispatch_picker(handle: u64, host: u64, id: NodeId, value: DatePickerValue) {
-    guard("picker", || {
-        with_session(handle, |session| {
-            let config = session.hosts.get(&host).and_then(|state| {
-                state.runtime.date_picker_config(id).or_else(|| {
-                    state.row_actions.get(&id).and_then(|row| {
-                        row.date
-                            .clone()
-                            .map(|action| (action, row.date_range, row.time_range))
-                    })
-                })
-            });
-            let Some((action, date_range, time_range)) = config else {
-                return;
-            };
-            let value = value.clamped(date_range, time_range);
-            let handled = match value {
-                DatePickerValue::Date(date) => session.app.handle(Event::DateChanged {
-                    action: &action,
-                    date,
-                }),
-                DatePickerValue::Time(time) => session.app.handle(Event::TimeChanged {
-                    action: &action,
-                    time,
-                }),
-                DatePickerValue::DateTime { date, time } => {
-                    session.app.handle(Event::DateTimeChanged {
-                        action: &action,
-                        date,
-                        time,
-                    })
-                }
-            };
-            if handled {
-                session.render_all();
-            }
-        });
-    });
+    dispatch(handle, host, id, NodeEvent::Picker(value));
 }
 
 fn dispatch_selected(handle: u64, host: u64, id: NodeId, index: usize) {
-    guard("selection", || {
-        with_session(handle, |session| {
-            let action = session.hosts.get(&host).and_then(|state| {
-                state
-                    .runtime
-                    .tab_bar_action(id)
-                    .or_else(|| state.runtime.pager_action(id))
-                    .or_else(|| state.runtime.radio_group_action(id))
-                    .or_else(|| {
-                        state
-                            .row_actions
-                            .get(&id)
-                            .and_then(|row| row.selected.clone())
-                    })
-            });
-            if let Some(action) = action
-                && session.app.handle(Event::Selected {
-                    action: &action,
-                    index,
-                })
-            {
-                session.render_all();
-            }
-        });
-    });
+    dispatch(handle, host, id, NodeEvent::Select(index));
 }
 
 fn dispatch_scroll(handle: u64, host: u64, id: NodeId, offset: f64) {
-    guard("scroll", || {
-        with_session(handle, |session| {
-            let changed = session
-                .hosts
-                .get_mut(&host)
-                .is_some_and(|state| state.runtime.scroll(id, offset as f32));
-            if changed {
-                session.render_all();
-            }
-        });
-    });
+    dispatch(handle, host, id, NodeEvent::Scroll(offset as f32));
+}
+
+/// Unwraps a result that cannot fail.
+fn infallible<T>(result: Result<T, Infallible>) -> T {
+    match result {
+        Ok(value) => value,
+        Err(never) => match never {},
+    }
 }
 
 /// Starts an `NSURLSession` download for a remote image.
@@ -3404,97 +3132,79 @@ fn finish_download(
     });
 }
 
-/// One application instance shared by every native host in a scene.
-struct IosSession {
-    handle: u64,
-    app: Box<dyn App>,
-    hosts: HashMap<u64, IosState>,
-    pending: HashMap<u64, IosHostKind>,
-    next_host: u64,
-    controller: Option<Retained<NSObject>>,
-    /// The navigation stack last mirrored to the native controller.
-    navigation: Vec<crate::navigation::Screen>,
-    /// The alert the native controller is showing.
-    dialog: Option<crate::presentation::Dialog>,
+/// The iOS pieces of a [`Session`].
+struct Ios;
+
+impl Platform for Ios {
+    type Cx<'a> = MainThreadMarker;
+    type Error = Infallible;
+    type Host = IosState;
+    type Controller = IosController;
 }
+
+type IosSession = Session<Ios>;
 
 // SAFETY: every host and the controller are only touched on the main thread,
 // serialized by the global session mutex.
-unsafe impl Send for IosSession {}
+unsafe impl Send for Session<Ios> {}
 
-impl IosSession {
-    fn new(handle: u64, root: &Retained<UIView>, mtm: MainThreadMarker) -> Self {
-        let main = IosState::new(handle, 0, IosHostKind::Main, root, mtm);
-        let mut hosts = HashMap::new();
-        hosts.insert(0, main);
-        Self {
-            handle,
-            app: crate::app::create_app(),
-            hosts,
-            pending: HashMap::new(),
-            next_host: 1,
-            controller: None,
-            navigation: Vec::new(),
-            dialog: None,
-        }
+impl Host<Ios> for IosState {
+    fn kind(&self) -> &HostKind {
+        &self.kind
     }
 
-    fn render_all(&mut self) {
-        let has_navigation = self.app.navigation().is_some();
-        let mut elements = Vec::new();
-        for (id, host) in &self.hosts {
-            let element = match &host.kind {
-                IosHostKind::Main if has_navigation => None,
-                IosHostKind::Main => Some(self.app.view()),
-                IosHostKind::Screen(key) => self.app.screen(key),
-                IosHostKind::Modal => self.app.sheet().map(|sheet| sheet.into_content()),
-            };
-            if let Some(element) = element {
-                elements.push((*id, element));
-            }
-        }
-        for (id, element) in elements {
-            if let Some(host) = self.hosts.get_mut(&id) {
-                host.render(&element);
-            }
-        }
-        self.sync();
+    fn runtime(&self) -> &Runtime {
+        &self.runtime
     }
 
-    /// Reconciles the Rust state with the native iOS controller.
-    fn sync(&mut self) {
-        if self.controller.is_none() {
-            return;
-        }
-        let navigation = self
-            .app
-            .navigation()
-            .map(|nav| nav.screens)
-            .unwrap_or_default();
-        if navigation != self.navigation {
-            self.sync_navigation(&navigation);
-            self.sync_chrome(navigation.last());
-            self.navigation = navigation;
-        }
-        let dialog = self.app.dialog();
-        if dialog != self.dialog {
-            self.sync_dialog(dialog.as_ref());
-            self.dialog = dialog;
-        }
-        let sheet = self.app.sheet().is_some();
-        if sheet != self.has_sheet() {
-            self.sync_sheet(sheet);
-        }
+    fn runtime_mut(&mut self) -> &mut Runtime {
+        &mut self.runtime
     }
 
-    /// Mirrors the top screen's toolbar and bottom navigation.
-    ///
-    /// Sent on every navigation change so the native chrome never keeps a
-    /// previous screen's configuration.
-    fn sync_chrome(&mut self, screen: Option<&crate::navigation::Screen>) {
-        let Some(controller) = self.controller.as_ref() else {
-            return;
-        };
+    fn row_actions(&self, id: NodeId) -> Option<&Actions> {
+        self.row_actions.get(&id)
+    }
+
+    fn row_of(&self, id: NodeId) -> Option<(NodeId, usize)> {
+        self.row_nodes.get(&id).copied()
+    }
+
+    fn render(&mut self, _mtm: &mut MainThreadMarker, element: &Element) -> Result<(), Infallible> {
+        IosState::render(self, element);
+        Ok(())
+    }
+}
+
+/// The Swift `KrabikHostController`, which owns the navigation stack and
+/// bar, the tab bar, the system alert and the sheet.
+struct IosController(Retained<NSObject>);
+
+impl Controller<Ios> for IosController {
+    fn push(&self, _: &mut MainThreadMarker, host: u64, screen: &Screen) -> Result<(), Infallible> {
+        controller_push(&self.0, host, &screen.title, screen.transition.code());
+        Ok(())
+    }
+
+    fn pop(
+        &self,
+        _: &mut MainThreadMarker,
+        count: usize,
+        transition: ScreenTransition,
+    ) -> Result<(), Infallible> {
+        controller_pop(&self.0, count, transition.code());
+        Ok(())
+    }
+
+    fn set_root_visible(&self, _: &mut MainThreadMarker, visible: bool) -> Result<(), Infallible> {
+        controller_set_root_visible(&self.0, visible);
+        Ok(())
+    }
+
+    fn set_chrome(
+        &self,
+        _: &mut MainThreadMarker,
+        screen: Option<&Screen>,
+    ) -> Result<(), Infallible> {
         let toolbar = screen.and_then(|screen| screen.toolbar.as_ref());
         let title = screen.map_or("", |screen| screen.title.as_str());
         let subtitle = toolbar.and_then(|t| t.subtitle.as_deref()).unwrap_or("");
@@ -3504,114 +3214,32 @@ impl IosSession {
         // A screen shows the navigation bar unless it explicitly hides it.
         let hidden = screen.is_none() || toolbar.is_some_and(|toolbar| toolbar.hidden);
         let actions = toolbar.map_or(&[][..], |toolbar| toolbar.actions.as_slice());
-        controller_set_toolbar(controller, title, subtitle, back_title, hidden, actions);
+        controller_set_toolbar(&self.0, title, subtitle, back_title, hidden, actions);
         controller_set_bottom_navigation(
-            controller,
+            &self.0,
             screen.and_then(|screen| screen.bottom_navigation.as_ref()),
         );
+        Ok(())
     }
 
-    fn sync_navigation(&mut self, screens: &[crate::navigation::Screen]) {
-        let Some(controller) = self.controller.as_ref() else {
-            return;
-        };
-        let common = self
-            .navigation
-            .iter()
-            .zip(screens.iter())
-            .take_while(|(old, new)| old.key == new.key)
-            .count();
-
-        // Leaving several screens at once is one native pop, animated with
-        // the transition of the screen the user is looking at.
-        let popped = &self.navigation[common..];
-        if let Some(top) = popped.last() {
-            controller_pop(controller, popped.len(), top.transition.code());
-            let hosts: Vec<u64> = popped
-                .iter()
-                .filter_map(|screen| self.screen_host(&screen.key))
-                .collect();
-            for host in hosts {
-                self.hosts.remove(&host);
-                self.pending.remove(&host);
-            }
-        }
-        for screen in screens.iter().skip(common) {
-            let host = self.next_host;
-            self.next_host += 1;
-            self.pending
-                .insert(host, IosHostKind::Screen(screen.key.clone()));
-            controller_push(controller, host, &screen.title, screen.transition.code());
-        }
-
-        controller_set_root_visible(controller, screens.is_empty());
+    fn show_dialog(&self, _: &mut MainThreadMarker, dialog: &Dialog) -> Result<(), Infallible> {
+        controller_show_dialog(&self.0, dialog);
+        Ok(())
     }
 
-    /// Shows, replaces or closes the system alert.
-    fn sync_dialog(&mut self, dialog: Option<&crate::presentation::Dialog>) {
-        let Some(controller) = self.controller.as_ref() else {
-            return;
-        };
-        if self.dialog.is_some() {
-            controller_dismiss_dialog(controller);
-        }
-        if let Some(dialog) = dialog {
-            controller_show_dialog(controller, dialog);
-        }
+    fn dismiss_dialog(&self, _: &mut MainThreadMarker) -> Result<(), Infallible> {
+        controller_dismiss_dialog(&self.0);
+        Ok(())
     }
 
-    /// Presents or dismisses the native bottom sheet.
-    fn sync_sheet(&mut self, show: bool) {
-        let Some(controller) = self.controller.as_ref() else {
-            return;
-        };
-        if show {
-            let host = self.next_host;
-            self.next_host += 1;
-            self.pending.insert(host, IosHostKind::Modal);
-            controller_present_sheet(controller, host);
-        } else {
-            controller_dismiss_sheet(controller);
-            self.forget_sheet();
-        }
+    fn present_sheet(&self, _: &mut MainThreadMarker, host: u64) -> Result<(), Infallible> {
+        controller_present_sheet(&self.0, host);
+        Ok(())
     }
 
-    /// Whether a sheet is presented or about to be.
-    fn has_sheet(&self) -> bool {
-        self.hosts
-            .values()
-            .any(|host| matches!(host.kind, IosHostKind::Modal))
-            || self
-                .pending
-                .values()
-                .any(|kind| matches!(kind, IosHostKind::Modal))
-    }
-
-    /// Drops the sheet's host after the sheet closed.
-    fn forget_sheet(&mut self) {
-        self.hosts
-            .retain(|_, host| !matches!(host.kind, IosHostKind::Modal));
-        self.pending
-            .retain(|_, kind| !matches!(kind, IosHostKind::Modal));
-    }
-
-    fn attach_host(&mut self, host: u64, root: &Retained<UIView>, mtm: MainThreadMarker) {
-        let kind = if let Some(existing) = self.hosts.get(&host) {
-            existing.kind.clone()
-        } else if let Some(kind) = self.pending.remove(&host) {
-            kind
-        } else {
-            return;
-        };
-        let state = IosState::new(self.handle, host, kind, root, mtm);
-        self.hosts.insert(host, state);
-    }
-
-    fn screen_host(&self, key: &str) -> Option<u64> {
-        self.hosts.iter().find_map(|(id, host)| match &host.kind {
-            IosHostKind::Screen(screen) if screen == key => Some(*id),
-            _ => None,
-        })
+    fn dismiss_sheet(&self, _: &mut MainThreadMarker) -> Result<(), Infallible> {
+        controller_dismiss_sheet(&self.0);
+        Ok(())
     }
 }
 
@@ -3768,13 +3396,11 @@ pub unsafe extern "C" fn krabik_ios_create(root: *mut c_void, width: f64, height
     };
 
     let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
-    let mut session = IosSession::new(handle, &root, mtm);
-    guard("create", || {
-        if let Some(main) = session.hosts.get_mut(&0) {
-            main.viewport = Size::new(width.max(0.0) as f32, height.max(0.0) as f32);
-        }
-        session.render_all();
-    });
+    let mut main = IosState::new(handle, 0, HostKind::Main, &root, mtm);
+    main.viewport = Size::new(width.max(0.0) as f32, height.max(0.0) as f32);
+    let mut session = IosSession::new(crate::app::create_app(), main);
+    let mut cx = mtm;
+    guard("create", || infallible(session.render_all(&mut cx)));
     states().lock().expect("ios states").insert(handle, session);
     handle
 }
@@ -3786,15 +3412,15 @@ pub unsafe extern "C" fn krabik_ios_create(root: *mut c_void, width: f64, height
 /// The call must happen on the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_render(handle: u64, host: u64, width: f64, height: f64) {
-    if MainThreadMarker::new().is_none() {
+    let Some(mut mtm) = MainThreadMarker::new() else {
         return;
-    }
+    };
     guard("render", || {
         with_session(handle, |session| {
-            if let Some(state) = session.hosts.get_mut(&host) {
+            if let Some(state) = session.host_mut(host) {
                 state.viewport = Size::new(width.max(0.0) as f32, height.max(0.0) as f32);
             }
-            session.render_all();
+            infallible(session.render_all(&mut mtm));
         });
     });
 }
@@ -3806,10 +3432,10 @@ pub unsafe extern "C" fn krabik_ios_render(handle: u64, host: u64, width: f64, h
 /// The call must happen on the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_destroy(handle: u64) {
-    let Some(session) = states().lock().expect("ios states").remove(&handle) else {
+    let Some(mut session) = states().lock().expect("ios states").remove(&handle) else {
         return;
     };
-    for host in session.hosts.values() {
+    for host in session.hosts_mut() {
         for view in host.views.values() {
             view.view.removeFromSuperview();
         }
@@ -3823,7 +3449,7 @@ pub unsafe extern "C" fn krabik_ios_destroy(handle: u64) {
 /// `root` must be a live `UIView` and the call must happen on the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_attach_host(handle: u64, host: u64, root: *mut c_void) {
-    let Some(mtm) = MainThreadMarker::new() else {
+    let Some(mut mtm) = MainThreadMarker::new() else {
         return;
     };
     // SAFETY: the caller guarantees a live view for the duration of the call.
@@ -3832,8 +3458,10 @@ pub unsafe extern "C" fn krabik_ios_attach_host(handle: u64, host: u64, root: *m
     };
     guard("attach host", || {
         with_session(handle, |session| {
-            session.attach_host(host, &root, mtm);
-            session.render_all();
+            infallible(session.attach_host(host, |kind| {
+                Ok(IosState::new(handle, host, kind, &root, mtm))
+            }));
+            infallible(session.render_all(&mut mtm));
         });
     });
 }
@@ -3850,8 +3478,7 @@ pub unsafe extern "C" fn krabik_ios_destroy_host(handle: u64, host: u64) {
     }
     guard("destroy host", || {
         with_session(handle, |session| {
-            session.hosts.remove(&host);
-            session.pending.remove(&host);
+            session.remove_host(host);
         });
     });
 }
@@ -3864,18 +3491,17 @@ pub unsafe extern "C" fn krabik_ios_destroy_host(handle: u64, host: u64) {
 /// the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_set_controller(handle: u64, controller: *mut c_void) {
-    let Some(mtm) = MainThreadMarker::new() else {
+    let Some(mut mtm) = MainThreadMarker::new() else {
         return;
     };
-    let _ = mtm;
     // SAFETY: the caller guarantees a live Objective-C object.
     let Some(controller) = (unsafe { Retained::retain(controller.cast::<NSObject>()) }) else {
         return;
     };
     guard("controller", || {
         with_session(handle, |session| {
-            session.controller = Some(controller);
-            session.render_all();
+            session.set_controller(IosController(controller));
+            infallible(session.render_all(&mut mtm));
         });
     });
 }
@@ -3890,18 +3516,12 @@ pub unsafe extern "C" fn krabik_ios_set_controller(handle: u64, controller: *mut
 /// The call must happen on the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_on_modal_dismiss(handle: u64) {
-    if MainThreadMarker::new().is_none() {
+    let Some(mut mtm) = MainThreadMarker::new() else {
         return;
-    }
+    };
     guard("sheet dismiss", || {
         with_session(handle, |session| {
-            session.forget_sheet();
-            if let Some(sheet) = session.app.sheet() {
-                session.app.handle(Event::Click {
-                    action: &sheet.dismiss_action,
-                });
-            }
-            session.render_all();
+            infallible(session.sheet_dismissed(&mut mtm))
         });
     });
 }
@@ -3916,7 +3536,10 @@ pub unsafe extern "C" fn krabik_ios_on_modal_dismiss(handle: u64) {
 /// `action` must point to a valid NUL-terminated C string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_on_dialog_action(handle: u64, action: *const c_char) {
-    if action.is_null() || MainThreadMarker::new().is_none() {
+    let Some(mut mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    if action.is_null() {
         return;
     }
     // SAFETY: the caller guarantees a valid NUL-terminated string.
@@ -3925,11 +3548,7 @@ pub unsafe extern "C" fn krabik_ios_on_dialog_action(handle: u64, action: *const
         .into_owned();
     guard("dialog action", || {
         with_session(handle, |session| {
-            session.dialog = None;
-            if !action.is_empty() {
-                session.app.handle(Event::Click { action: &action });
-            }
-            session.render_all();
+            infallible(session.dialog_closed(&mut mtm, &action));
         });
     });
 }
@@ -3941,25 +3560,12 @@ pub unsafe extern "C" fn krabik_ios_on_dialog_action(handle: u64, action: *const
 /// The call must happen on the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_on_bottom_navigation_selected(handle: u64, index: u64) {
-    if MainThreadMarker::new().is_none() {
+    let Some(mut mtm) = MainThreadMarker::new() else {
         return;
-    }
+    };
     guard("bottom navigation", || {
         with_session(handle, |session| {
-            let action = session
-                .navigation
-                .last()
-                .and_then(|screen| screen.bottom_navigation.as_ref())
-                .map(|bar| bar.action.clone())
-                .filter(|action| !action.is_empty());
-            if let Some(action) = action
-                && session.app.handle(Event::Selected {
-                    action: &action,
-                    index: index as usize,
-                })
-            {
-                session.render_all();
-            }
+            infallible(session.bottom_navigation_selected(&mut mtm, index as usize));
         });
     });
 }
@@ -3978,8 +3584,7 @@ pub unsafe extern "C" fn krabik_ios_content_height(handle: u64, host: u64) -> f6
     }
     with_session(handle, |session| {
         session
-            .hosts
-            .get(&host)
+            .host(host)
             .map_or(0.0, |state| f64::from(state.runtime.content_height()))
     })
     .unwrap_or(0.0)
@@ -3992,7 +3597,10 @@ pub unsafe extern "C" fn krabik_ios_content_height(handle: u64, host: u64) -> f6
 /// `action` must point to a valid NUL-terminated C string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_on_toolbar_action(handle: u64, action: *const c_char) {
-    if action.is_null() || MainThreadMarker::new().is_none() {
+    let Some(mut mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    if action.is_null() {
         return;
     }
     // SAFETY: the caller guarantees a valid NUL-terminated string.
@@ -4001,9 +3609,7 @@ pub unsafe extern "C" fn krabik_ios_on_toolbar_action(handle: u64, action: *cons
         .into_owned();
     guard("toolbar action", || {
         with_session(handle, |session| {
-            if session.app.handle(Event::Click { action: &action }) {
-                session.render_all();
-            }
+            infallible(session.toolbar_action(&mut mtm, &action));
         });
     });
 }
@@ -4015,15 +3621,13 @@ pub unsafe extern "C" fn krabik_ios_on_toolbar_action(handle: u64, action: *cons
 /// The call must happen on the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_on_back(handle: u64) -> bool {
-    if MainThreadMarker::new().is_none() {
+    let Some(mut mtm) = MainThreadMarker::new() else {
         return false;
-    }
-    with_session(handle, |session| {
-        let handled = session.app.handle(Event::Back);
-        if handled {
-            session.render_all();
-        }
-        handled
-    })
-    .unwrap_or(false)
+    };
+    let mut handled = false;
+    guard("back", || {
+        handled =
+            with_session(handle, |session| infallible(session.back(&mut mtm))).unwrap_or(false);
+    });
+    handled
 }

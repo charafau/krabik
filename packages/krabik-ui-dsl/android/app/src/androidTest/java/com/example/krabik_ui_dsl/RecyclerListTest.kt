@@ -114,6 +114,7 @@ class RecyclerListTest {
             // This demo is the last entry in the gallery; a swipe is more
             // reliable than `scrollTo` for a view at the very bottom edge.
             onView(isRoot()).perform(swipeUp())
+            Thread.sleep(800)
             onView(withText("List (recycled, variable)")).perform(click())
             onView(withText("Taps: 0")).check(matches(isDisplayed()))
 
@@ -136,6 +137,7 @@ class RecyclerListTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(isRoot()).perform(swipeUp())
             onView(isRoot()).perform(swipeUp())
+            Thread.sleep(800)
             onView(withText("List (recycled, form)")).perform(click())
 
             onView(withHint("Note 1")).perform(click())
