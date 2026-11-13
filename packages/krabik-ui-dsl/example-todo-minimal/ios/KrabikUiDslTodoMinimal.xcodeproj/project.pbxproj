@@ -7,11 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0AF0320EE849EA4B5FDCBB95 /* KrabikHostController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4557FEA8A5216E80F4A08EB7 /* KrabikHostController.swift */; };
-		0E90DAF9C57CD8B5C86547B1 /* RustRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444004253EA0BF4FBF44EF9B /* RustRootView.swift */; };
 		4B9E654A478DBCA4698C46F5 /* KrabikUiDslTodoMinimalApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63C7D13156EB4DB0A208E270 /* KrabikUiDslTodoMinimalApp.swift */; };
-		B24FA8D600866687D17572CF /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11A97929DE2CE71019280A1 /* ContentView.swift */; };
+		6281BE97E970244BB623FCE0 /* KrabikHostController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F4BB669954AC8ED42D8320E /* KrabikHostController.swift */; };
+		67C73D7C181CF9CDCC1E0513 /* RustRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C6C926E5F066A356334E54B /* RustRootView.swift */; };
 		D59D74C400B6C473B7E9C72B /* MinimalTodoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4427D965CC1AE6F0BCA07BD /* MinimalTodoUITests.swift */; };
+		FEB0EE188C6A0BEDAC3C559C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07405E7A8DF0C7DA5F24E33A /* ContentView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,13 +25,14 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		07405E7A8DF0C7DA5F24E33A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		08698D11AB6F203028FE9F3D /* KrabikUiDslTodoMinimal.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KrabikUiDslTodoMinimal.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		444004253EA0BF4FBF44EF9B /* RustRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustRootView.swift; sourceTree = "<group>"; };
-		4557FEA8A5216E80F4A08EB7 /* KrabikHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikHostController.swift; sourceTree = "<group>"; };
+		330969BAF139E277712927D0 /* Bridging.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Bridging.h; sourceTree = "<group>"; };
+		3C6C926E5F066A356334E54B /* RustRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustRootView.swift; sourceTree = "<group>"; };
+		4F4BB669954AC8ED42D8320E /* KrabikHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikHostController.swift; sourceTree = "<group>"; };
 		63C7D13156EB4DB0A208E270 /* KrabikUiDslTodoMinimalApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikUiDslTodoMinimalApp.swift; sourceTree = "<group>"; };
+		753A52580F20655A16BCB052 /* KrabikIOS.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = KrabikIOS.h; sourceTree = "<group>"; };
 		A2F617D0CF9089D59689B7FA /* KrabikUiDslTodoMinimalUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = KrabikUiDslTodoMinimalUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		C2AFF1E57A323D1ED50FB776 /* KrabikIOS.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = KrabikIOS.h; sourceTree = "<group>"; };
-		F11A97929DE2CE71019280A1 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		F4427D965CC1AE6F0BCA07BD /* MinimalTodoUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinimalTodoUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -45,6 +46,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		32334FA857B2E216B1F0996E /* shared */ = {
+			isa = PBXGroup;
+			children = (
+				7F7BC3ABBE6ABFAB9163D29D /* ios */,
+			);
+			path = shared;
+			sourceTree = "<group>";
+		};
 		7826FA595B4312DD6D55C728 /* UITests */ = {
 			isa = PBXGroup;
 			children = (
@@ -53,23 +62,41 @@
 			path = UITests;
 			sourceTree = "<group>";
 		};
+		7F7BC3ABBE6ABFAB9163D29D /* ios */ = {
+			isa = PBXGroup;
+			children = (
+				07405E7A8DF0C7DA5F24E33A /* ContentView.swift */,
+				4F4BB669954AC8ED42D8320E /* KrabikHostController.swift */,
+				753A52580F20655A16BCB052 /* KrabikIOS.h */,
+				3C6C926E5F066A356334E54B /* RustRootView.swift */,
+			);
+			path = ios;
+			sourceTree = "<group>";
+		};
 		9EC8CC48A4DDE9BB2AD59151 = {
 			isa = PBXGroup;
 			children = (
+				AF739559451497B5FF1F8C32 /* krabik-ui-dsl */,
 				D6FE85D8FD5B79D6BFFCF20D /* Sources */,
 				7826FA595B4312DD6D55C728 /* UITests */,
 				1DE076000594E5F885AE0872 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
+		AF739559451497B5FF1F8C32 /* krabik-ui-dsl */ = {
+			isa = PBXGroup;
+			children = (
+				32334FA857B2E216B1F0996E /* shared */,
+			);
+			name = "krabik-ui-dsl";
+			path = ../..;
+			sourceTree = "<group>";
+		};
 		D6FE85D8FD5B79D6BFFCF20D /* Sources */ = {
 			isa = PBXGroup;
 			children = (
-				F11A97929DE2CE71019280A1 /* ContentView.swift */,
-				4557FEA8A5216E80F4A08EB7 /* KrabikHostController.swift */,
-				C2AFF1E57A323D1ED50FB776 /* KrabikIOS.h */,
+				330969BAF139E277712927D0 /* Bridging.h */,
 				63C7D13156EB4DB0A208E270 /* KrabikUiDslTodoMinimalApp.swift */,
-				444004253EA0BF4FBF44EF9B /* RustRootView.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -99,6 +126,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 396F01CC54621D629A9C5A66 /* Build configuration list for PBXNativeTarget "KrabikUiDslTodoMinimal" */;
 			buildPhases = (
+				31E835AFA3DBBE36511A4CD2 /* Build Rust library */,
 				26CFB055E498031C7344125F /* Sources */,
 			);
 			buildRules = (
@@ -146,6 +174,28 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		31E835AFA3DBBE36511A4CD2 /* Build Rust library */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust library";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "export PATH=\"$HOME/.cargo/bin:$PATH\"\ncd \"$SRCROOT/../rust\"\nif [ \"$CONFIGURATION\" = \"Release\" ]; then\n  cargo build --target \"$RUST_TARGET\" --release\nelse\n  cargo build --target \"$RUST_TARGET\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		074D8831CE9B9474F7E54264 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -159,10 +209,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B24FA8D600866687D17572CF /* ContentView.swift in Sources */,
-				0AF0320EE849EA4B5FDCBB95 /* KrabikHostController.swift in Sources */,
+				FEB0EE188C6A0BEDAC3C559C /* ContentView.swift in Sources */,
+				6281BE97E970244BB623FCE0 /* KrabikHostController.swift in Sources */,
 				4B9E654A478DBCA4698C46F5 /* KrabikUiDslTodoMinimalApp.swift in Sources */,
-				0E90DAF9C57CD8B5C86547B1 /* RustRootView.swift in Sources */,
+				67C73D7C181CF9CDCC1E0513 /* RustRootView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -231,6 +281,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -272,7 +323,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.krabik-ui-dsl-todo-minimal";
 				PRODUCT_NAME = KrabikUiDslTodoMinimal;
 				SDKROOT = iphoneos;
-				SWIFT_OBJC_BRIDGING_HEADER = Sources/KrabikIOS.h;
+				SWIFT_OBJC_BRIDGING_HEADER = Sources/Bridging.h;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -295,7 +346,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.krabik-ui-dsl-todo-minimal";
 				PRODUCT_NAME = KrabikUiDslTodoMinimal;
 				SDKROOT = iphoneos;
-				SWIFT_OBJC_BRIDGING_HEADER = Sources/KrabikIOS.h;
+				SWIFT_OBJC_BRIDGING_HEADER = Sources/Bridging.h;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -354,6 +405,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;

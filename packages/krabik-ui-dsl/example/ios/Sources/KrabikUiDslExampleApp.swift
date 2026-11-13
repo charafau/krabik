@@ -3,8 +3,8 @@ import SwiftUI
 @main
 struct KrabikUiDslExampleApp: App {
     init() {
-        // Registers this example's checklist app with the DSL runtime, so the
-        // root view renders it instead of the built-in gallery.
+        // Registers this example's showcase app with the framework before any view
+        // is created.
         krabik_ui_dsl_example_install()
     }
 

@@ -15,7 +15,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "54CB8E8E132E57FBFAB40012"
+               BlueprintIdentifier = "D7CB24A5FE50B028E5F012A6"
                BuildableName = "KrabikUiDslExample.app"
                BlueprintName = "KrabikUiDslExample"
                ReferencedContainer = "container:KrabikUiDslExample.xcodeproj">
@@ -32,7 +32,7 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "54CB8E8E132E57FBFAB40012"
+            BlueprintIdentifier = "D7CB24A5FE50B028E5F012A6"
             BuildableName = "KrabikUiDslExample.app"
             BlueprintName = "KrabikUiDslExample"
             ReferencedContainer = "container:KrabikUiDslExample.xcodeproj">
@@ -44,7 +44,7 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "5B0CBD0E87C34E60CF471CAE"
+               BlueprintIdentifier = "02CEA64670569127D1D97C3B"
                BuildableName = "KrabikUiDslExampleUITests.xctest"
                BlueprintName = "KrabikUiDslExampleUITests"
                ReferencedContainer = "container:KrabikUiDslExample.xcodeproj">
@@ -68,7 +68,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "54CB8E8E132E57FBFAB40012"
+            BlueprintIdentifier = "D7CB24A5FE50B028E5F012A6"
             BuildableName = "KrabikUiDslExample.app"
             BlueprintName = "KrabikUiDslExample"
             ReferencedContainer = "container:KrabikUiDslExample.xcodeproj">
@@ -87,7 +87,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "54CB8E8E132E57FBFAB40012"
+            BlueprintIdentifier = "D7CB24A5FE50B028E5F012A6"
             BuildableName = "KrabikUiDslExample.app"
             BlueprintName = "KrabikUiDslExample"
             ReferencedContainer = "container:KrabikUiDslExample.xcodeproj">

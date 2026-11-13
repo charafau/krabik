@@ -10,7 +10,6 @@ pub(crate) mod element;
 pub mod engine;
 // Only the platform renderers drive a session; it stays compiled everywhere
 // so its tests run on the host.
-pub mod gallery;
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 mod host;
 mod message;
@@ -33,7 +32,6 @@ mod frame_batch;
 pub use app::{App, Component, set_app_factory};
 // The engine modules keep their short public paths, e.g. `krabik_ui_dsl::runtime`.
 pub use engine::{geometry, layout, measure, render, runtime, tree};
-pub use gallery::GalleryApp;
 
 #[cfg(target_os = "android")]
 mod android;

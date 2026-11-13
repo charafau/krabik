@@ -1,0 +1,9 @@
+/rust/target
+/ios/build
+/ios/DerivedData
+.idea/
+*.iml
+.DS_Store
+
+xcuserdata/
+*.xcuserstate

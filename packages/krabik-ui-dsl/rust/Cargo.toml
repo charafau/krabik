@@ -3,10 +3,8 @@ name = "krabik-ui-dsl"
 version = "0.1.0"
 edition = "2024"
 
-[lib]
-# The rlib lets consumer crates (see `example/`) link the DSL; the cdylib is
-# the Android JNI library and the staticlib is linked into the iOS app.
-crate-type = ["cdylib", "staticlib", "rlib"]
+# A plain Rust library. Each app is its own crate that depends on this one
+# and builds the native library its Android and iOS shells load.
 
 [dependencies]
 jni = "0.22"
