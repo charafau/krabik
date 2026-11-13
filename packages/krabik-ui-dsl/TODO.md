@@ -249,8 +249,8 @@ Four container/navigation widgets round out the native set:
 - **Pager** — a horizontal, swipeable page container. Android uses a custom
   `KrabikPager` with `OverScroller` and velocity tracking; iOS uses a paging
   `UIScrollView`. Pages are ordinary Rust children laid out side by side.
-  Swiping reports `Event::Selected`; programmatic selection re-creates the
-  native pager at the requested offset.
+  Swiping reports `Event::Selected`; programmatic selection scrolls the
+  native pager in place.
 - **TabsView** — a `TabBar` above a `Pager`; tab taps and page swipes share one
   action and one selected index.
 - **BottomNavigation** — host-level chrome configured by

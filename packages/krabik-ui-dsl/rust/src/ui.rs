@@ -730,17 +730,11 @@ impl Pager {
         Self(element)
     }
 
-    /// Sets the selected page index.
-    ///
-    /// The selection is part of the node key when the application did not
-    /// supply one, so a programmatic page change recreates the native pager at
-    /// the right offset instead of relying on an in-place update.
+    /// Sets the selected page index. Changing it scrolls the native pager
+    /// to that page in place; the pages keep their state.
     pub fn selected(mut self, index: usize) -> Self {
         if let ElementKind::Pager(props) = &mut self.0.kind {
             props.selected = index;
-        }
-        if self.0.key.is_none() {
-            self.0.key = Some(Cow::Owned(format!("pager-{index}")));
         }
         self
     }
@@ -793,13 +787,10 @@ impl TabsView {
         {
             props.selected = index;
         }
-        if let Some(pager) = self.0.children.get_mut(1) {
-            if let ElementKind::Pager(props) = &mut pager.kind {
-                props.selected = index;
-            }
-            if pager.key.is_none() {
-                pager.key = Some(Cow::Owned(format!("pager-{index}")));
-            }
+        if let Some(pager) = self.0.children.get_mut(1)
+            && let ElementKind::Pager(props) = &mut pager.kind
+        {
+            props.selected = index;
         }
         self
     }

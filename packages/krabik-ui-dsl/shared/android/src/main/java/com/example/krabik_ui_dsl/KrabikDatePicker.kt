@@ -99,7 +99,14 @@ class KrabikDatePicker(
     ) {
         minDate = if (minYear > 0) intArrayOf(minYear, minMonth, minDay) else null
         maxDate = if (maxYear > 0) intArrayOf(maxYear, maxMonth, maxDay) else null
-        applyDateRange(inlineDate)
+        // Narrowing the range can move the native picker's date; that is not
+        // a user change and must not be reported back.
+        silent = true
+        try {
+            applyDateRange(inlineDate)
+        } finally {
+            silent = false
+        }
         clampValue()
         syncViews()
     }

@@ -721,7 +721,6 @@ mod tests {
         use krabik_ui_dsl::render::Op;
         use krabik_ui_dsl::runtime::Runtime;
         use krabik_ui_dsl::tree::NodeKind;
-        use krabik_ui_dsl::ui::Text;
 
         let mut app = app();
         app.stack = vec!["home", "tabs-view"];
@@ -747,16 +746,21 @@ mod tests {
             unreachable!()
         };
         assert_eq!(props.selected, 1);
-        assert!(update.ops.iter().any(|op| match op {
-            Op::Update(node) | Op::Create(node) =>
-                matches!(&node.kind, NodeKind::Pager(p) if p.selected == 1),
-            _ => false,
-        }));
+        // The pager is updated in place: nothing is torn down and rebuilt.
+        assert!(update.ops.iter().any(|op| matches!(
+            op,
+            Op::Update(node) if matches!(&node.kind, NodeKind::Pager(p) if p.selected == 1)
+        )));
+        assert!(
+            !update
+                .ops
+                .iter()
+                .any(|op| matches!(op, Op::Create(_) | Op::Remove { .. }))
+        );
         assert!(update.ops.iter().any(|op| matches!(
             op,
             Op::Update(node) if matches!(&node.kind, NodeKind::TabBar(p) if p.selected == 1)
         )));
-        let _ = Text::new("unused");
     }
 
     #[test]
