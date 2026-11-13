@@ -1,5 +1,6 @@
 package com.example.krabik_ui_dsl
 
+import dev.krabik.ui.*
 import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView

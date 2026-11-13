@@ -30,7 +30,7 @@ use jni::errors::Result as JniResult;
 use jni::ids::{JMethodID, JStaticFieldID, JStaticMethodID};
 use jni::objects::{JClass, JObject, JValue, JValueOwned};
 use jni::refs::Global;
-use jni::signature::{JavaType, Primitive};
+use jni::signature::{JavaType, Primitive, RuntimeMethodSignature};
 use jni::strings::JNIStr;
 use jni::{Env, jni_sig, jni_str};
 
@@ -39,8 +39,8 @@ use super::{
     IMAGE_VIEW_CLASS, KRABIK_IMAGES_CLASS, KRABIK_RECYCLERS_CLASS, KRABIK_ROWS_CLASS,
     KRABIK_STYLE_CLASS, KRABIK_VIEWS_CLASS, LAYOUT_PARAMS_CLASS, LONG_CLASS, MEASURE_SPEC_CLASS,
     PAGER_CLASS, PLAIN_SWITCH_CLASS, PROGRESS_BAR_CLASS, RADIO_CLASS, RADIO_GROUP_CLASS,
-    RUST_ROOT_VIEW_CLASS, SEEK_BAR_CLASS, SWITCH_CLASS, TAB_BAR_CLASS, TEXT_INPUT_CLASS,
-    TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
+    ROOT_VIEW_DESCRIPTOR, RUST_ROOT_VIEW_CLASS, SEEK_BAR_CLASS, SWITCH_CLASS, TAB_BAR_CLASS,
+    TEXT_INPUT_CLASS, TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
 };
 
 const VOID: JavaType = JavaType::Primitive(Primitive::Void);
@@ -189,6 +189,23 @@ macro_rules! ctor {
     };
 }
 
+/// A method signature that mentions `RustRootView`, written with `{root}` in
+/// its place so the framework's package is not repeated here.
+fn root_signature(template: &str) -> JniResult<RuntimeMethodSignature> {
+    RuntimeMethodSignature::from_str(template.replace("{root}", ROOT_VIEW_DESCRIPTOR))
+}
+
+/// The constructor every framework widget has: `(Context, RustRootView, long)`.
+fn widget_ctor(
+    env: &mut Env<'_>,
+    class: &Global<JClass<'static>>,
+    signature: &RuntimeMethodSignature,
+) -> JniResult<Ctor> {
+    Ok(Ctor {
+        id: env.get_method_id(class, jni_str!("<init>"), signature.method_signature())?,
+    })
+}
+
 fn class(env: &mut Env<'_>, name: &JNIStr) -> JniResult<Global<JClass<'static>>> {
     let class = env.find_class(name)?;
     env.new_global_ref(&class)
@@ -331,6 +348,7 @@ pub(super) struct Jni {
 
 impl Jni {
     fn load(env: &mut Env<'_>) -> JniResult<Self> {
+        let widget_signature = root_signature("(Landroid/content/Context;{root}J)V")?;
         let view = class(env, VIEW_CLASS)?;
         let view_group = class(env, jni_str!("android/view/ViewGroup"))?;
         let text_view = class(env, TEXT_VIEW_CLASS)?;
@@ -544,13 +562,15 @@ impl Jni {
 
             make_measure_spec: static_method!(env, &measure_spec, "makeMeasureSpec", "(II)I", INT),
             long_value_of: static_method!(env, &long, "valueOf", "(J)Ljava/lang/Long;", OBJECT),
-            create_scroll: static_method!(
-                env,
-                &krabik_views,
-                "createScroll",
-                "(Landroid/content/Context;ZLcom/example/krabik_ui_dsl/RustRootView;)Landroid/view/ViewGroup;",
-                OBJECT
-            ),
+            create_scroll: StaticMethod {
+                id: env.get_static_method_id(
+                    &krabik_views,
+                    jni_str!("createScroll"),
+                    root_signature("(Landroid/content/Context;Z{root})Landroid/view/ViewGroup;")?
+                        .method_signature(),
+                )?,
+                returns: OBJECT,
+            },
             load_image: static_method!(
                 env,
                 &krabik_images,
@@ -579,13 +599,15 @@ impl Jni {
                 "(Landroid/view/ViewGroup;Landroid/view/View;I)V",
                 VOID
             ),
-            create_recycler: static_method!(
-                env,
-                &krabik_recyclers,
-                "create",
-                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;JII)Landroid/view/ViewGroup;",
-                OBJECT
-            ),
+            create_recycler: StaticMethod {
+                id: env.get_static_method_id(
+                    &krabik_recyclers,
+                    jni_str!("create"),
+                    root_signature("(Landroid/content/Context;{root}JII)Landroid/view/ViewGroup;")?
+                        .method_signature(),
+                )?,
+                returns: OBJECT,
+            },
             update_recycler: static_method!(
                 env,
                 &krabik_recyclers,
@@ -618,7 +640,7 @@ impl Jni {
                 env,
                 &krabik_style,
                 "apply",
-                "(Landroid/view/View;IZIIZZFFFFFZFIZFZFIIIIII)V",
+                "(Landroid/view/View;IZIIZZFFFFFIZFZFIIIIII)V",
                 VOID
             ),
             typeface_default: static_field!(
@@ -648,52 +670,16 @@ impl Jni {
             image_view_ctor: ctor!(env, &image_view, "(Landroid/content/Context;)V"),
             view_ctor: ctor!(env, &view, "(Landroid/content/Context;)V"),
             frame_layout_ctor: ctor!(env, &frame_layout, "(Landroid/content/Context;)V"),
-            text_input_ctor: ctor!(
-                env,
-                &text_input,
-                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
-            ),
-            switch_ctor: ctor!(
-                env,
-                &switch,
-                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
-            ),
+            text_input_ctor: widget_ctor(env, &text_input, &widget_signature)?,
+            switch_ctor: widget_ctor(env, &switch, &widget_signature)?,
             plain_switch_ctor: ctor!(env, &plain_switch, "(Landroid/content/Context;)V"),
-            checkbox_ctor: ctor!(
-                env,
-                &checkbox,
-                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
-            ),
-            radio_ctor: ctor!(
-                env,
-                &radio_button,
-                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
-            ),
-            radio_group_ctor: ctor!(
-                env,
-                &radio_group,
-                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
-            ),
-            tab_bar_ctor: ctor!(
-                env,
-                &tab_bar,
-                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
-            ),
-            pager_ctor: ctor!(
-                env,
-                &pager,
-                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
-            ),
-            date_picker_ctor: ctor!(
-                env,
-                &date_picker,
-                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
-            ),
-            seek_bar_ctor: ctor!(
-                env,
-                &seek_bar,
-                "(Landroid/content/Context;Lcom/example/krabik_ui_dsl/RustRootView;J)V"
-            ),
+            checkbox_ctor: widget_ctor(env, &checkbox, &widget_signature)?,
+            radio_ctor: widget_ctor(env, &radio_button, &widget_signature)?,
+            radio_group_ctor: widget_ctor(env, &radio_group, &widget_signature)?,
+            tab_bar_ctor: widget_ctor(env, &tab_bar, &widget_signature)?,
+            pager_ctor: widget_ctor(env, &pager, &widget_signature)?,
+            date_picker_ctor: widget_ctor(env, &date_picker, &widget_signature)?,
+            seek_bar_ctor: widget_ctor(env, &seek_bar, &widget_signature)?,
             progress_bar_ctor: ctor!(env, &progress_bar, "(Landroid/content/Context;)V"),
             layout_params_ctor: ctor!(env, &layout_params, "(II)V"),
             frame_params_ctor: ctor!(env, &frame_params, "(II)V"),

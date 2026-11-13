@@ -33,3 +33,7 @@ plugins {
 rootProject.name = "krabik-ui-dsl-todo-minimal"
 
 include(":app")
+
+// The framework's Android library lives outside this project.
+include(":krabik-ui")
+project(":krabik-ui").projectDir = file("../../shared/android")

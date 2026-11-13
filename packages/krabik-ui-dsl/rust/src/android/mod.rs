@@ -9,6 +9,28 @@ use jni::strings::JNIStr;
 use jni::sys::jint;
 use jni::{Env, EnvUnowned, jni_str};
 
+// The Kotlin package of the framework's Android classes (`shared/android`).
+// It is spelled here and nowhere else in Rust: once with slashes for class
+// lookups, once mangled for the names of the native methods. Renaming the
+// package means changing these lines and the Kotlin sources.
+
+/// The JNI name of a framework class, such as `dev/krabik/ui/RustRootView`.
+macro_rules! framework_class {
+    ($name:literal) => {
+        jni::jni_str!("dev/krabik/ui/", $name)
+    };
+}
+
+/// The symbol the JVM looks up for a `native` method of `RustRootView`.
+macro_rules! native_name {
+    ($method:literal) => {
+        concat!("Java_dev_krabik_ui_RustRootView_", $method)
+    };
+}
+
+/// The descriptor of `RustRootView` inside a method signature.
+pub(crate) const ROOT_VIEW_DESCRIPTOR: &str = "Ldev/krabik/ui/RustRootView;";
+
 /// Calls a JNI method and turns a pending Java exception into a Rust error.
 macro_rules! jcall {
     ($env:expr, $call:expr) => {{
@@ -57,27 +79,24 @@ pub(crate) const LAYOUT_PARAMS_CLASS: &JNIStr = jni_str!("android/view/ViewGroup
 /// ScrollView casts its direct child's params to `MarginLayoutParams`, so every
 /// sized view uses `FrameLayout.LayoutParams`, which is a safe superset.
 pub(crate) const FRAME_PARAMS_CLASS: &JNIStr = jni_str!("android/widget/FrameLayout$LayoutParams");
-pub(crate) const KRABIK_STYLE_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikStyle");
-pub(crate) const RUST_ROOT_VIEW_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/RustRootView");
-pub(crate) const TEXT_INPUT_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikTextInput");
-pub(crate) const SWITCH_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSwitch");
+pub(crate) const KRABIK_STYLE_CLASS: &JNIStr = framework_class!("KrabikStyle");
+pub(crate) const RUST_ROOT_VIEW_CLASS: &JNIStr = framework_class!("RustRootView");
+pub(crate) const TEXT_INPUT_CLASS: &JNIStr = framework_class!("KrabikTextInput");
+pub(crate) const SWITCH_CLASS: &JNIStr = framework_class!("KrabikSwitch");
 /// The framework switch, measured only for its intrinsic size.
 pub(crate) const PLAIN_SWITCH_CLASS: &JNIStr = jni_str!("android/widget/Switch");
-pub(crate) const CHECKBOX_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikCheckBox");
-pub(crate) const RADIO_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioButton");
-pub(crate) const RADIO_GROUP_CLASS: &JNIStr =
-    jni_str!("com/example/krabik_ui_dsl/KrabikRadioGroup");
-pub(crate) const TAB_BAR_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikTabBar");
-pub(crate) const PAGER_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikPager");
-pub(crate) const DATE_PICKER_CLASS: &JNIStr =
-    jni_str!("com/example/krabik_ui_dsl/KrabikDatePicker");
-pub(crate) const SEEK_BAR_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSeekBar");
+pub(crate) const CHECKBOX_CLASS: &JNIStr = framework_class!("KrabikCheckBox");
+pub(crate) const RADIO_CLASS: &JNIStr = framework_class!("KrabikRadioButton");
+pub(crate) const RADIO_GROUP_CLASS: &JNIStr = framework_class!("KrabikRadioGroup");
+pub(crate) const TAB_BAR_CLASS: &JNIStr = framework_class!("KrabikTabBar");
+pub(crate) const PAGER_CLASS: &JNIStr = framework_class!("KrabikPager");
+pub(crate) const DATE_PICKER_CLASS: &JNIStr = framework_class!("KrabikDatePicker");
+pub(crate) const SEEK_BAR_CLASS: &JNIStr = framework_class!("KrabikSeekBar");
 pub(crate) const PROGRESS_BAR_CLASS: &JNIStr = jni_str!("android/widget/ProgressBar");
-pub(crate) const KRABIK_IMAGES_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikImages");
-pub(crate) const KRABIK_ROWS_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRows");
-pub(crate) const KRABIK_VIEWS_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikViews");
-pub(crate) const KRABIK_RECYCLERS_CLASS: &JNIStr =
-    jni_str!("com/example/krabik_ui_dsl/KrabikRecyclers");
+pub(crate) const KRABIK_IMAGES_CLASS: &JNIStr = framework_class!("KrabikImages");
+pub(crate) const KRABIK_ROWS_CLASS: &JNIStr = framework_class!("KrabikRows");
+pub(crate) const KRABIK_VIEWS_CLASS: &JNIStr = framework_class!("KrabikViews");
+pub(crate) const KRABIK_RECYCLERS_CLASS: &JNIStr = framework_class!("KrabikRecyclers");
 
 pub(crate) const MEASURE_UNSPECIFIED: jint = 0;
 pub(crate) const MEASURE_AT_MOST: jint = -2_147_483_648;

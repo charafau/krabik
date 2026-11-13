@@ -48,8 +48,8 @@ pub(crate) fn lock_states_for_event() -> Option<MutexGuard<'static, HashMap<jlon
 }
 
 /// Creates the Rust-side state for a `RustRootView`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeCreate<'caller>(
+#[unsafe(export_name = native_name!("nativeCreate"))]
+pub extern "system" fn native_create<'caller>(
     mut unenv: EnvUnowned<'caller>,
     this: JObject<'caller>,
     context: JObject<'caller>,
@@ -78,10 +78,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeCreat
 /// The height, in pixels, of the content a host rendered last.
 ///
 /// Lets a content-sized native container, such as a bottom sheet, wrap it.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeContentHeight<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeContentHeight"))]
+pub extern "system" fn native_content_height<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -98,8 +96,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeConte
 }
 
 /// Rebuilds the tree for the new viewport and applies the resulting operations.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeRender<'caller>(
+#[unsafe(export_name = native_name!("nativeRender"))]
+pub extern "system" fn native_render<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -157,8 +155,8 @@ pub(crate) fn on_node_event(
 }
 
 /// A button was pressed.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnClick<'caller>(
+#[unsafe(export_name = native_name!("nativeOnClick"))]
+pub extern "system" fn native_on_click<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -171,10 +169,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnCli
 }
 
 /// The text of an input changed.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnTextChanged<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeOnTextChanged"))]
+pub extern "system" fn native_on_text_changed<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -189,8 +185,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnTex
 }
 
 /// An input was submitted from the keyboard.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSubmitted<'caller>(
+#[unsafe(export_name = native_name!("nativeOnSubmitted"))]
+pub extern "system" fn native_on_submitted<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -204,10 +200,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSub
 
 /// An input gained or lost focus. `attached` is false when the field lost
 /// focus because its recycled row left the screen.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFocusChanged<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeOnFocusChanged"))]
+pub extern "system" fn native_on_focus_changed<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -228,10 +222,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnFoc
 }
 
 /// Restores focus to the field a recycled row kept logically focused.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeRestoreRowFocus<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeRestoreRowFocus"))]
+pub extern "system" fn native_restore_row_focus<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -292,10 +284,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeResto
 }
 
 /// A switch, checkbox or radio button was toggled.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnCheckedChanged<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeOnCheckedChanged"))]
+pub extern "system" fn native_on_checked_changed<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -309,10 +299,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnChe
 }
 
 /// A slider moved.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSliderChanged<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeOnSliderChanged"))]
+pub extern "system" fn native_on_slider_changed<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -326,10 +314,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnSli
 }
 
 /// A picker chose a date (`kind` 0), a time (1) or both (2).
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnPickerChanged<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeOnPickerChanged"))]
+pub extern "system" fn native_on_picker_changed<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -356,10 +342,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnPic
 }
 
 /// A radio group selected an option.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnRadioGroupSelected<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeOnRadioGroupSelected"))]
+pub extern "system" fn native_on_radio_group_selected<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -379,10 +363,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnRad
 }
 
 /// A pager settled on a page.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnPageSelected<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeOnPageSelected"))]
+pub extern "system" fn native_on_page_selected<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -402,10 +384,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnPag
 }
 
 /// A tab bar selected a tab.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnTabSelected<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeOnTabSelected"))]
+pub extern "system" fn native_on_tab_selected<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -425,8 +405,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnTab
 }
 
 /// A scroll container moved to `offset_px`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnScroll<'caller>(
+#[unsafe(export_name = native_name!("nativeOnScroll"))]
+pub extern "system" fn native_on_scroll<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -448,10 +428,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnScr
 }
 
 /// The toolbar item at `index` was tapped.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnToolbarAction<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeOnToolbarAction"))]
+pub extern "system" fn native_on_toolbar_action<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -466,10 +444,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnToo
 
 /// The system alert closed: by the button at index `button`, or by the
 /// platform itself when `button` is negative.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnDialogAction<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeOnDialogAction"))]
+pub extern "system" fn native_on_dialog_action<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -483,10 +459,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnDia
 }
 
 /// The user picked a destination in the bottom navigation bar.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnBottomNavigationSelected<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeOnBottomNavigationSelected"))]
+pub extern "system" fn native_on_bottom_navigation_selected<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -502,10 +476,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnBot
 }
 
 /// The user dismissed the bottom sheet natively (swipe, back, scrim).
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnModalDismiss<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeOnModalDismiss"))]
+pub extern "system" fn native_on_modal_dismiss<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -517,8 +489,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnMod
 
 /// Android's system back button. Returns whether the application consumed
 /// it; when it did not, the Activity falls back to its normal behaviour.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnBack<'caller>(
+#[unsafe(export_name = native_name!("nativeOnBack"))]
+pub extern "system" fn native_on_back<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -537,8 +509,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnBac
 ///
 /// Returns the row height in pixels, so a variable-height list can size the
 /// holder to its content.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeBindRow<'caller>(
+#[unsafe(export_name = native_name!("nativeBindRow"))]
+pub extern "system" fn native_bind_row<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -569,8 +541,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeBindR
 }
 
 /// Releases the row a recycled-list holder currently shows.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeUnbindRow<'caller>(
+#[unsafe(export_name = native_name!("nativeUnbindRow"))]
+pub extern "system" fn native_unbind_row<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -592,8 +564,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeUnbin
 }
 
 /// Releases the widgets and the Rust state of a `RustRootView`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeDestroy<'caller>(
+#[unsafe(export_name = native_name!("nativeDestroy"))]
+pub extern "system" fn native_destroy<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -617,8 +589,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeDestr
 }
 
 /// Attaches a host view the controller created (a screen or the sheet).
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeAttachHost<'caller>(
+#[unsafe(export_name = native_name!("nativeAttachHost"))]
+pub extern "system" fn native_attach_host<'caller>(
     mut unenv: EnvUnowned<'caller>,
     this: JObject<'caller>,
     handle: jlong,
@@ -638,10 +610,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeAttac
 }
 
 /// Registers the native controller that owns navigation and modals.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeSetController<
-    'caller,
->(
+#[unsafe(export_name = native_name!("nativeSetController"))]
+pub extern "system" fn native_set_controller<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
@@ -659,8 +629,8 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeSetCo
 }
 
 /// Drops one host after its native view is destroyed.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeDestroyHost<'caller>(
+#[unsafe(export_name = native_name!("nativeDestroyHost"))]
+pub extern "system" fn native_destroy_host<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
