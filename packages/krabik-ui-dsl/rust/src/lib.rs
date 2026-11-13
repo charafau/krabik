@@ -27,6 +27,11 @@ pub mod runtime;
 pub mod tree;
 pub mod ui;
 
+// Only the iOS renderer evaluates curves from Rust; the module stays compiled
+// everywhere so its tests run on the host.
+#[cfg_attr(not(feature = "ios"), allow(dead_code))]
+mod animation;
+
 // Only the Android renderer consumes the packed frame arrays; the module stays
 // compiled everywhere so its tests run on the host.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]

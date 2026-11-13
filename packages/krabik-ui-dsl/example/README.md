@@ -47,7 +47,10 @@ Highlights:
   ten before the app sees the value.
 - **Progress** — a determinate bar driven by buttons and an indeterminate spinner.
 - **Lists** — a windowed list that only materializes visible rows, and a native recycler with a
-  tappable button in every row.
+  tappable button in every row. Shuffle opts into a 180 ms rebind cross-fade that never blocks
+  holder reuse.
+- **Image** — a bundled asset without an explicit height derives it from the image's aspect ratio;
+  a disabled styled button shows how `.enabled(false)` dims DSL-drawn decoration.
 - **Checklist** — the original example, with switches, dynamic notes and per-row delete actions.
 - **Native navigation** — every widget page is a native screen. Rust owns the route stack through
   `App::navigation` / `screen`; the platform owns the toolbar, transitions and back gesture.

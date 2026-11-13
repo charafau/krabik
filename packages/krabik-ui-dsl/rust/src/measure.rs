@@ -7,12 +7,34 @@
 //! host and acts as a fallback.
 
 use crate::geometry::{Constraints, Size};
-use crate::ui::TextProps;
+use crate::ui::{ImageProps, TextProps};
+
+/// The default switch size, matching the Material track.
+pub const DEFAULT_SWITCH_WIDTH: f32 = 52.0;
+/// The default switch height, matching the Material track.
+pub const DEFAULT_SWITCH_HEIGHT: f32 = 32.0;
 
 /// Measures content that the layout engine cannot size by itself.
 pub trait Measure: Send + Sync {
     /// Returns the intrinsic size of the text under the given constraints.
     fn measure(&self, text: &TextProps, constraints: Constraints) -> Size;
+
+    /// Returns the platform's intrinsic size for a switch.
+    ///
+    /// Platforms override this with their native control; the default matches
+    /// the Material track and keeps host builds deterministic.
+    fn switch_size(&self) -> Size {
+        Size::new(DEFAULT_SWITCH_WIDTH, DEFAULT_SWITCH_HEIGHT)
+    }
+
+    /// Returns the natural size of an image, when it is known without
+    /// downloading or decoding it.
+    ///
+    /// Local bundled assets can be inspected cheaply; remote URLs return
+    /// `None` and keep the current explicit-size requirement.
+    fn image_size(&self, _props: &ImageProps) -> Option<Size> {
+        None
+    }
 }
 
 /// A cheap text measurement that does not need a platform.

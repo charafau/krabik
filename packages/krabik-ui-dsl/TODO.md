@@ -224,8 +224,9 @@ renderer diff; nodes without an animation behave exactly as before.
   before the platform detaches them. A recreated node cancels a pending exit.
 - **Snapping** — viewport changes, recycled-row rebinds and zero durations
   apply immediately, so startup and rotation do not animate.
-- **Hit-testing** — iOS disables interaction on an animating view until its
-  completion; Android already hit-tests against the live frame.
+- **Hit-testing** — iOS drives frame animations from a `CADisplayLink` that
+  updates the model frames on every tick, so touches hit the view where it
+  actually is; Android already hit-tests against the live translation.
 - **Accessibility** — Android respects the system animator duration scale and
   iOS skips animations when Reduce Motion is enabled.
 - **Coverage** — the Motion section has four pages: Frames & opacity,
@@ -258,6 +259,30 @@ navigation and Toolbar pages, and platform tests cover swipes, tab sync,
 destination changes and toolbar actions.
 
 Per-tab navigation stacks and collapsing/large toolbars remain future work.
+
+### 2j. Rendering & UX wins ✅
+
+- **Disabled decoration** — `.enabled(false)` dims the fill, gradient stops,
+  border and shadow the DSL paints (alpha × 0.4) while native text and controls
+  keep their own disabled appearance. The rule lives in
+  [`dim_color()`](rust/src/ui.rs), so Android and iOS agree.
+- **Intrinsic sizing** — `Measure` gained `switch_size()` and `image_size()`.
+  Android measures a framework switch and reads asset headers with
+  `BitmapFactory`; iOS uses `UISwitch.intrinsicContentSize()` and the bundled
+  `UIImage`. A fixed width or height derives the other image axis from the
+  natural aspect ratio. Remote images keep the explicit-size fallback.
+- **Motion polish** — iOS animates shadow opacity/radius/offset and gradient
+  start/end points with Core Animation.
+- **Exact hit-testing** — iOS frame animations run on a `CADisplayLink` that
+  writes the interpolated frame into the model layer every tick. Touches
+  therefore hit the view where it actually is, and the old interaction lock is
+  gone; a departing view simply stops accepting touches.
+- **Recycled-row cross-fade** — `List::row_transition(ms)` captures the previous
+  holder content into an overlay and fades it out after the new widgets are in
+  place. The holder is never withheld from reuse.
+
+The showcase covers a disabled styled control, an intrinsic-size asset image
+and a shuffled recycled list with row transitions; both UI suites assert them.
 
 ### 3b. Virtualized lists ✅
 
@@ -501,15 +526,6 @@ matters for large lists.
 
 ### Rendering & UX
 
-- Animation follow-ups:
-  - Animate iOS shadow opacity/radius/offset and gradient orientation changes.
-  - Exact presentation-layer hit-testing on iOS instead of briefly disabling
-    interaction.
-  - Animated `Create`/`Remove` for recycled-row content without delaying the
-    holder's reuse.
-- Native intrinsic measurement for switches and images, so their intrinsic
-  size comes from the platform rather than the hard-coded defaults.
-- Disabled-state styling for custom backgrounds (native text already dims).
 - Continuous focus for recycled rows: today the field regains focus when its
   row is bound again. Keeping the focused holder attached off-screen would need
   a custom Android `LayoutManager`; iOS has no native collection-view

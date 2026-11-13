@@ -5,7 +5,6 @@
 //! and every event is handled here on native `UILabel`/`UIButton`/… instances.
 
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr::NonNull;
@@ -17,16 +16,18 @@ use dispatch2::DispatchQueue;
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject, Sel};
 use objc2::{ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
-use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize, CGVector};
+use objc2_core_foundation::{CFTimeInterval, CGAffineTransform, CGPoint, CGRect, CGSize, CGVector};
 use objc2_core_graphics::CGColor;
 use objc2_foundation::{
     NSArray, NSBundle, NSCalendar, NSCalendarUnit, NSData, NSDate, NSDateComponents, NSError,
-    NSIndexPath, NSNumber, NSString, NSURL, NSURLResponse, NSURLSession,
+    NSIndexPath, NSNumber, NSRunLoop, NSRunLoopCommonModes, NSString, NSURL, NSURLResponse,
+    NSURLSession, NSValue,
 };
 use objc2_quartz_core::{
-    CABasicAnimation, CACornerMask, CAGradientLayer, CALayer, CAMediaTiming, CAMediaTimingFunction,
-    kCAMediaTimingFunctionEaseIn, kCAMediaTimingFunctionEaseInEaseOut,
-    kCAMediaTimingFunctionEaseOut, kCAMediaTimingFunctionLinear,
+    CABasicAnimation, CACornerMask, CACurrentMediaTime, CADisplayLink, CAGradientLayer, CALayer,
+    CAMediaTiming, CAMediaTimingFunction, kCAMediaTimingFunctionEaseIn,
+    kCAMediaTimingFunctionEaseInEaseOut, kCAMediaTimingFunctionEaseOut,
+    kCAMediaTimingFunctionLinear,
 };
 use objc2_ui_kit::{
     NSIndexPathUIKitAdditions, NSLineBreakMode, NSObjectUIAccessibility, NSTextAlignment,
@@ -44,19 +45,20 @@ use objc2_ui_kit::{
     UIViewPropertyAnimator,
 };
 
+use crate::animation::ease_curve;
 use crate::app::{App, Event};
 use crate::geometry::{Constraints, Rect, Size};
 use crate::layout::LayoutResult;
-use crate::measure::Measure;
+use crate::measure::{DEFAULT_SWITCH_HEIGHT, DEFAULT_SWITCH_WIDTH, Measure};
 use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Animation, AnimationCurve, Axis, BottomNavigationProps, ButtonProps, CheckProps,
+    Animation, AnimationCurve, Axis, Border, BottomNavigationProps, ButtonProps, CheckProps,
     DatePickerMode, DatePickerProps, DatePickerValue, DateValue, EdgeInsets, Element, FontWeight,
-    GradientDirection, ImageProps, ImageScale, ImageSource, ImeAction, KeyboardType, ProgressProps,
-    RadioGroupProps, SliderProps, SpinnerProps, TabBarProps, TextAlign, TextFieldProps, TextProps,
-    TimeValue, snap_slider_value,
+    Gradient, GradientDirection, ImageProps, ImageScale, ImageSource, ImeAction, KeyboardType,
+    ProgressProps, RadioGroupProps, SliderProps, SpinnerProps, TabBarProps, TextAlign,
+    TextFieldProps, TextProps, TimeValue, dim_color, snap_slider_value,
 };
 
 /// Measures text with an off-screen `UILabel`.
@@ -67,6 +69,8 @@ use crate::ui::{
 struct IosMeasure {
     label: Retained<UILabel>,
     cache: Mutex<HashMap<MeasureKey, Size>>,
+    switch_size: Mutex<Option<Size>>,
+    image_sizes: Mutex<HashMap<String, Option<Size>>>,
 }
 
 // SAFETY: every method is called from the main thread by `IosState::render`.
@@ -90,6 +94,8 @@ impl IosMeasure {
         Self {
             label,
             cache: Mutex::new(HashMap::new()),
+            switch_size: Mutex::new(None),
+            image_sizes: Mutex::new(HashMap::new()),
         }
     }
 
@@ -144,6 +150,51 @@ impl IosMeasure {
 impl Measure for IosMeasure {
     fn measure(&self, text: &TextProps, constraints: Constraints) -> Size {
         self.measure_with(text, constraints)
+    }
+
+    fn switch_size(&self) -> Size {
+        if let Some(size) = *self.switch_size.lock().expect("switch size cache") {
+            return size;
+        }
+        // The switch must be created on the main thread; layout already runs
+        // there. A host build falls back to the Material default.
+        let size = MainThreadMarker::new()
+            .map(UISwitch::new)
+            .map(|switch| switch.intrinsicContentSize())
+            .filter(|size| size.width > 0.0 && size.height > 0.0)
+            .map_or(
+                Size::new(DEFAULT_SWITCH_WIDTH, DEFAULT_SWITCH_HEIGHT),
+                |size| Size::new(size.width as f32, size.height as f32),
+            );
+        *self.switch_size.lock().expect("switch size cache") = Some(size);
+        size
+    }
+
+    fn image_size(&self, props: &ImageProps) -> Option<Size> {
+        let ImageSource::Asset(path) = &props.source else {
+            return None;
+        };
+        if let Some(cached) = self
+            .image_sizes
+            .lock()
+            .expect("image size cache")
+            .get(path)
+            .copied()
+        {
+            return cached;
+        }
+        let size = MainThreadMarker::new().and_then(|_| {
+            load_asset(path).map(|image| {
+                // SAFETY: the image was just loaded on the main thread.
+                let size = unsafe { image.size() };
+                Size::new(size.width as f32, size.height as f32)
+            })
+        });
+        self.image_sizes
+            .lock()
+            .expect("image size cache")
+            .insert(path.clone(), size);
+        size
     }
 }
 
@@ -541,6 +592,8 @@ struct ViewHandle {
     frame: Option<Rect>,
     /// The node's padding, used to inset the content.
     padding: EdgeInsets,
+    /// The display link driving a frame animation, when one is running.
+    frame_link: Option<Retained<CADisplayLink>>,
 }
 
 impl ViewHandle {
@@ -552,6 +605,7 @@ impl ViewHandle {
             parent: node.parent,
             frame: None,
             padding: node.style.padding,
+            frame_link: None,
         }
     }
 
@@ -723,19 +777,22 @@ struct LayoutFrames {
     host: Option<Retained<UIView>>,
     scroll: Option<(Retained<UIScrollView>, Retained<UIView>, Size)>,
     gradient: Option<Retained<CAGradientLayer>>,
-    rect: CGRect,
     padding: EdgeInsets,
 }
 
 impl LayoutFrames {
-    fn apply(&self) {
-        self.view.setFrame(self.rect);
+    /// Applies the frames with the view at `rect`.
+    ///
+    /// Frame animations call this on every display-link tick, so the model
+    /// frames always match what the user sees and hit-testing stays exact.
+    fn apply_rect(&self, rect: CGRect) {
+        self.view.setFrame(rect);
 
         if let Some(content) = &self.inset {
-            content.setFrame(inset(self.rect.size, self.padding));
+            content.setFrame(inset(rect.size, self.padding));
         }
         if let Some(host) = &self.host {
-            host.setFrame(inset(self.rect.size, self.padding));
+            host.setFrame(inset(rect.size, self.padding));
         }
         if let Some((scroll, host, size)) = &self.scroll {
             host.setFrame(CGRect::new(
@@ -751,8 +808,96 @@ impl LayoutFrames {
             ));
         }
         if let Some(gradient) = &self.gradient {
-            gradient.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), self.rect.size));
+            gradient.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), rect.size));
         }
+    }
+}
+
+/// Interpolates between two frames.
+fn lerp_rect(from: CGRect, to: CGRect, progress: f64) -> CGRect {
+    let lerp = |a: f64, b: f64| a + (b - a) * progress;
+    CGRect::new(
+        CGPoint::new(
+            lerp(from.origin.x, to.origin.x),
+            lerp(from.origin.y, to.origin.y),
+        ),
+        CGSize::new(
+            lerp(from.size.width, to.size.width),
+            lerp(from.size.height, to.size.height),
+        ),
+    )
+}
+
+/// Drives a frame animation from the display link.
+struct FrameTickerIvars {
+    frames: LayoutFrames,
+    from: CGRect,
+    to: CGRect,
+    start: CFTimeInterval,
+    duration: f64,
+    curve: AnimationCurve,
+}
+
+objc2::define_class!(
+    // The ticker and its retained views live on the main thread.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "KrabikFrameTicker"]
+    #[ivars = FrameTickerIvars]
+    struct FrameTicker;
+
+    unsafe impl NSObjectProtocol for FrameTicker {}
+
+    impl FrameTicker {
+        #[unsafe(method(tick:))]
+        fn tick(&self, link: &CADisplayLink) {
+            let ivars = self.ivars();
+            let progress = if ivars.duration <= 0.0 {
+                1.0
+            } else {
+                ((link.timestamp() - ivars.start) / ivars.duration).clamp(0.0, 1.0)
+            };
+            let eased = f64::from(ease_curve(&ivars.curve, progress as f32));
+            ivars
+                .frames
+                .apply_rect(lerp_rect(ivars.from, ivars.to, eased));
+            if progress >= 1.0 {
+                link.invalidate();
+            }
+        }
+    }
+);
+
+impl FrameTicker {
+    /// Starts a frame tween and returns the display link that drives it.
+    ///
+    /// The link retains the ticker for as long as it runs, so the caller only
+    /// keeps the link in order to cancel it.
+    fn start(
+        frames: LayoutFrames,
+        from: CGRect,
+        to: CGRect,
+        duration_ms: u32,
+        curve: AnimationCurve,
+        mtm: MainThreadMarker,
+    ) -> Retained<CADisplayLink> {
+        let ticker = Self::alloc(mtm).set_ivars(FrameTickerIvars {
+            frames,
+            from,
+            to,
+            start: CACurrentMediaTime(),
+            duration: f64::from(duration_ms) / 1000.0,
+            curve,
+        });
+        // SAFETY: `NSObject`'s initializer returns an initialized instance of
+        // this class with the ivars already set.
+        let ticker: Retained<Self> = unsafe { objc2::msg_send![super(ticker), init] };
+        // SAFETY: the ticker implements `tick:` and is retained by the link.
+        let link =
+            unsafe { CADisplayLink::displayLinkWithTarget_selector(&ticker, objc2::sel!(tick:)) };
+        // SAFETY: the run loop and the static common mode both outlive the link.
+        unsafe { link.addToRunLoop_forMode(&NSRunLoop::mainRunLoop(), NSRunLoopCommonModes) };
+        link
     }
 }
 
@@ -892,6 +1037,11 @@ struct StyleSnapshot {
     border_width: f64,
     corner_radius: f64,
     gradient_colors: Option<Retained<NSArray>>,
+    gradient_start: Option<CGPoint>,
+    gradient_end: Option<CGPoint>,
+    shadow_opacity: f32,
+    shadow_radius: f64,
+    shadow_offset: CGSize,
     alpha: f64,
 }
 
@@ -906,7 +1056,36 @@ fn style_snapshot(
         border_width: layer.borderWidth(),
         corner_radius: layer.cornerRadius(),
         gradient_colors: gradient.and_then(|gradient| gradient.colors()),
+        gradient_start: gradient.map(|gradient| gradient.startPoint()),
+        gradient_end: gradient.map(|gradient| gradient.endPoint()),
+        shadow_opacity: layer.shadowOpacity(),
+        shadow_radius: layer.shadowRadius(),
+        shadow_offset: layer.shadowOffset(),
         alpha: view.alpha(),
+    }
+}
+
+/// Boxes a point for a Core Animation value.
+fn box_point(point: CGPoint) -> Retained<NSValue> {
+    // SAFETY: both pointers are valid for the duration of the call; the type
+    // encoding matches the pointed-to `CGPoint`.
+    unsafe {
+        NSValue::valueWithBytes_objCType(
+            NonNull::new_unchecked((&point as *const CGPoint).cast_mut().cast()),
+            NonNull::new_unchecked(c"{CGPoint=dd}".as_ptr().cast_mut()),
+        )
+    }
+}
+
+/// Boxes a size for a Core Animation value.
+fn box_size(size: CGSize) -> Retained<NSValue> {
+    // SAFETY: both pointers are valid for the duration of the call; the type
+    // encoding matches the pointed-to `CGSize`.
+    unsafe {
+        NSValue::valueWithBytes_objCType(
+            NonNull::new_unchecked((&size as *const CGSize).cast_mut().cast()),
+            NonNull::new_unchecked(c"{CGSize=dd}".as_ptr().cast_mut()),
+        )
     }
 }
 
@@ -989,57 +1168,77 @@ fn animate_style_change(
             animation.duration_ms,
             &animation.curve,
         );
-    }
-}
 
-struct InteractionLock {
-    view: Retained<UIView>,
-    depth: u32,
-    original: bool,
-}
-
-thread_local! {
-    static INTERACTION_LOCKS: RefCell<HashMap<usize, InteractionLock>> =
-        RefCell::new(HashMap::new());
-}
-
-/// Disables interaction on a view for the duration of an animation.
-///
-/// UIKit hit-tests against the model layer, which is already at the final
-/// position while the presentation layer animates.
-fn begin_interaction_lock(view: &Retained<UIView>) {
-    let key = Retained::as_ptr(view) as usize;
-    INTERACTION_LOCKS.with(|locks| {
-        let mut locks = locks.borrow_mut();
-        if let Some(lock) = locks.get_mut(&key) {
-            lock.depth += 1;
-        } else {
-            locks.insert(
-                key,
-                InteractionLock {
-                    view: view.clone(),
-                    depth: 1,
-                    original: view.isUserInteractionEnabled(),
-                },
+        // Gradient direction is expressed by its endpoints, so animating them
+        // turns a direction change into a smooth sweep.
+        if let Some(from) = snapshot.gradient_start {
+            let from = box_point(from);
+            let to = box_point(gradient.startPoint());
+            add_layer_animation(
+                gradient,
+                "startPoint",
+                Some(&from),
+                Some(&to),
+                animation.duration_ms,
+                &animation.curve,
             );
-            view.setUserInteractionEnabled(false);
         }
-    });
-}
+        if let Some(from) = snapshot.gradient_end {
+            let from = box_point(from);
+            let to = box_point(gradient.endPoint());
+            add_layer_animation(
+                gradient,
+                "endPoint",
+                Some(&from),
+                Some(&to),
+                animation.duration_ms,
+                &animation.curve,
+            );
+        }
+    }
 
-fn end_interaction_lock(view: &Retained<UIView>) {
-    let key = Retained::as_ptr(view) as usize;
-    INTERACTION_LOCKS.with(|locks| {
-        let mut locks = locks.borrow_mut();
-        let Some(lock) = locks.get_mut(&key) else {
-            return;
-        };
-        lock.depth = lock.depth.saturating_sub(1);
-        if lock.depth == 0 {
-            let lock = locks.remove(&key).expect("checked above");
-            lock.view.setUserInteractionEnabled(lock.original);
-        }
-    });
+    let from_shadow_opacity: Retained<AnyObject> = unsafe {
+        Retained::cast_unchecked(NSNumber::numberWithDouble(f64::from(
+            snapshot.shadow_opacity,
+        )))
+    };
+    let to_shadow_opacity: Retained<AnyObject> = unsafe {
+        Retained::cast_unchecked(NSNumber::numberWithDouble(f64::from(layer.shadowOpacity())))
+    };
+    add_layer_animation(
+        &layer,
+        "shadowOpacity",
+        Some(&from_shadow_opacity),
+        Some(&to_shadow_opacity),
+        animation.duration_ms,
+        &animation.curve,
+    );
+
+    let from_shadow_radius: Retained<AnyObject> =
+        unsafe { Retained::cast_unchecked(NSNumber::numberWithDouble(snapshot.shadow_radius)) };
+    let to_shadow_radius: Retained<AnyObject> =
+        unsafe { Retained::cast_unchecked(NSNumber::numberWithDouble(layer.shadowRadius())) };
+    add_layer_animation(
+        &layer,
+        "shadowRadius",
+        Some(&from_shadow_radius),
+        Some(&to_shadow_radius),
+        animation.duration_ms,
+        &animation.curve,
+    );
+
+    let from_shadow_offset: Retained<AnyObject> =
+        unsafe { Retained::cast_unchecked(box_size(snapshot.shadow_offset)) };
+    let to_shadow_offset: Retained<AnyObject> =
+        unsafe { Retained::cast_unchecked(box_size(layer.shadowOffset())) };
+    add_layer_animation(
+        &layer,
+        "shadowOffset",
+        Some(&from_shadow_offset),
+        Some(&to_shadow_offset),
+        animation.duration_ms,
+        &animation.curve,
+    );
 }
 
 struct IosState {
@@ -1158,7 +1357,6 @@ impl IosState {
                         tx: 0.0,
                         ty: 0.0,
                     });
-                    begin_interaction_lock(&view);
                     let view_for_block = view.clone();
                     let block = RcBlock::new(move || {
                         view_for_block.setAlpha(target_alpha);
@@ -1171,17 +1369,9 @@ impl IosState {
                             ty: 0.0,
                         });
                     });
-                    let view_for_completion = view.clone();
-                    let completion = RcBlock::new(move |_: UIViewAnimatingPosition| {
-                        end_interaction_lock(&view_for_completion);
-                    });
-                    run_animation(
-                        enter.duration_ms,
-                        &enter.curve,
-                        block,
-                        Some(completion),
-                        mtm,
-                    );
+                    // The view already occupies its final frame, so hits land
+                    // where the user expects while it fades in.
+                    run_animation(enter.duration_ms, &enter.curve, block, None, mtm);
                 }
             }
             Op::Update(node) => {
@@ -1248,6 +1438,9 @@ impl IosState {
             Op::Remove { id, exit } => {
                 self.images.expected.remove(&id);
                 if let Some(handle) = views.remove(&id) {
+                    if let Some(link) = &handle.frame_link {
+                        link.invalidate();
+                    }
                     if animate
                         && let Some(exit) = exit
                             .as_ref()
@@ -1255,7 +1448,7 @@ impl IosState {
                     {
                         let view = handle.view.clone();
                         self.pending_exits.insert(id, view.clone());
-                        begin_interaction_lock(&view);
+                        view.setUserInteractionEnabled(false);
                         let remove = view.clone();
                         let block = RcBlock::new(move || {
                             remove.setAlpha(0.0);
@@ -1274,7 +1467,6 @@ impl IosState {
                             let handle = self.handle;
                             let host = self.host;
                             RcBlock::new(move |_: UIViewAnimatingPosition| {
-                                end_interaction_lock(&view);
                                 view.removeFromSuperview();
                                 schedule(move || {
                                     with_session(handle, |session| {
@@ -1587,6 +1779,16 @@ impl IosState {
                 f64::from(frame.height.max(0.0)),
             ),
         );
+        // The previous frame is the starting point of an implicit animation.
+        let from = handle.frame.map_or(rect, |frame| {
+            CGRect::new(
+                CGPoint::new(f64::from(frame.x), f64::from(frame.y)),
+                CGSize::new(
+                    f64::from(frame.width.max(0.0)),
+                    f64::from(frame.height.max(0.0)),
+                ),
+            )
+        });
         handle.frame = Some(frame);
 
         let pager = match &handle.content {
@@ -1615,29 +1817,29 @@ impl IosState {
                 _ => None,
             },
             gradient: handle.gradient.clone(),
-            rect,
             padding: handle.padding,
         };
 
+        if let Some(link) = handle.frame_link.take() {
+            link.invalidate();
+        }
         if let Some(animation) = animation
             .as_ref()
             .filter(|animation| animation_is_enabled(animation.duration_ms))
         {
-            let view = frames.view.clone();
-            begin_interaction_lock(&view);
-            let block = RcBlock::new(move || frames.apply());
-            let completion = RcBlock::new(move |_: UIViewAnimatingPosition| {
-                end_interaction_lock(&view);
-            });
-            run_animation(
+            // A display link updates the model frames every tick, so a tap
+            // during the animation hits the view where it actually is.
+            let link = FrameTicker::start(
+                frames,
+                from,
+                rect,
                 animation.duration_ms,
-                &animation.curve,
-                block,
-                Some(completion),
+                animation.curve.clone(),
                 mtm,
             );
+            handle.frame_link = Some(link);
         } else {
-            frames.apply();
+            frames.apply_rect(rect);
         }
 
         if let Some((scroll, pages, selected)) = pager {
@@ -1755,10 +1957,15 @@ impl IosState {
         let Some((tree, layout)) = self.row_layout(list, index, width as f32) else {
             return;
         };
+        let transition_ms = self
+            .runtime
+            .row_source(list)
+            .map_or(0, |props| props.row_transition_ms);
         let content = cell.contentView();
         let key = cell as *const UICollectionViewCell as usize;
 
         let previous = self.row_states.remove(&key);
+        let had_previous = previous.is_some();
         let rebinding = previous
             .as_ref()
             .is_some_and(|state| state.list == list && state.index == index);
@@ -1782,8 +1989,36 @@ impl IosState {
 
         let mut ops = render::diff(&old_tree, &tree);
         ops.extend(render::diff_layout(&old_tree, &tree, &old_layout, &layout));
+
+        // The snapshot shows the old content while the new widgets are laid
+        // out underneath. The cell stays available for reuse immediately.
+        let snapshot = if animation_is_enabled(transition_ms) && had_previous && !ops.is_empty() {
+            content.snapshotViewAfterScreenUpdates(false)
+        } else {
+            None
+        };
+
         for op in ops {
             self.apply_to(op, &mut views, &content, false);
+        }
+
+        if let Some(snapshot) = snapshot
+            && let Some(mtm) = MainThreadMarker::new()
+        {
+            content.addSubview(&snapshot);
+            let fading = snapshot.clone();
+            let block = RcBlock::new(move || fading.setAlpha(0.0));
+            let removing = snapshot;
+            let completion = RcBlock::new(move |_: UIViewAnimatingPosition| {
+                removing.removeFromSuperview();
+            });
+            run_animation(
+                transition_ms,
+                &AnimationCurve::EaseOut,
+                block,
+                Some(completion),
+                mtm,
+            );
         }
 
         self.record_row_actions(list, index, &tree);
@@ -1811,6 +2046,11 @@ impl IosState {
     /// Releases the widgets and actions of the row a cell currently shows.
     fn unbind_row(&mut self, key: usize) {
         if let Some(state) = self.row_states.remove(&key) {
+            for handle in state.views.values() {
+                if let Some(link) = &handle.frame_link {
+                    link.invalidate();
+                }
+            }
             if let Some(focus) = self.runtime.row_focus()
                 && tree::find(&state.tree, focus.field).is_some()
             {
@@ -2532,6 +2772,20 @@ fn load_asset(path: &str) -> Option<Retained<UIImage>> {
 
 fn apply_style(view: &UIView, node: &RenderNode, gradient: &mut Option<Retained<CAGradientLayer>>) {
     let style = &node.style;
+    // Native text and controls dim themselves; only the decoration the DSL
+    // paints is dimmed here.
+    let enabled = style.enabled.unwrap_or(true);
+    let background = style.background.map(|value| dim_color(value, enabled));
+    let gradient_style = style.gradient.map(|gradient| Gradient {
+        start: dim_color(gradient.start, enabled),
+        end: dim_color(gradient.end, enabled),
+        ..gradient
+    });
+    let border_style = style.border.map(|border| Border {
+        color: dim_color(border.color, enabled),
+        ..border
+    });
+    let elevation = if enabled { style.elevation } else { 0.0 };
     let layer = view.layer();
 
     let radii = style.corner_radii();
@@ -2562,16 +2816,16 @@ fn apply_style(view: &UIView, node: &RenderNode, gradient: &mut Option<Retained<
         matches!(&node.kind, NodeKind::Image(props) if props.scale == ImageScale::Fill);
     let clips = matches!(&node.kind, NodeKind::Scroll(_) | NodeKind::Recycler(_))
         || fills_frame
-        || (radius > 0.0 && style.elevation <= 0.0);
+        || (radius > 0.0 && elevation <= 0.0);
     view.setClipsToBounds(clips);
 
-    if style.gradient.is_some() {
+    if gradient_style.is_some() {
         view.setBackgroundColor(None);
     } else {
-        view.setBackgroundColor(style.background.map(color).as_deref());
+        view.setBackgroundColor(background.map(color).as_deref());
     }
 
-    if let Some(shape) = style.gradient {
+    if let Some(shape) = gradient_style {
         let gradient_layer = gradient.get_or_insert_with(CAGradientLayer::new);
         if gradient_layer.superlayer().is_none() {
             view.layer().insertSublayer_atIndex(gradient_layer, 0);
@@ -2603,7 +2857,7 @@ fn apply_style(view: &UIView, node: &RenderNode, gradient: &mut Option<Retained<
         gradient_layer.removeFromSuperlayer();
     }
 
-    if let Some(border) = style.border {
+    if let Some(border) = border_style {
         let border_color = cg_color(border.color);
         layer.setBorderWidth(f64::from(border.width));
         layer.setBorderColor(Some(&border_color));
@@ -2614,13 +2868,13 @@ fn apply_style(view: &UIView, node: &RenderNode, gradient: &mut Option<Retained<
 
     view.setAlpha(f64::from(style.opacity.unwrap_or(1.0)));
 
-    if style.elevation > 0.0 {
+    if elevation > 0.0 {
         // SAFETY: `CGColor` is retained for as long as the layer keeps it.
         let shadow = unsafe { UIColor::blackColor().CGColor() };
         layer.setShadowColor(Some(&shadow));
         layer.setShadowOpacity(0.18);
-        layer.setShadowRadius(f64::from(style.elevation));
-        layer.setShadowOffset(CGSize::new(0.0, f64::from(style.elevation / 2.0)));
+        layer.setShadowRadius(f64::from(elevation));
+        layer.setShadowOffset(CGSize::new(0.0, f64::from(elevation / 2.0)));
     } else {
         layer.setShadowOpacity(0.0);
     }
