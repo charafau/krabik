@@ -34,6 +34,8 @@ class KrabikHostController(
     private val mainContainer: FrameLayout,
     private val navContainer: FrameLayout,
     private val main: RustRootView,
+    /** Arms or disarms the activity's back callback; see [setBackEnabled]. */
+    private val onBackEnabled: (Boolean) -> Unit,
 ) {
     /**
      * The screen stack, root first. Screens are plain fragments added to
@@ -168,6 +170,15 @@ class KrabikHostController(
         lastPopAnimated = false
     }
 
+    /**
+     * Whether the application handles the system back action right now. When
+     * it does not, the system's own behaviour applies, including the
+     * predictive "back to home" animation on the root screen.
+     */
+    fun setBackEnabled(enabled: Boolean) {
+        onBackEnabled(enabled)
+    }
+
     // endregion
 
     // region Toolbar and bottom navigation
@@ -240,12 +251,15 @@ class KrabikHostController(
             }
         }
         toolbar.visibility = if (hidden || screens.isEmpty()) View.GONE else View.VISIBLE
+        // The system-bar padding depends on which bars are showing.
+        toolbar.rootView.requestApplyInsets()
     }
 
     /** Applies the top screen's bottom navigation bar; no items hides it. */
     fun setBottomNavigation(labels: Array<String>, icons: Array<String>, selected: Int) {
         bottomNavigation.configure(labels.toList(), icons.toList(), selected)
         bottomNavigation.visibility = if (labels.isEmpty()) View.GONE else View.VISIBLE
+        bottomNavigation.rootView.requestApplyInsets()
     }
 
     // endregion

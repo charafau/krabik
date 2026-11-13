@@ -26,6 +26,8 @@ pub(crate) struct Session<P: Platform> {
     navigation: Vec<Screen>,
     /// The alert the controller is showing.
     dialog: Option<Dialog>,
+    /// Whether the controller was last told that back is handled here.
+    back_enabled: bool,
 }
 
 impl<P: Platform> Session<P> {
@@ -41,6 +43,7 @@ impl<P: Platform> Session<P> {
             controller: None,
             navigation: Vec::new(),
             dialog: None,
+            back_enabled: false,
         }
     }
 
@@ -129,6 +132,13 @@ impl<P: Platform> Session<P> {
         let sheet = self.app.sheet().is_some();
         if sheet != self.has_sheet() {
             self.sync_sheet(cx, sheet)?;
+        }
+        let back_enabled = self.app.back().is_some();
+        if back_enabled != self.back_enabled {
+            if let Some(controller) = self.controller.as_ref() {
+                controller.set_back_enabled(cx, back_enabled)?;
+            }
+            self.back_enabled = back_enabled;
         }
         Ok(())
     }
@@ -471,6 +481,10 @@ mod tests {
             self.0.borrow_mut().push(format!("chrome {title}"));
             Ok(())
         }
+        fn set_back_enabled(&self, _cx: &mut (), enabled: bool) -> Result<(), Infallible> {
+            self.0.borrow_mut().push(format!("back {enabled}"));
+            Ok(())
+        }
         fn show_dialog(&self, _cx: &mut (), dialog: &Dialog) -> Result<(), Infallible> {
             self.0.borrow_mut().push(format!("dialog {}", dialog.title));
             Ok(())
@@ -640,7 +654,12 @@ mod tests {
 
         app.state().stack.truncate(1);
         session.render_all(&mut ()).unwrap();
-        assert_eq!(take(&log), ["pop 2 Slide", "root false", "chrome HOME"]);
+        // Back at the root there is nothing left to go back to, so the
+        // platform is told to handle back itself again.
+        assert_eq!(
+            take(&log),
+            ["pop 2 Slide", "root false", "chrome HOME", "back false"]
+        );
         // The popped screens' hosts are gone; main and home remain.
         assert_eq!(session.hosts.len(), 2);
     }

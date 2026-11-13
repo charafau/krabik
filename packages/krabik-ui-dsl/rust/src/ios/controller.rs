@@ -107,6 +107,12 @@ impl Controller<Ios> for IosController {
         Ok(())
     }
 
+    fn set_back_enabled(&self, _: &mut MainThreadMarker, _enabled: bool) -> Result<(), Infallible> {
+        // iOS has no system back action; the navigation bar's back button
+        // asks the session directly.
+        Ok(())
+    }
+
     fn show_dialog(&self, _: &mut MainThreadMarker, dialog: &Dialog) -> Result<(), Infallible> {
         controller_show_dialog(&self.0, dialog);
         Ok(())

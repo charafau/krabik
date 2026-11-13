@@ -152,6 +152,16 @@ impl Controller<Android> for AndroidController {
         Ok(())
     }
 
+    fn set_back_enabled(&self, env: &mut Env<'_>, enabled: bool) -> JniResult<()> {
+        env.call_method(
+            self.0.as_obj(),
+            jni_str!("setBackEnabled"),
+            jni_sig!("(Z)V"),
+            &[JValue::Bool(enabled)],
+        )?;
+        Ok(())
+    }
+
     fn show_dialog(&self, env: &mut Env<'_>, dialog: &Dialog) -> JniResult<()> {
         let title = jcall!(env, env.new_string(&dialog.title))?;
         let message = jcall!(env, env.new_string(dialog.message.as_deref().unwrap_or("")))?;
