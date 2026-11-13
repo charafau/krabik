@@ -1,5 +1,6 @@
 //! One page per widget for the showcase app.
 
+use krabik_ui_dsl::app::Component;
 use krabik_ui_dsl::navigation::{BottomNavItem, BottomNavigation};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::ui::{
@@ -9,7 +10,7 @@ use krabik_ui_dsl::ui::{
     Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
 };
 
-use crate::ShowcaseApp;
+use crate::{Msg, ShowcaseApp};
 
 pub(crate) const COLOR_TEXT: u32 = 0xFF20_2125;
 pub(crate) const COLOR_MUTED: u32 = 0xFF66_6666;
@@ -22,7 +23,7 @@ const COLOR_PURPLE: u32 = 0xFF6A_1B9A;
 const COLOR_BORDER: u32 = 0xFFDD_DDDD;
 
 /// A muted secondary line of copy.
-pub(crate) fn caption(text: &str) -> Text {
+pub(crate) fn caption<M>(text: &str) -> Text<M> {
     Text::new(text).size(14).color(COLOR_MUTED)
 }
 
@@ -33,7 +34,7 @@ macro_rules! body {
     };
 }
 
-fn page(title: &str, subtitle: &str, body: Vec<Element>) -> Element {
+fn page(title: &str, subtitle: &str, body: Vec<Element<Msg>>) -> Element<Msg> {
     let mut column = Column::new()
         .padding(24)
         .spacing(14)
@@ -134,7 +135,7 @@ pub(crate) fn title(key: &str) -> &'static str {
 }
 
 /// Builds the content for one navigation screen.
-pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element> {
+pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element<Msg>> {
     Some(match key {
         "home" => home(),
         "text" => text_page(),
@@ -168,16 +169,22 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element> {
         "recycled-list" => recycled_list_page(app),
         "layouts" => layouts_page(),
         "styling" => styling_page(),
-        "checklist" => app.checklist.view(),
+        "checklist" => app.checklist.view().map(Msg::Checklist),
         _ => return None,
     })
 }
 
-fn page_button(label: &'static str, action: &'static str) -> Button {
-    Button::new(label).action(action).width_percent(1.0)
+/// A catalog entry: `page:<key>` opens that screen, anything else is the
+/// dialog entry.
+fn page_button(label: &'static str, action: &'static str) -> Button<Msg> {
+    let message = match screen_key(action) {
+        Some(key) => Msg::Open(key),
+        None => Msg::OpenDialog,
+    };
+    Button::new(label).on_click(message).width_percent(1.0)
 }
 
-pub(crate) fn home() -> Element {
+pub(crate) fn home() -> Element<Msg> {
     let catalog: [(&str, &[(&str, &str)]); 8] = [
         (
             "Text & layout",
@@ -279,7 +286,7 @@ pub(crate) fn home() -> Element {
         .into()
 }
 
-fn text_page() -> Element {
+fn text_page() -> Element<Msg> {
     page(
         "Text",
         "Sizes, weights, colors, alignment and truncation.",
@@ -314,7 +321,7 @@ fn text_page() -> Element {
     )
 }
 
-fn button_page(app: &ShowcaseApp) -> Element {
+fn button_page(app: &ShowcaseApp) -> Element<Msg> {
     page(
         "Button",
         "Clicks dispatch typed events; disabled buttons ignore input.",
@@ -322,14 +329,14 @@ fn button_page(app: &ShowcaseApp) -> Element {
             Text::new(format!("Taps: {}", app.taps))
                 .size(20)
                 .color(COLOR_TEXT),
-            Button::new("Add one").action("demo:tap"),
-            Button::new("Reset").action("demo:reset"),
+            Button::new("Add one").on_click(Msg::Tap),
+            Button::new("Reset").on_click(Msg::ResetTaps),
             Button::new("Disabled").enabled(false),
         ],
     )
 }
 
-fn text_field_page(app: &ShowcaseApp) -> Element {
+fn text_field_page(app: &ShowcaseApp) -> Element<Msg> {
     let submitted = if app.submitted.is_empty() {
         "Press return to submit.".to_string()
     } else {
@@ -341,8 +348,8 @@ fn text_field_page(app: &ShowcaseApp) -> Element {
         body![
             TextField::new(app.name.clone())
                 .placeholder("Type your name")
-                .action("demo:name")
-                .submit_action("demo:name:submit")
+                .on_change(Msg::Name)
+                .on_submit(Msg::SubmitName)
                 .accessibility_label("Name")
                 .width_percent(1.0),
             Text::new(format!("Value: {}", app.name))
@@ -353,7 +360,7 @@ fn text_field_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-fn switch_page(app: &ShowcaseApp) -> Element {
+fn switch_page(app: &ShowcaseApp) -> Element<Msg> {
     page(
         "Switch",
         "Booleans are simple: the app stores the state and the switch reflects it.",
@@ -365,7 +372,7 @@ fn switch_page(app: &ShowcaseApp) -> Element {
                 .child(Spacer::new())
                 .child(
                     Switch::new(app.notifications)
-                        .action("demo:notifications")
+                        .on_toggle(Msg::Notifications)
                         .accessibility_label("Notifications"),
                 ),
             if app.notifications {
@@ -381,13 +388,13 @@ fn switch_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-fn checkbox_page(app: &ShowcaseApp) -> Element {
+fn checkbox_page(app: &ShowcaseApp) -> Element<Msg> {
     page(
         "Checkbox",
         "Independent checkboxes, each with its own toggle action.",
         body![
             Checkbox::new("Wi-Fi", app.wifi)
-                .action("demo:wifi")
+                .on_toggle(Msg::Wifi)
                 .accessibility_label("Wi-Fi"),
             caption(if app.wifi {
                 "Wi-Fi is on."
@@ -395,7 +402,7 @@ fn checkbox_page(app: &ShowcaseApp) -> Element {
                 "Wi-Fi is off."
             }),
             Checkbox::new("Bluetooth", app.bluetooth)
-                .action("demo:bluetooth")
+                .on_toggle(Msg::Bluetooth)
                 .accessibility_label("Bluetooth"),
             caption(if app.bluetooth {
                 "Bluetooth is on."
@@ -406,14 +413,14 @@ fn checkbox_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-fn radio_buttons_page(app: &ShowcaseApp) -> Element {
+fn radio_buttons_page(app: &ShowcaseApp) -> Element<Msg> {
     page(
         "Radio buttons",
         "These are independent controls: the application owns the mutual exclusion.",
         body![
-            RadioButton::new("Small", app.radio_choice == 0).action("demo:radio:0"),
-            RadioButton::new("Medium", app.radio_choice == 1).action("demo:radio:1"),
-            RadioButton::new("Large", app.radio_choice == 2).action("demo:radio:2"),
+            RadioButton::new("Small", app.radio_choice == 0).on_toggle(|_| Msg::Radio(0)),
+            RadioButton::new("Medium", app.radio_choice == 1).on_toggle(|_| Msg::Radio(1)),
+            RadioButton::new("Large", app.radio_choice == 2).on_toggle(|_| Msg::Radio(2)),
             caption(&format!(
                 "Selected: {}",
                 ["Small", "Medium", "Large"][app.radio_choice]
@@ -422,14 +429,14 @@ fn radio_buttons_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-fn radio_group_page(app: &ShowcaseApp) -> Element {
+fn radio_group_page(app: &ShowcaseApp) -> Element<Msg> {
     page(
         "Radio group",
         "The group owns the selection and reports the chosen index with one event.",
         body![
             RadioGroup::new(["Small", "Medium", "Large"])
                 .selected(app.size_choice)
-                .action("demo:size")
+                .on_select(Msg::Size)
                 .accessibility_label("Size")
                 .width_percent(1.0),
             caption(&format!(
@@ -441,26 +448,27 @@ fn radio_group_page(app: &ShowcaseApp) -> Element {
 }
 
 /// The system alert shown by the "Dialog" entry.
-pub(crate) fn dialog() -> Dialog {
+pub(crate) fn dialog() -> Dialog<Msg> {
     Dialog::new("Delete task?")
         .message("This cannot be undone.")
-        .cancel("Cancel", "dialog:close")
-        .destructive("Delete", "dialog:delete")
+        .cancel("Cancel", Msg::CloseDialog)
+        .destructive("Delete", Msg::CloseDialog)
 }
 
 /// The content of the native bottom sheet.
-pub(crate) fn sheet() -> BottomSheet {
-    BottomSheet::new("sheet:close")
+pub(crate) fn sheet() -> BottomSheet<Msg> {
+    BottomSheet::new()
+        .on_dismiss(Msg::CloseSheet)
         .child(Text::new("Filters").size(20).bold().color(COLOR_TEXT))
         .child(
             Text::new("The native sheet provides the surface, drag handle and dismissal.")
                 .size(15)
                 .color(COLOR_MUTED),
         )
-        .child(Button::new("Close").action("sheet:close"))
+        .child(Button::new("Close").on_click(Msg::CloseSheet))
 }
 
-fn date_picker_page(app: &ShowcaseApp) -> Element {
+fn date_picker_page(app: &ShowcaseApp) -> Element<Msg> {
     page(
         "Date picker",
         "Compact fields open the platform picker; inline calendars stay visible.",
@@ -469,7 +477,7 @@ fn date_picker_page(app: &ShowcaseApp) -> Element {
                 .size(18)
                 .color(COLOR_TEXT),
             DatePicker::new(app.date)
-                .action("demo:date")
+                .on_change(Msg::Date)
                 .accessibility_label("Compact date"),
             caption("Tap the field to open the native date picker."),
             Text::new(format!("Inline: {}", app.inline_date))
@@ -477,7 +485,7 @@ fn date_picker_page(app: &ShowcaseApp) -> Element {
                 .color(COLOR_TEXT),
             DatePicker::new(app.inline_date)
                 .mode(DatePickerMode::Inline)
-                .action("demo:date-inline")
+                .on_change(Msg::InlineDate)
                 .accessibility_label("Inline date"),
             caption("The inline calendar reports every selected day."),
             Text::new(format!("Time: {}", app.time))
@@ -485,7 +493,7 @@ fn date_picker_page(app: &ShowcaseApp) -> Element {
                 .color(COLOR_TEXT),
             DatePicker::time(app.time)
                 .time_range(TimeValue::new(8, 0), TimeValue::new(18, 0))
-                .action("demo:time")
+                .on_change(Msg::Time)
                 .accessibility_label("Time"),
             caption("Time pickers use the same widget; values are bounded to 08:00-18:00."),
             Text::new(format!(
@@ -495,7 +503,7 @@ fn date_picker_page(app: &ShowcaseApp) -> Element {
             .size(18)
             .color(COLOR_TEXT),
             DatePicker::date_time(app.date_time_date, app.date_time)
-                .action("demo:date-time")
+                .on_change(Msg::DateTime)
                 .accessibility_label("Date and time"),
             caption("Date-and-time pickers report both components together."),
             Text::new(format!("Bounded: {}", app.range_date))
@@ -503,14 +511,14 @@ fn date_picker_page(app: &ShowcaseApp) -> Element {
                 .color(COLOR_TEXT),
             DatePicker::new(app.range_date)
                 .range(DateValue::new(2026, 1, 1), DateValue::new(2026, 12, 31))
-                .action("demo:date-range")
+                .on_change(Msg::RangeDate)
                 .accessibility_label("Bounded date"),
             caption("Dates outside 2026 are clamped to the nearest bound."),
         ],
     )
 }
 
-fn tabs_page(app: &ShowcaseApp) -> Element {
+fn tabs_page(app: &ShowcaseApp) -> Element<Msg> {
     let content = match app.tab {
         0 => "Overview: the first tab is selected by default.",
         1 => "Details: the app owns the selected index.",
@@ -522,22 +530,22 @@ fn tabs_page(app: &ShowcaseApp) -> Element {
         vec![
             Tabs::new(["Overview", "Details", "Settings"])
                 .selected(app.tab)
-                .action("demo:tab")
+                .on_select(Msg::Tab)
                 .child(Text::new(content).size(18).color(COLOR_TEXT).padding(16))
                 .into(),
             caption("Tabs composes a TabBar above application-owned content.").into(),
             TabBar::new(["Day", "Week", "Month"])
                 .selected(app.tab.min(2))
-                .action("demo:tab")
+                .on_select(Msg::Tab)
                 .accessibility_label("Period")
                 .into(),
         ],
     )
 }
 
-fn animations_page(app: &ShowcaseApp) -> Element {
+fn animations_page(app: &ShowcaseApp) -> Element<Msg> {
     let open = app.animations;
-    let extra: Element = if open {
+    let extra: Element<Msg> = if open {
         Text::new("Entered with a fade and scale.")
             .color(COLOR_ACCENT)
             .animate_enter(220)
@@ -552,7 +560,8 @@ fn animations_page(app: &ShowcaseApp) -> Element {
         "Frames & opacity",
         "Frame size, position and opacity follow state changes with a spring curve.",
         body![
-            Button::new(if open { "Hide panel" } else { "Show panel" }).action("demo:animate"),
+            Button::new(if open { "Hide panel" } else { "Show panel" })
+                .on_click(Msg::ToggleAnimations),
             Column::new()
                 .animate(320)
                 .animation_curve(AnimationCurve::spring(0.72, 0.35))
@@ -589,14 +598,14 @@ fn animations_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-fn animation_decoration_page(app: &ShowcaseApp) -> Element {
+fn animation_decoration_page(app: &ShowcaseApp) -> Element<Msg> {
     let alt = app.decoration_alt;
     page(
         "Decoration",
         "Fill, gradient, border, corners and elevation interpolate with one transition.",
         body![
             Button::new(if alt { "Cool palette" } else { "Warm palette" })
-                .action("demo:decoration"),
+                .on_click(Msg::ToggleDecoration),
             Column::new()
                 .animate(360)
                 .animation_curve(AnimationCurve::cubic_bezier(0.2, 0.8, 0.2, 1.0))
@@ -645,7 +654,7 @@ fn animation_decoration_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-fn animation_enter_exit_page(app: &ShowcaseApp) -> Element {
+fn animation_enter_exit_page(app: &ShowcaseApp) -> Element<Msg> {
     let mut cards = Column::new()
         .animate(320)
         .animation_curve(AnimationCurve::spring(0.75, 0.3))
@@ -685,12 +694,12 @@ fn animation_enter_exit_page(app: &ShowcaseApp) -> Element {
                 .spacing(10)
                 .child(
                     Button::new("Add card")
-                        .action("demo:add-card")
+                        .on_click(Msg::AddCard)
                         .enabled(app.cards < 4),
                 )
                 .child(
                     Button::new("Remove card")
-                        .action("demo:remove-card")
+                        .on_click(Msg::RemoveCard)
                         .enabled(app.cards > 0),
                 ),
             Text::new(format!("{} cards", app.cards))
@@ -704,9 +713,9 @@ fn animation_enter_exit_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-fn animation_curves_page(app: &ShowcaseApp) -> Element {
+fn animation_curves_page(app: &ShowcaseApp) -> Element<Msg> {
     let wide = app.curves_alt;
-    let bar = |label: &'static str, color: u32, curve: AnimationCurve| -> Element {
+    let bar = |label: &'static str, color: u32, curve: AnimationCurve| -> Element<Msg> {
         Column::new()
             .spacing(6)
             .width_percent(1.0)
@@ -726,7 +735,7 @@ fn animation_curves_page(app: &ShowcaseApp) -> Element {
         "Curves & springs",
         "Four bars run the same width change with different timing curves.",
         body![
-            Button::new("Run curves").action("demo:curves"),
+            Button::new("Run curves").on_click(Msg::RunCurves),
             Text::new(if wide {
                 "Target: wide"
             } else {
@@ -747,19 +756,19 @@ fn animation_curves_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-fn page_transitions_page() -> Element {
+fn page_transitions_page() -> Element<Msg> {
     page(
         "Page transitions",
         "Each screen chooses the native transition used when it is pushed.",
         body![
             Button::new("Push with slide")
-                .action("page:transition-slide")
+                .on_click(Msg::Open("transition-slide"))
                 .width_percent(1.0),
             Button::new("Push with fade")
-                .action("page:transition-fade")
+                .on_click(Msg::Open("transition-fade"))
                 .width_percent(1.0),
             Button::new("Push with no animation")
-                .action("page:transition-none")
+                .on_click(Msg::Open("transition-none"))
                 .width_percent(1.0),
             caption("Go back after each push to compare another style."),
             caption("Pop reverses the same native transition."),
@@ -767,7 +776,7 @@ fn page_transitions_page() -> Element {
     )
 }
 
-fn transition_demo_page(key: &'static str) -> Element {
+fn transition_demo_page(key: &'static str) -> Element<Msg> {
     let (title, detail) = match key {
         "transition-fade" => ("Fade", "Pushed with a cross-fade transition."),
         "transition-none" => ("Instant", "Pushed with no animation."),
@@ -783,13 +792,13 @@ fn transition_demo_page(key: &'static str) -> Element {
     )
 }
 
-fn bottom_sheet_page() -> Element {
+fn bottom_sheet_page() -> Element<Msg> {
     page(
         "Bottom sheet",
         "A Rust button asks the session to present a platform-native bottom sheet.",
         body![
             Button::new("Open bottom sheet")
-                .action("sheet:open")
+                .on_click(Msg::OpenSheet)
                 .width_percent(1.0),
             caption(
                 "Android uses a Material BottomSheetDialogFragment; iOS uses UISheetPresentationController. Both size the sheet to its content.",
@@ -799,9 +808,9 @@ fn bottom_sheet_page() -> Element {
     )
 }
 
-fn pager_page(app: &ShowcaseApp) -> Element {
+fn pager_page(app: &ShowcaseApp) -> Element<Msg> {
     let selected = app.pager_page.min(2);
-    let card = |title: &'static str, body: &'static str, color: u32| -> Element {
+    let card = |title: &'static str, body: &'static str, color: u32| -> Element<Msg> {
         Column::new()
             .background(color)
             .padding(20)
@@ -819,7 +828,7 @@ fn pager_page(app: &ShowcaseApp) -> Element {
                 .color(COLOR_TEXT),
             Pager::new()
                 .selected(selected)
-                .action("demo:pager")
+                .on_select(Msg::Page)
                 .height(320)
                 .accessibility_label("View pager")
                 .child(card("One", "The first page.", 0xFF15_65C0))
@@ -830,9 +839,9 @@ fn pager_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-fn tabs_view_page(app: &ShowcaseApp) -> Element {
+fn tabs_view_page(app: &ShowcaseApp) -> Element<Msg> {
     let selected = app.tabs_view.min(2);
-    let page_body = |title: &'static str, detail: &'static str, color: u32| -> Element {
+    let page_body = |title: &'static str, detail: &'static str, color: u32| -> Element<Msg> {
         Column::new()
             .background(color)
             .padding(20)
@@ -853,7 +862,7 @@ fn tabs_view_page(app: &ShowcaseApp) -> Element {
             .color(COLOR_TEXT),
             TabsView::new(["Overview", "Details", "Settings"])
                 .selected(selected)
-                .action("demo:tabs-view")
+                .on_select(Msg::TabsView)
                 .height(360)
                 .child(page_body(
                     "Overview page",
@@ -875,7 +884,7 @@ fn tabs_view_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-fn bottom_navigation_page(app: &ShowcaseApp) -> Element {
+fn bottom_navigation_page(app: &ShowcaseApp) -> Element<Msg> {
     let content = match app.bottom_dest.min(2) {
         0 => "Home destination",
         1 => "Search destination",
@@ -889,7 +898,7 @@ fn bottom_navigation_page(app: &ShowcaseApp) -> Element {
 }
 
 /// The native bar declared on the bottom-navigation screen.
-pub(crate) fn bottom_navigation(app: &ShowcaseApp) -> BottomNavigation {
+pub(crate) fn bottom_navigation(app: &ShowcaseApp) -> BottomNavigation<Msg> {
     BottomNavigation::new([
         BottomNavItem::new("Home", Icon::new().drawable("ic_home").sf("house.fill")),
         BottomNavItem::new(
@@ -902,10 +911,10 @@ pub(crate) fn bottom_navigation(app: &ShowcaseApp) -> BottomNavigation {
         ),
     ])
     .selected(app.bottom_dest.min(2))
-    .action("demo:bottom-nav")
+    .on_select(Msg::BottomDest)
 }
 
-fn toolbar_page(app: &ShowcaseApp) -> Element {
+fn toolbar_page(app: &ShowcaseApp) -> Element<Msg> {
     page(
         "Toolbar",
         "The native toolbar is configured by the Screen, not by page content.",
@@ -927,7 +936,7 @@ fn toolbar_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-fn slider_page(app: &ShowcaseApp) -> Element {
+fn slider_page(app: &ShowcaseApp) -> Element<Msg> {
     page(
         "Slider",
         "Continuous sliders report every change; stepped sliders quantize the value.",
@@ -938,7 +947,7 @@ fn slider_page(app: &ShowcaseApp) -> Element {
             Slider::new(app.volume)
                 .min(0.0)
                 .max(100.0)
-                .action("demo:volume")
+                .on_change(Msg::Volume)
                 .accessibility_label("Volume")
                 .width_percent(1.0),
             Text::new(format!("Stepped: {:.0}", app.stepped))
@@ -948,7 +957,7 @@ fn slider_page(app: &ShowcaseApp) -> Element {
                 .min(0.0)
                 .max(100.0)
                 .step(10.0)
-                .action("demo:stepped")
+                .on_change(Msg::Stepped)
                 .accessibility_label("Stepped volume")
                 .width_percent(1.0),
             caption("The stepped slider only reports multiples of ten."),
@@ -956,7 +965,7 @@ fn slider_page(app: &ShowcaseApp) -> Element {
     )
 }
 
-fn progress_page(app: &ShowcaseApp) -> Element {
+fn progress_page(app: &ShowcaseApp) -> Element<Msg> {
     page(
         "Progress",
         "A determinate bar driven by application state.",
@@ -970,14 +979,14 @@ fn progress_page(app: &ShowcaseApp) -> Element {
                 .width_percent(1.0),
             Row::new()
                 .spacing(8)
-                .child(Button::new("Set 25%").action("demo:progress:25"))
-                .child(Button::new("Set 50%").action("demo:progress:50"))
-                .child(Button::new("Set 100%").action("demo:progress:100")),
+                .child(Button::new("Set 25%").on_click(Msg::Progress(0.25)))
+                .child(Button::new("Set 50%").on_click(Msg::Progress(0.5)))
+                .child(Button::new("Set 100%").on_click(Msg::Progress(1.0))),
         ],
     )
 }
 
-fn spinner_page() -> Element {
+fn spinner_page() -> Element<Msg> {
     page(
         "Spinner",
         "An indeterminate indicator for work whose end is not known.",
@@ -992,7 +1001,7 @@ fn spinner_page() -> Element {
     )
 }
 
-fn image_page() -> Element {
+fn image_page() -> Element<Msg> {
     page(
         "Image",
         "Bundled assets load immediately; remote images load from a URL.",
@@ -1019,7 +1028,7 @@ fn image_page() -> Element {
     )
 }
 
-fn scroll_page() -> Element {
+fn scroll_page() -> Element<Msg> {
     let mut vertical = Column::new().spacing(8).width_percent(1.0);
     for index in 1..=20 {
         vertical = vertical.child(
@@ -1075,7 +1084,7 @@ fn scroll_page() -> Element {
     )
 }
 
-fn list_page(app: &ShowcaseApp) -> Element {
+fn list_page(app: &ShowcaseApp) -> Element<Msg> {
     let items = app.list_items.clone();
     let mut column = Column::new()
         .padding(24)
@@ -1106,7 +1115,7 @@ fn list_page(app: &ShowcaseApp) -> Element {
     column.into()
 }
 
-fn recycled_list_page(app: &ShowcaseApp) -> Element {
+fn recycled_list_page(app: &ShowcaseApp) -> Element<Msg> {
     let items = app.recycled_items.clone();
     let alt = app.recycled_alt;
     Column::new()
@@ -1132,7 +1141,7 @@ fn recycled_list_page(app: &ShowcaseApp) -> Element {
                 )
                 .child(
                     Button::new("Shuffle")
-                        .action("demo:recycled-shuffle")
+                        .on_click(Msg::RecycledShuffle)
                         .accessibility_label("Shuffle rows"),
                 ),
         )
@@ -1160,7 +1169,7 @@ fn recycled_list_page(app: &ShowcaseApp) -> Element {
                         .child(Text::new(label).size(15).grow(1.0))
                         .child(
                             Button::new("Tap")
-                                .action("demo:recycled-tap")
+                                .on_click(Msg::RecycledTap)
                                 .accessibility_label(format!("Tap {row}")),
                         )
                         .into()
@@ -1169,7 +1178,7 @@ fn recycled_list_page(app: &ShowcaseApp) -> Element {
         .into()
 }
 
-fn layouts_page() -> Element {
+fn layouts_page() -> Element<Msg> {
     page(
         "Layouts",
         "Rows, columns and spacers compose with flexbox.",
@@ -1199,7 +1208,7 @@ fn layouts_page() -> Element {
     )
 }
 
-fn styling_page() -> Element {
+fn styling_page() -> Element<Msg> {
     page(
         "Styling",
         "Backgrounds, gradients, borders, radii, opacity and elevation.",
@@ -1238,7 +1247,7 @@ fn styling_page() -> Element {
                 .padding_each(EdgeInsets::symmetric(14, 10))
                 .corner_radius(12),
             Button::new("Disabled action")
-                .action("demo:noop")
+                .on_click(Msg::Noop)
                 .enabled(false)
                 .color(0xFFFF_FFFF)
                 .background(COLOR_ACCENT)
@@ -1259,7 +1268,7 @@ fn styling_page() -> Element {
     )
 }
 
-fn chip(text: &str, color: u32) -> Text {
+fn chip(text: &str, color: u32) -> Text<Msg> {
     Text::new(text)
         .size(14)
         .color(0xFFFF_FFFF)

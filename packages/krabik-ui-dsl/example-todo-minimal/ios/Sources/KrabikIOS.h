@@ -33,8 +33,9 @@ void krabik_ios_destroy(uint64_t handle);
 /// Reports that the user dismissed the sheet natively.
 void krabik_ios_on_modal_dismiss(uint64_t handle);
 
-/// Reports a button press of the system alert.
-void krabik_ios_on_dialog_action(uint64_t handle, const char *action);
+/// Reports that the system alert closed by the button at `button`, or
+/// without a button when `button` is negative.
+void krabik_ios_on_dialog_action(uint64_t handle, int64_t button);
 
 /// Reports a selection in the host-level tab bar.
 void krabik_ios_on_bottom_navigation_selected(uint64_t handle, uint64_t index);
@@ -45,8 +46,8 @@ double krabik_ios_content_height(uint64_t handle, uint64_t host);
 /// Dispatches a native back action. Returns whether the application handled it.
 bool krabik_ios_on_back(uint64_t handle);
 
-/// Dispatches a toolbar action.
-void krabik_ios_on_toolbar_action(uint64_t handle, const char *action);
+/// Reports a tap on the toolbar item at `index`.
+void krabik_ios_on_toolbar_action(uint64_t handle, uint64_t index);
 
 #ifdef __cplusplus
 }

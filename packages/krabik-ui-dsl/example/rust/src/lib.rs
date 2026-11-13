@@ -13,15 +13,64 @@ use std::sync::Arc;
 
 use jni::EnvUnowned;
 use jni::objects::JObject;
-use krabik_ui_dsl::app::{App, Event, set_app_factory};
+use krabik_ui_dsl::app::{App, Component, set_app_factory};
 use krabik_ui_dsl::navigation::{Navigation, Screen, ScreenTransition, Toolbar};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
-use krabik_ui_dsl::ui::{DateValue, Element, Icon, TimeValue};
+use krabik_ui_dsl::ui::{DatePickerValue, DateValue, Element, Icon, TimeValue};
 
 mod checklist;
 mod pages;
 
 use checklist::Checklist;
+
+/// Everything that can happen in the showcase.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Msg {
+    /// Opens the screen with this key; `home` returns to the catalog.
+    Open(&'static str),
+    /// The system or toolbar back action.
+    Back,
+    /// Something happened on the checklist screen, a component of its own.
+    Checklist(checklist::Msg),
+
+    Name(String),
+    SubmitName,
+    Tap,
+    ResetTaps,
+    Progress(f32),
+    RecycledTap,
+    RecycledShuffle,
+    ToggleAnimations,
+    ToggleDecoration,
+    AddCard,
+    RemoveCard,
+    RunCurves,
+    /// A button that exists only to show a style.
+    Noop,
+    /// A native toolbar item was tapped.
+    Toolbar(&'static str),
+    OpenDialog,
+    CloseDialog,
+    OpenSheet,
+    CloseSheet,
+
+    Notifications(bool),
+    Wifi(bool),
+    Bluetooth(bool),
+    Radio(usize),
+    Size(usize),
+    Date(DatePickerValue),
+    InlineDate(DatePickerValue),
+    RangeDate(DatePickerValue),
+    Time(DatePickerValue),
+    DateTime(DatePickerValue),
+    Tab(usize),
+    Page(usize),
+    TabsView(usize),
+    BottomDest(usize),
+    Volume(f32),
+    Stepped(f32),
+}
 
 /// The state of the showcase application.
 pub struct ShowcaseApp {
@@ -119,7 +168,7 @@ impl ShowcaseApp {
     /// The host shell calls this once at startup, before creating the root
     /// view. Without it the platform views fall back to the built-in gallery.
     pub fn install() {
-        set_app_factory(|| Box::new(Self::new()));
+        set_app_factory(Self::new);
     }
 }
 
@@ -129,12 +178,85 @@ impl Default for ShowcaseApp {
     }
 }
 
-impl App for ShowcaseApp {
-    fn view(&self) -> Element {
+impl Component for ShowcaseApp {
+    type Msg = Msg;
+
+    /// Not shown: with navigation, the first screen is the root.
+    fn view(&self) -> Element<Msg> {
         pages::home()
     }
 
-    fn navigation(&self) -> Option<Navigation> {
+    fn update(&mut self, msg: Msg) {
+        match msg {
+            Msg::Open("home") => self.stack.truncate(1),
+            Msg::Open(key) => {
+                // Only real screens are pushed, and never twice in a row.
+                if self.stack.last() != Some(&key) && pages::screen(self, key).is_some() {
+                    self.stack.push(key);
+                }
+            }
+            // Back closes whatever is on top: the dialog, the sheet, a screen.
+            Msg::Back => {
+                if self.dialog_open {
+                    self.dialog_open = false;
+                } else if self.sheet_open {
+                    self.sheet_open = false;
+                } else if self.stack.len() > 1 {
+                    self.stack.pop();
+                }
+            }
+            Msg::Checklist(msg) => self.checklist.update(msg),
+
+            Msg::Name(name) => {
+                self.name = name;
+                self.submitted.clear();
+            }
+            Msg::SubmitName => self.submitted = self.name.clone(),
+            Msg::Tap => self.taps += 1,
+            Msg::ResetTaps => self.taps = 0,
+            Msg::Progress(value) => self.progress = value,
+            Msg::RecycledTap => self.recycled_taps += 1,
+            Msg::RecycledShuffle => self.recycled_alt = !self.recycled_alt,
+            Msg::ToggleAnimations => self.animations = !self.animations,
+            Msg::ToggleDecoration => self.decoration_alt = !self.decoration_alt,
+            Msg::AddCard => self.cards = (self.cards + 1).min(4),
+            Msg::RemoveCard => self.cards = self.cards.saturating_sub(1),
+            Msg::RunCurves => self.curves_alt = !self.curves_alt,
+            Msg::Noop => {}
+            Msg::Toolbar(item) => {
+                self.toolbar_taps += 1;
+                self.toolbar_last = item.to_string();
+            }
+            Msg::OpenDialog => self.dialog_open = true,
+            Msg::CloseDialog => self.dialog_open = false,
+            Msg::OpenSheet => self.sheet_open = true,
+            Msg::CloseSheet => self.sheet_open = false,
+
+            Msg::Notifications(on) => self.notifications = on,
+            Msg::Wifi(on) => self.wifi = on,
+            Msg::Bluetooth(on) => self.bluetooth = on,
+            Msg::Radio(index) => self.radio_choice = index.min(2),
+            Msg::Size(index) => self.size_choice = index.min(2),
+            Msg::Date(value) => self.date = value.date().unwrap_or(self.date),
+            Msg::InlineDate(value) => self.inline_date = value.date().unwrap_or(self.inline_date),
+            Msg::RangeDate(value) => self.range_date = value.date().unwrap_or(self.range_date),
+            Msg::Time(value) => self.time = value.time().unwrap_or(self.time),
+            Msg::DateTime(value) => {
+                self.date_time_date = value.date().unwrap_or(self.date_time_date);
+                self.date_time = value.time().unwrap_or(self.date_time);
+            }
+            Msg::Tab(index) => self.tab = index.min(2),
+            Msg::Page(index) => self.pager_page = index.min(2),
+            Msg::TabsView(index) => self.tabs_view = index.min(2),
+            Msg::BottomDest(index) => self.bottom_dest = index.min(2),
+            Msg::Volume(value) => self.volume = value,
+            Msg::Stepped(value) => self.stepped = value,
+        }
+    }
+}
+
+impl App for ShowcaseApp {
+    fn navigation(&self) -> Option<Navigation<Msg>> {
         Some(Navigation::new(
             self.stack
                 .iter()
@@ -153,11 +275,11 @@ impl App for ShowcaseApp {
                             Toolbar::new()
                                 .subtitle("Host-level native chrome")
                                 .back_title("Back")
-                                .action("toolbar:refresh", "Refresh")
+                                .action("Refresh", Msg::Toolbar("Refresh"))
                                 .action_with_icon(
-                                    "toolbar:save",
                                     "Save",
                                     Icon::new().drawable("ic_save").sf("square.and.arrow.down"),
+                                    Msg::Toolbar("Save"),
                                 ),
                         );
                     }
@@ -167,283 +289,22 @@ impl App for ShowcaseApp {
         ))
     }
 
-    fn screen(&self, key: &str) -> Option<Element> {
+    fn screen(&self, key: &str) -> Option<Element<Msg>> {
         pages::screen(self, key)
     }
 
-    fn dialog(&self) -> Option<Dialog> {
+    fn dialog(&self) -> Option<Dialog<Msg>> {
         self.dialog_open.then(pages::dialog)
     }
 
-    fn sheet(&self) -> Option<BottomSheet> {
+    fn sheet(&self) -> Option<BottomSheet<Msg>> {
         self.sheet_open.then(pages::sheet)
     }
 
-    fn handle(&mut self, event: Event<'_>) -> bool {
-        match event {
-            Event::Click { action } if action.starts_with("page:") => {
-                let Some(key) = pages::screen_key(action) else {
-                    return false;
-                };
-                if key == "home" {
-                    if self.stack.len() > 1 {
-                        self.stack.truncate(1);
-                        true
-                    } else {
-                        false
-                    }
-                } else if self.stack.last() == Some(&key) {
-                    false
-                } else {
-                    self.stack.push(key);
-                    true
-                }
-            }
-            Event::Back => {
-                if self.dialog_open {
-                    self.dialog_open = false;
-                    true
-                } else if self.sheet_open {
-                    self.sheet_open = false;
-                    true
-                } else if self.stack.len() > 1 {
-                    self.stack.pop();
-                    true
-                } else {
-                    false
-                }
-            }
-            // The checklist screen owns every remaining event on its page.
-            _ if self.stack.last() == Some(&"checklist") => self.checklist.handle(event),
-            Event::TextChanged {
-                action: "demo:name",
-                value,
-            } => {
-                self.name = value.to_string();
-                self.submitted.clear();
-                true
-            }
-            Event::Submitted {
-                action: "demo:name:submit",
-            } => {
-                self.submitted = self.name.clone();
-                true
-            }
-            Event::Click { action } => match action {
-                "demo:tap" => {
-                    self.taps += 1;
-                    true
-                }
-                "demo:reset" => {
-                    self.taps = 0;
-                    true
-                }
-                "demo:progress:25" => {
-                    self.progress = 0.25;
-                    true
-                }
-                "demo:progress:50" => {
-                    self.progress = 0.5;
-                    true
-                }
-                "demo:progress:100" => {
-                    self.progress = 1.0;
-                    true
-                }
-                "demo:recycled-tap" => {
-                    self.recycled_taps += 1;
-                    true
-                }
-                "demo:recycled-shuffle" => {
-                    self.recycled_alt = !self.recycled_alt;
-                    true
-                }
-                "demo:animate" => {
-                    self.animations = !self.animations;
-                    true
-                }
-                "demo:decoration" => {
-                    self.decoration_alt = !self.decoration_alt;
-                    true
-                }
-                "demo:add-card" => {
-                    if self.cards >= 4 {
-                        return false;
-                    }
-                    self.cards += 1;
-                    true
-                }
-                "demo:remove-card" => {
-                    if self.cards == 0 {
-                        return false;
-                    }
-                    self.cards -= 1;
-                    true
-                }
-                "demo:curves" => {
-                    self.curves_alt = !self.curves_alt;
-                    true
-                }
-                "toolbar:refresh" => {
-                    self.toolbar_taps += 1;
-                    self.toolbar_last = "Refresh".to_string();
-                    true
-                }
-                "toolbar:save" => {
-                    self.toolbar_taps += 1;
-                    self.toolbar_last = "Save".to_string();
-                    true
-                }
-                "dialog:open" => {
-                    self.dialog_open = true;
-                    true
-                }
-                "dialog:close" | "dialog:delete" => {
-                    let changed = self.dialog_open;
-                    self.dialog_open = false;
-                    changed
-                }
-                "sheet:open" => {
-                    self.sheet_open = true;
-                    true
-                }
-                "sheet:close" => {
-                    let changed = self.sheet_open;
-                    self.sheet_open = false;
-                    changed
-                }
-                _ => false,
-            },
-            Event::Toggled { action, checked } => match action {
-                "demo:notifications" => {
-                    self.notifications = checked;
-                    true
-                }
-                "demo:wifi" => {
-                    self.wifi = checked;
-                    true
-                }
-                "demo:bluetooth" => {
-                    self.bluetooth = checked;
-                    true
-                }
-                "demo:radio:0" if checked => {
-                    self.radio_choice = 0;
-                    true
-                }
-                "demo:radio:1" if checked => {
-                    self.radio_choice = 1;
-                    true
-                }
-                "demo:radio:2" if checked => {
-                    self.radio_choice = 2;
-                    true
-                }
-                _ => false,
-            },
-            Event::Selected {
-                action: "demo:size",
-                index,
-            } => {
-                if index > 2 || self.size_choice == index {
-                    return false;
-                }
-                self.size_choice = index;
-                true
-            }
-            Event::DateChanged {
-                action: "demo:date",
-                date,
-            } => {
-                self.date = date;
-                true
-            }
-            Event::DateChanged {
-                action: "demo:date-inline",
-                date,
-            } => {
-                self.inline_date = date;
-                true
-            }
-            Event::DateChanged {
-                action: "demo:date-range",
-                date,
-            } => {
-                self.range_date = date;
-                true
-            }
-            Event::TimeChanged {
-                action: "demo:time",
-                time,
-            } => {
-                self.time = time;
-                true
-            }
-            Event::DateTimeChanged {
-                action: "demo:date-time",
-                date,
-                time,
-            } => {
-                self.date_time_date = date;
-                self.date_time = time;
-                true
-            }
-            Event::Selected {
-                action: "demo:tab",
-                index,
-            } => {
-                if index > 2 || self.tab == index {
-                    return false;
-                }
-                self.tab = index;
-                true
-            }
-            Event::Selected {
-                action: "demo:pager",
-                index,
-            } => {
-                if index > 2 || self.pager_page == index {
-                    return false;
-                }
-                self.pager_page = index;
-                true
-            }
-            Event::Selected {
-                action: "demo:tabs-view",
-                index,
-            } => {
-                if index > 2 || self.tabs_view == index {
-                    return false;
-                }
-                self.tabs_view = index;
-                true
-            }
-            Event::Selected {
-                action: "demo:bottom-nav",
-                index,
-            } => {
-                if index > 2 || self.bottom_dest == index {
-                    return false;
-                }
-                self.bottom_dest = index;
-                true
-            }
-            Event::ValueChanged {
-                action: "demo:volume",
-                value,
-            } => {
-                self.volume = value;
-                true
-            }
-            Event::ValueChanged {
-                action: "demo:stepped",
-                value,
-            } => {
-                self.stepped = value;
-                true
-            }
-            _ => false,
-        }
+    /// Back is ours while something can be closed; on the catalog with
+    /// nothing open, the platform leaves the app.
+    fn back(&self) -> Option<Msg> {
+        (self.dialog_open || self.sheet_open || self.stack.len() > 1).then_some(Msg::Back)
     }
 }
 
@@ -479,10 +340,6 @@ mod tests {
         ShowcaseApp::new()
     }
 
-    fn click(action: &'static str) -> Event<'static> {
-        Event::Click { action }
-    }
-
     #[test]
     fn starts_on_the_widget_catalog() {
         let app = app();
@@ -496,13 +353,13 @@ mod tests {
     #[test]
     fn page_actions_push_and_back_pops() {
         let mut app = app();
-        assert!(app.handle(click("page:radio-group")));
+        app.update(Msg::Open("radio-group"));
         assert_eq!(app.stack, vec!["home", "radio-group"]);
         assert!(app.screen("radio-group").is_some());
-        assert!(!app.handle(click("page:radio-group")));
-        assert!(app.handle(Event::Back));
+        app.update(Msg::Open("radio-group"));
+        app.update(app.back().expect("back is handled"));
         assert_eq!(app.stack, vec!["home"]);
-        assert!(app.handle(click("page:checklist")));
+        app.update(Msg::Open("checklist"));
         assert!(app.screen("checklist").is_some());
     }
 
@@ -511,98 +368,77 @@ mod tests {
         let mut app = app();
         assert!(app.dialog().is_none());
         assert!(app.sheet().is_none());
-        assert!(app.handle(click("dialog:open")));
+        app.update(Msg::OpenDialog);
         let dialog = app.dialog().expect("dialog");
         assert_eq!(dialog.title, "Delete task?");
-        assert_eq!(dialog.dismiss_action(), Some("dialog:close"));
-        assert!(app.handle(click("dialog:delete")));
+        assert!(dialog.is_cancelable());
+        app.update(Msg::CloseDialog);
         assert!(app.dialog().is_none());
-        assert!(app.handle(click("sheet:open")));
-        assert_eq!(app.sheet().expect("sheet").dismiss_action, "sheet:close");
-        assert!(app.handle(Event::Back));
+        app.update(Msg::OpenSheet);
+        assert!(app.sheet().expect("sheet").on_dismiss.is_set());
+        app.update(app.back().expect("back is handled"));
         assert!(app.sheet().is_none());
     }
 
     #[test]
     fn the_bottom_navigation_screen_declares_its_bar() {
         let mut app = app();
-        assert!(app.handle(click("page:bottom-navigation")));
+        app.update(Msg::Open("bottom-navigation"));
         let screens = app.navigation().expect("navigation").screens;
         assert!(screens[0].bottom_navigation.is_none());
         let bar = screens[1].bottom_navigation.as_ref().expect("bar");
         assert_eq!(bar.items.len(), 3);
-        assert_eq!(bar.action, "demo:bottom-nav");
+        assert!(bar.on_select.is_set());
     }
 
     #[test]
     fn unknown_pages_are_ignored_and_back_at_home_is_unhandled() {
         let mut app = app();
-        assert!(!app.handle(click("page:unknown")));
-        assert!(!app.handle(Event::Back));
+        app.update(Msg::Open("unknown"));
+        assert_eq!(app.back(), None);
     }
 
     #[test]
     fn radio_group_updates_the_selection() {
         let mut app = app();
-        assert!(app.handle(Event::Selected {
-            action: "demo:size",
-            index: 2,
-        }));
+        app.update(Msg::Size(2));
         assert_eq!(app.size_choice, 2);
-        assert!(!app.handle(Event::Selected {
-            action: "demo:size",
-            index: 2,
-        }));
-        assert!(!app.handle(Event::Selected {
-            action: "demo:size",
-            index: 9,
-        }));
+        app.update(Msg::Size(2));
+        app.update(Msg::Size(9));
     }
 
     #[test]
     fn stepped_slider_keeps_the_snapped_value_from_the_dsl() {
         let mut app = app();
-        assert!(app.handle(Event::ValueChanged {
-            action: "demo:stepped",
-            value: 70.0,
-        }));
+        app.update(Msg::Stepped(70.0));
         assert_eq!(app.stepped, 70.0);
     }
 
     #[test]
     fn date_pickers_update_their_dates() {
         let mut app = app();
-        assert!(app.handle(Event::DateChanged {
-            action: "demo:date",
-            date: DateValue::new(2027, 1, 2),
-        }));
+        app.update(Msg::Date(DatePickerValue::Date(DateValue::new(2027, 1, 2))));
         assert_eq!(app.date, DateValue::new(2027, 1, 2));
-        assert!(app.handle(Event::DateChanged {
-            action: "demo:date-inline",
-            date: DateValue::new(2027, 3, 4),
-        }));
+        app.update(Msg::InlineDate(DatePickerValue::Date(DateValue::new(
+            2027, 3, 4,
+        ))));
         assert_eq!(app.inline_date, DateValue::new(2027, 3, 4));
     }
 
     #[test]
     fn time_and_range_pickers_update_their_values() {
         let mut app = app();
-        assert!(app.handle(Event::TimeChanged {
-            action: "demo:time",
-            time: TimeValue::new(9, 45),
-        }));
+        app.update(Msg::Time(DatePickerValue::Time(TimeValue::new(9, 45))));
         assert_eq!(app.time, TimeValue::new(9, 45));
-        assert!(app.handle(Event::DateTimeChanged {
-            action: "demo:date-time",
+        app.update(Msg::DateTime(DatePickerValue::DateTime {
             date: DateValue::new(2027, 2, 3),
             time: TimeValue::new(18, 15),
         }));
         assert_eq!(app.date_time_date, DateValue::new(2027, 2, 3));
         assert_eq!(app.date_time, TimeValue::new(18, 15));
-        assert!(app.handle(Event::DateChanged {
-            action: "demo:date-range",
-            date: DateValue::new(2026, 8, 1),
-        }));
+        app.update(Msg::RangeDate(DatePickerValue::Date(DateValue::new(
+            2026, 8, 1,
+        ))));
         assert_eq!(app.range_date, DateValue::new(2026, 8, 1));
     }
 
@@ -631,44 +467,35 @@ mod tests {
     #[test]
     fn tab_bar_updates_the_selected_tab() {
         let mut app = app();
-        assert!(app.handle(Event::Selected {
-            action: "demo:tab",
-            index: 2,
-        }));
+        app.update(Msg::Tab(2));
         assert_eq!(app.tab, 2);
-        assert!(!app.handle(Event::Selected {
-            action: "demo:tab",
-            index: 2,
-        }));
-        assert!(!app.handle(Event::Selected {
-            action: "demo:tab",
-            index: 9,
-        }));
+        app.update(Msg::Tab(2));
+        app.update(Msg::Tab(9));
     }
 
     #[test]
     fn animations_toggle() {
         let mut app = app();
         assert!(app.animations);
-        assert!(app.handle(click("demo:animate")));
+        app.update(Msg::ToggleAnimations);
         assert!(!app.animations);
-        assert!(app.handle(click("demo:animate")));
+        app.update(Msg::ToggleAnimations);
         assert!(app.animations);
 
         assert!(app.decoration_alt);
-        assert!(app.handle(click("demo:decoration")));
+        app.update(Msg::ToggleDecoration);
         assert!(!app.decoration_alt);
 
         assert!(!app.curves_alt);
-        assert!(app.handle(click("demo:curves")));
+        app.update(Msg::RunCurves);
         assert!(app.curves_alt);
 
         assert_eq!(app.cards, 2);
-        assert!(app.handle(click("demo:add-card")));
-        assert!(app.handle(click("demo:add-card")));
+        app.update(Msg::AddCard);
+        app.update(Msg::AddCard);
         assert_eq!(app.cards, 4);
-        assert!(!app.handle(click("demo:add-card")));
-        assert!(app.handle(click("demo:remove-card")));
+        app.update(Msg::AddCard);
+        app.update(Msg::RemoveCard);
         assert_eq!(app.cards, 3);
     }
 
@@ -698,25 +525,16 @@ mod tests {
     #[test]
     fn container_widgets_update_their_state() {
         let mut app = app();
-        assert!(app.handle(Event::Selected {
-            action: "demo:pager",
-            index: 2,
-        }));
+        app.update(Msg::Page(2));
         assert_eq!(app.pager_page, 2);
-        assert!(app.handle(Event::Selected {
-            action: "demo:tabs-view",
-            index: 1,
-        }));
+        app.update(Msg::TabsView(1));
         assert_eq!(app.tabs_view, 1);
-        assert!(app.handle(Event::Selected {
-            action: "demo:bottom-nav",
-            index: 2,
-        }));
+        app.update(Msg::BottomDest(2));
         assert_eq!(app.bottom_dest, 2);
-        assert!(app.handle(click("toolbar:refresh")));
+        app.update(Msg::Toolbar("Refresh"));
         assert_eq!(app.toolbar_taps, 1);
         assert_eq!(app.toolbar_last, "Refresh");
-        assert!(app.handle(click("toolbar:save")));
+        app.update(Msg::Toolbar("Save"));
         assert_eq!(app.toolbar_taps, 2);
         assert_eq!(app.toolbar_last, "Save");
     }
@@ -736,10 +554,7 @@ mod tests {
             &pages::screen(&app, "tabs-view").expect("tabs page"),
             viewport,
         );
-        assert!(app.handle(Event::Selected {
-            action: "demo:tabs-view",
-            index: 1,
-        }));
+        app.update(Msg::TabsView(1));
         let update = runtime.update(
             &pages::screen(&app, "tabs-view").expect("tabs page"),
             viewport,
@@ -773,10 +588,7 @@ mod tests {
     fn tabs_view_selection_reaches_the_pager() {
         let mut app = app();
         app.stack = vec!["home", "tabs-view"];
-        assert!(app.handle(Event::Selected {
-            action: "demo:tabs-view",
-            index: 1,
-        }));
+        app.update(Msg::TabsView(1));
         let element = pages::screen(&app, "tabs-view").expect("tabs page");
         let tree = krabik_ui_dsl::tree::build(&element);
         let pager = krabik_ui_dsl::tree::preorder(&tree)
@@ -846,47 +658,33 @@ mod tests {
     #[test]
     fn controls_update_their_state() {
         let mut app = app();
-        assert!(app.handle(click("demo:tap")));
+        app.update(Msg::Tap);
         assert_eq!(app.taps, 1);
-        assert!(app.handle(click("demo:reset")));
+        app.update(Msg::ResetTaps);
         assert_eq!(app.taps, 0);
-        assert!(app.handle(Event::Toggled {
-            action: "demo:wifi",
-            checked: false,
-        }));
+        app.update(Msg::Wifi(false));
         assert!(!app.wifi);
-        assert!(app.handle(Event::Toggled {
-            action: "demo:radio:2",
-            checked: true,
-        }));
+        app.update(Msg::Radio(2));
         assert_eq!(app.radio_choice, 2);
-        assert!(app.handle(click("demo:progress:100")));
+        app.update(Msg::Progress(1.0));
         assert_eq!(app.progress, 1.0);
     }
 
     #[test]
     fn text_field_tracks_typing_and_submission() {
         let mut app = app();
-        assert!(app.handle(Event::TextChanged {
-            action: "demo:name",
-            value: "Ada",
-        }));
+        app.update(Msg::Name("Ada".to_string()));
         assert_eq!(app.name, "Ada");
-        assert!(app.handle(Event::Submitted {
-            action: "demo:name:submit",
-        }));
+        app.update(Msg::SubmitName);
         assert_eq!(app.submitted, "Ada");
     }
 
     #[test]
     fn checklist_screen_delegates_its_events() {
         let mut app = app();
-        assert!(app.handle(click("page:checklist")));
+        app.update(Msg::Open("checklist"));
         assert_eq!(app.stack.last(), Some(&"checklist"));
-        assert!(app.handle(Event::Toggled {
-            action: "task:1",
-            checked: true,
-        }));
+        app.update(Msg::Checklist(checklist::Msg::SetTask(1, true)));
         assert!(app.checklist.summary().contains("2 of 3 tasks done"));
     }
 }

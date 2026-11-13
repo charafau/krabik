@@ -1,12 +1,14 @@
 //! The `radio_group` widget: properties and builder.
 
-use crate::element::{Element, ElementKind, style_builder, text_builder};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement, style_builder, text_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
+use crate::message::Handler;
 use crate::style::{FontWeight, IntoPoints};
 use crate::widgets::Widget;
 use crate::widgets::{CHECK_GAP, CHECK_HEIGHT, CHECK_INDICATOR, TextProps};
-use std::borrow::Cow;
 
 /// Platform-independent properties of a group of mutually exclusive radio buttons.
 #[derive(Clone, Debug, PartialEq)]
@@ -15,8 +17,8 @@ pub struct RadioGroupProps {
     pub options: Vec<String>,
     /// The index of the selected option, or `None` when nothing is selected.
     pub selected: Option<usize>,
-    /// The action dispatched whenever the selection changes.
-    pub action: Cow<'static, str>,
+    /// Reported with the index of the option the user picked.
+    pub on_select: Handler<usize>,
     /// Font size of the labels in logical points.
     pub size: f32,
     /// ARGB color of the labels and indicators.
@@ -33,7 +35,7 @@ impl RadioGroupProps {
         Self {
             options,
             selected: None,
-            action: Cow::Borrowed(""),
+            on_select: Handler::none(),
             size: 16.0,
             color: 0xFF00_0000,
             weight: FontWeight::Normal,
@@ -45,17 +47,19 @@ impl RadioGroupProps {
 /// A native group of mutually exclusive radio buttons.
 ///
 /// Unlike individual [`RadioButton`]s, the group owns the selection: tapping an
-/// option reports the chosen index through [`Event::Selected`](crate::app::Event::Selected).
-#[derive(Clone, Debug, PartialEq)]
-pub struct RadioGroup(pub(crate) Element);
+/// option reports the chosen index through [`RadioGroup::on_select`].
+pub struct RadioGroup<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl RadioGroup {
+impl<M> RadioGroup<M> {
     /// Creates a radio group with the given option labels.
     pub fn new(options: impl IntoIterator<Item = impl Into<String>>) -> Self {
         let options: Vec<String> = options.into_iter().map(Into::into).collect();
-        Self(Element::leaf(ElementKind::Widget(Widget::RadioGroup(
-            RadioGroupProps::new(options),
-        ))))
+        Self(
+            RawElement::leaf(ElementKind::Widget(Widget::RadioGroup(
+                RadioGroupProps::new(options),
+            ))),
+            PhantomData,
+        )
     }
 
     /// Sets the index of the selected option.
@@ -66,10 +70,13 @@ impl RadioGroup {
         self
     }
 
-    /// Sets the action dispatched whenever the selection changes.
-    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+    /// Reports the index of the option the user picked.
+    pub fn on_select(mut self, message: impl Fn(usize) -> M + Send + Sync + 'static) -> Self
+    where
+        M: 'static,
+    {
         if let ElementKind::Widget(Widget::RadioGroup(props)) = &mut self.0.kind {
-            props.action = action.into();
+            props.on_select = Handler::new(message);
         }
         self
     }
@@ -83,9 +90,9 @@ impl RadioGroup {
     }
 }
 
-impl From<RadioGroup> for Element {
-    fn from(component: RadioGroup) -> Self {
-        component.0
+impl<M> From<RadioGroup<M>> for Element<M> {
+    fn from(component: RadioGroup<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 

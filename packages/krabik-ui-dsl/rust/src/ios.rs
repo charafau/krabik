@@ -4,9 +4,8 @@
 //! the native widgets. Every widget, every property update, every frame change,
 //! and every event is handled here on native `UILabel`/`UIButton`/… instances.
 
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::ffi::{CStr, c_char, c_void};
+use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -58,10 +57,10 @@ use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
     Animation, AnimationCurve, Axis, Border, ButtonProps, CheckProps, DatePickerMode,
-    DatePickerProps, DatePickerValue, DateValue, EdgeInsets, Element, FontWeight, Gradient,
+    DatePickerProps, DatePickerValue, DateValue, EdgeInsets, FontWeight, Gradient,
     GradientDirection, ImageProps, ImageScale, ImageSource, ImeAction, KeyboardType, ProgressProps,
-    RadioGroupProps, SliderProps, SpinnerProps, TabBarProps, TextAlign, TextFieldProps, TextProps,
-    TimeValue, dim_color, snap_slider_value,
+    RadioGroupProps, RawElement, SliderProps, SpinnerProps, TabBarProps, TextAlign, TextFieldProps,
+    TextProps, TimeValue, dim_color, snap_slider_value,
 };
 use crate::widgets::Widget;
 
@@ -1218,7 +1217,7 @@ impl IosState {
         }
     }
 
-    fn render(&mut self, element: &crate::ui::Element) {
+    fn render(&mut self, element: &crate::ui::RawElement) {
         let update = self.runtime.update(element, self.viewport);
         let Some(root) = self.root.load() else {
             return;
@@ -1792,7 +1791,7 @@ impl IosState {
     }
 
     /// The element of one recycled row, or `None` when the item vanished.
-    fn row_element(&self, list: NodeId, index: usize) -> Option<Element> {
+    fn row_element(&self, list: NodeId, index: usize) -> Option<RawElement> {
         let source = self.runtime.row_source(list)?;
         (index < source.item_count).then(|| (source.rows)(index))
     }
@@ -2220,7 +2219,7 @@ fn update_radio_group(
             &CheckProps {
                 label: label.clone(),
                 checked: props.selected == Some(index),
-                action: Cow::Borrowed(""),
+                on_toggle: crate::ui::Handler::none(),
                 size: props.size,
                 color: props.color,
                 weight: props.weight,
@@ -3169,7 +3168,11 @@ impl Host<Ios> for IosState {
         self.row_nodes.get(&id).copied()
     }
 
-    fn render(&mut self, _mtm: &mut MainThreadMarker, element: &Element) -> Result<(), Infallible> {
+    fn render(
+        &mut self,
+        _mtm: &mut MainThreadMarker,
+        element: &RawElement,
+    ) -> Result<(), Infallible> {
         IosState::render(self, element);
         Ok(())
     }
@@ -3267,10 +3270,6 @@ fn controller_set_toolbar(
     let title = NSString::from_str(title);
     let subtitle = NSString::from_str(subtitle);
     let back_title = NSString::from_str(back_title);
-    let ids: Vec<Retained<NSString>> = actions
-        .iter()
-        .map(|action| NSString::from_str(&action.action))
-        .collect();
     let labels: Vec<Retained<NSString>> = actions
         .iter()
         .map(|action| NSString::from_str(&action.label))
@@ -3279,7 +3278,6 @@ fn controller_set_toolbar(
         .iter()
         .map(|action| NSString::from_str(action.icon.ios_name().unwrap_or("")))
         .collect();
-    let ids = NSArray::from_retained_slice(&ids);
     let labels = NSArray::from_retained_slice(&labels);
     let icons = NSArray::from_retained_slice(&icons);
     // SAFETY: the controller is a live Swift object with this @objc method.
@@ -3290,7 +3288,6 @@ fn controller_set_toolbar(
             subtitle: &*subtitle,
             backTitle: &*back_title,
             hidden: hidden,
-            actionIds: &*ids,
             actionLabels: &*labels,
             actionIcons: &*icons
         ]
@@ -3338,7 +3335,6 @@ fn controller_show_dialog(controller: &NSObject, dialog: &crate::presentation::D
     let title = NSString::from_str(&dialog.title);
     let message = NSString::from_str(dialog.message.as_deref().unwrap_or(""));
     let labels = string_array(dialog.buttons.iter().map(|b| b.label.as_str()));
-    let actions = string_array(dialog.buttons.iter().map(|b| b.action.as_str()));
     let roles: Vec<Retained<NSNumber>> = dialog
         .buttons
         .iter()
@@ -3352,8 +3348,7 @@ fn controller_show_dialog(controller: &NSObject, dialog: &crate::presentation::D
             krabikShowDialog: &*title,
             message: &*message,
             labels: &*labels,
-            roles: &*roles,
-            actions: &*actions
+            roles: &*roles
         ]
     };
 }
@@ -3533,22 +3528,17 @@ pub unsafe extern "C" fn krabik_ios_on_modal_dismiss(handle: u64) {
 ///
 /// # Safety
 ///
-/// `action` must point to a valid NUL-terminated C string.
+/// The call must happen on the main thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_dialog_action(handle: u64, action: *const c_char) {
+pub unsafe extern "C" fn krabik_ios_on_dialog_action(handle: u64, button: i64) {
     let Some(mut mtm) = MainThreadMarker::new() else {
         return;
     };
-    if action.is_null() {
-        return;
-    }
-    // SAFETY: the caller guarantees a valid NUL-terminated string.
-    let action = unsafe { CStr::from_ptr(action) }
-        .to_string_lossy()
-        .into_owned();
+    // A negative index means the alert closed without a button.
+    let button = usize::try_from(button).ok();
     guard("dialog action", || {
         with_session(handle, |session| {
-            infallible(session.dialog_closed(&mut mtm, &action));
+            infallible(session.dialog_closed(&mut mtm, button));
         });
     });
 }
@@ -3594,22 +3584,15 @@ pub unsafe extern "C" fn krabik_ios_content_height(handle: u64, host: u64) -> f6
 ///
 /// # Safety
 ///
-/// `action` must point to a valid NUL-terminated C string.
+/// The call must happen on the main thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_on_toolbar_action(handle: u64, action: *const c_char) {
+pub unsafe extern "C" fn krabik_ios_on_toolbar_action(handle: u64, index: u64) {
     let Some(mut mtm) = MainThreadMarker::new() else {
         return;
     };
-    if action.is_null() {
-        return;
-    }
-    // SAFETY: the caller guarantees a valid NUL-terminated string.
-    let action = unsafe { CStr::from_ptr(action) }
-        .to_string_lossy()
-        .into_owned();
     guard("toolbar action", || {
         with_session(handle, |session| {
-            infallible(session.toolbar_action(&mut mtm, &action));
+            infallible(session.toolbar_action(&mut mtm, index as usize));
         });
     });
 }

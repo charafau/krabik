@@ -4,8 +4,9 @@
 //! here; the definitions live in [`crate::widgets`], [`crate::style`] and
 //! [`crate::element`].
 
-pub use crate::element::Element;
 pub(crate) use crate::element::ElementKind;
+pub use crate::element::{Element, RawElement};
+pub use crate::message::Handler;
 pub use crate::style::*;
 pub use crate::widgets::*;
 
@@ -19,7 +20,7 @@ mod tests {
             .spacing(8)
             .padding(16)
             .child(Text::new("Hello").bold())
-            .child(Button::new("Click").action("click"))
+            .child(Button::new("Click").on_click(()))
             .into();
 
         assert_eq!(element.children().len(), 2);
@@ -36,7 +37,7 @@ mod tests {
             panic!("expected button");
         };
         assert_eq!(button.label, "Click");
-        assert_eq!(button.action, "click");
+        assert!(button.on_click.is_set());
     }
 
     #[test]
@@ -54,42 +55,42 @@ mod tests {
 
     #[test]
     fn switch_keeps_its_state_and_action() {
-        let element: Element = Switch::new(true).action("toggle").into();
+        let element: Element = Switch::new(true).on_toggle(|_| ()).into();
 
-        let ElementKind::Widget(Widget::Switch(props)) = element.kind else {
+        let ElementKind::Widget(Widget::Switch(props)) = &element.kind else {
             panic!("expected switch");
         };
         assert!(props.checked);
-        assert_eq!(props.action, "toggle");
+        assert!(props.on_toggle.is_set());
     }
 
     #[test]
     fn radio_group_keeps_options_and_selection() {
         let element: Element = RadioGroup::new(["Small", "Medium", "Large"])
             .selected(1)
-            .action("size")
+            .on_select(|_| ())
             .spacing(12)
             .into();
 
-        let ElementKind::Widget(Widget::RadioGroup(props)) = element.kind else {
+        let ElementKind::Widget(Widget::RadioGroup(props)) = &element.kind else {
             panic!("expected radio group");
         };
         assert_eq!(props.options, ["Small", "Medium", "Large"]);
         assert_eq!(props.selected, Some(1));
-        assert_eq!(props.action, "size");
+        assert!(props.on_select.is_set());
         assert_eq!(props.spacing, 12.0);
     }
 
     #[test]
     fn slider_step_is_optional() {
         let element: Element = Slider::new(0.5).step(0.25).into();
-        let ElementKind::Widget(Widget::Slider(props)) = element.kind else {
+        let ElementKind::Widget(Widget::Slider(props)) = &element.kind else {
             panic!("expected slider");
         };
         assert_eq!(props.step, Some(0.25));
 
         let element: Element = Slider::new(0.5).step(0.0).into();
-        let ElementKind::Widget(Widget::Slider(props)) = element.kind else {
+        let ElementKind::Widget(Widget::Slider(props)) = &element.kind else {
             panic!("expected slider");
         };
         assert_eq!(props.step, None);
@@ -109,7 +110,7 @@ mod tests {
     #[test]
     fn indeterminate_progress_is_a_spinner() {
         let element: Element = ProgressIndicator::indeterminate().color(0xFF00_897B).into();
-        let ElementKind::Widget(Widget::Spinner(props)) = element.kind else {
+        let ElementKind::Widget(Widget::Spinner(props)) = &element.kind else {
             panic!("expected spinner");
         };
         assert_eq!(props.color, 0xFF00_897B);
@@ -164,9 +165,9 @@ mod tests {
     fn time_and_datetime_pickers_keep_their_ranges() {
         let element: Element = DatePicker::time(TimeValue::new(10, 30))
             .time_range(TimeValue::new(9, 0), TimeValue::new(17, 0))
-            .action("time")
+            .on_change(|_| ())
             .into();
-        let ElementKind::Widget(Widget::DatePicker(props)) = element.kind else {
+        let ElementKind::Widget(Widget::DatePicker(props)) = &element.kind else {
             panic!("expected date picker");
         };
         assert_eq!(props.value, DatePickerValue::Time(TimeValue::new(10, 30)));
@@ -179,7 +180,7 @@ mod tests {
             DatePicker::date_time(DateValue::new(2026, 11, 12), TimeValue::new(10, 30))
                 .range(DateValue::new(2026, 11, 1), DateValue::new(2026, 11, 30))
                 .into();
-        let ElementKind::Widget(Widget::DatePicker(props)) = element.kind else {
+        let ElementKind::Widget(Widget::DatePicker(props)) = &element.kind else {
             panic!("expected date picker");
         };
         assert_eq!(
@@ -199,21 +200,21 @@ mod tests {
     fn tab_bar_keeps_tabs_selection_and_action() {
         let element: Element = TabBar::new(["Day", "Week", "Month"])
             .selected(2)
-            .action("period")
+            .on_select(|_| ())
             .into();
-        let ElementKind::Widget(Widget::TabBar(props)) = element.kind else {
+        let ElementKind::Widget(Widget::TabBar(props)) = &element.kind else {
             panic!("expected tab bar");
         };
         assert_eq!(props.tabs, ["Day", "Week", "Month"]);
         assert_eq!(props.selected, 2);
-        assert_eq!(props.action, "period");
+        assert!(props.on_select.is_set());
     }
 
     #[test]
     fn tabs_compose_a_bar_above_their_content() {
         let element: Element = Tabs::new(["One", "Two"])
             .selected(1)
-            .action("tab")
+            .on_select(|_| ())
             .child(Text::new("content"))
             .into();
 
@@ -223,7 +224,7 @@ mod tests {
         };
         assert_eq!(props.tabs, ["One", "Two"]);
         assert_eq!(props.selected, 1);
-        assert_eq!(props.action, "tab");
+        assert!(props.on_select.is_set());
         assert!(matches!(
             element.children[1].kind,
             ElementKind::Widget(Widget::Text(_))
@@ -308,7 +309,7 @@ mod tests {
     fn pager_and_tabs_view_keep_pages_and_selection() {
         let pager: Element = Pager::new()
             .selected(1)
-            .action("page")
+            .on_select(|_| ())
             .child(Text::new("one"))
             .child(Text::new("two"))
             .into();
@@ -316,12 +317,12 @@ mod tests {
             panic!("expected pager");
         };
         assert_eq!(props.selected, 1);
-        assert_eq!(props.action, "page");
+        assert!(props.on_select.is_set());
         assert_eq!(pager.children.len(), 2);
 
         let tabs: Element = TabsView::new(["One", "Two"])
             .selected(1)
-            .action("tab")
+            .on_select(|_| ())
             .child(Text::new("one"))
             .child(Text::new("two"))
             .into();
@@ -352,10 +353,10 @@ mod tests {
     fn date_picker_keeps_its_mode_and_action() {
         let element: Element = DatePicker::new(DateValue::new(2026, 11, 12))
             .mode(DatePickerMode::Inline)
-            .action("pick")
+            .on_change(|_| ())
             .into();
 
-        let ElementKind::Widget(Widget::DatePicker(props)) = element.kind else {
+        let ElementKind::Widget(Widget::DatePicker(props)) = &element.kind else {
             panic!("expected date picker");
         };
         assert_eq!(
@@ -363,6 +364,6 @@ mod tests {
             DatePickerValue::Date(DateValue::new(2026, 11, 12))
         );
         assert_eq!(props.mode, DatePickerMode::Inline);
-        assert_eq!(props.action, "pick");
+        assert!(props.on_change.is_set());
     }
 }

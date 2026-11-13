@@ -1,18 +1,20 @@
 //! The `switch` widget: properties and builder.
 
-use crate::element::{Element, ElementKind, style_builder};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
+use crate::message::Handler;
 use crate::widgets::Widget;
-use std::borrow::Cow;
 
 /// Platform-independent properties of a switch node.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SwitchProps {
     /// Whether the switch is on.
     pub checked: bool,
-    /// The action dispatched whenever the switch is toggled.
-    pub action: Cow<'static, str>,
+    /// Reported with the new state when the switch is toggled.
+    pub on_toggle: Handler<bool>,
 }
 
 impl SwitchProps {
@@ -20,21 +22,23 @@ impl SwitchProps {
     pub const fn new(checked: bool) -> Self {
         Self {
             checked,
-            action: Cow::Borrowed(""),
+            on_toggle: Handler::none(),
         }
     }
 }
 
 /// A native on/off switch.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Switch(pub(crate) Element);
+pub struct Switch<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl Switch {
+impl<M> Switch<M> {
     /// Creates a switch in the given state.
     pub fn new(checked: bool) -> Self {
-        Self(Element::leaf(ElementKind::Widget(Widget::Switch(
-            SwitchProps::new(checked),
-        ))))
+        Self(
+            RawElement::leaf(ElementKind::Widget(Widget::Switch(SwitchProps::new(
+                checked,
+            )))),
+            PhantomData,
+        )
     }
 
     /// Sets whether the switch is on.
@@ -45,21 +49,21 @@ impl Switch {
         self
     }
 
-    /// Sets the action dispatched whenever the switch is toggled.
-    ///
-    /// Accepts a `&'static str` or an owned `String` for actions built at
-    /// runtime.
-    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+    /// Reports the new state when the switch is toggled.
+    pub fn on_toggle(mut self, message: impl Fn(bool) -> M + Send + Sync + 'static) -> Self
+    where
+        M: 'static,
+    {
         if let ElementKind::Widget(Widget::Switch(props)) = &mut self.0.kind {
-            props.action = action.into();
+            props.on_toggle = Handler::new(message);
         }
         self
     }
 }
 
-impl From<Switch> for Element {
-    fn from(component: Switch) -> Self {
-        component.0
+impl<M> From<Switch<M>> for Element<M> {
+    fn from(component: Switch<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 

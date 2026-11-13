@@ -1,6 +1,8 @@
 //! The `image` widget: properties and builder.
 
-use crate::element::{Element, ElementKind, style_builder};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::widgets::Widget;
@@ -56,18 +58,18 @@ impl ImageProps {
 }
 
 /// A native image.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Image(pub(crate) Element);
+pub struct Image<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl Image {
+impl<M> Image<M> {
     /// Creates an image with the given source.
     ///
     /// Give the image an explicit width and height, or let a parent stretch it;
     /// intrinsic sizing is not available for remote images yet.
     pub fn new(source: ImageSource) -> Self {
-        Self(Element::leaf(ElementKind::Widget(Widget::Image(
-            ImageProps::new(source),
-        ))))
+        Self(
+            RawElement::leaf(ElementKind::Widget(Widget::Image(ImageProps::new(source)))),
+            PhantomData,
+        )
     }
 
     /// Sets how the image fills its frame.
@@ -79,9 +81,9 @@ impl Image {
     }
 }
 
-impl From<Image> for Element {
-    fn from(component: Image) -> Self {
-        component.0
+impl<M> From<Image<M>> for Element<M> {
+    fn from(component: Image<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 

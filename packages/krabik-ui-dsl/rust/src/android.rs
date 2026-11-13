@@ -439,7 +439,7 @@ impl AndroidState {
         })
     }
 
-    fn render(&mut self, env: &mut Env<'_>, element: &crate::ui::Element) -> JniResult<()> {
+    fn render(&mut self, env: &mut Env<'_>, element: &crate::ui::RawElement) -> JniResult<()> {
         let update = self.runtime.update(element, self.viewport);
 
         // The main views are taken out while the operations run so the same
@@ -1784,7 +1784,7 @@ impl Host<Android> for AndroidState {
         self.row_nodes.get(&id).copied()
     }
 
-    fn render(&mut self, env: &mut Env<'_>, element: &crate::ui::Element) -> JniResult<()> {
+    fn render(&mut self, env: &mut Env<'_>, element: &crate::ui::RawElement) -> JniResult<()> {
         AndroidState::render(self, env, element)
     }
 }
@@ -1853,7 +1853,6 @@ impl Controller<Android> for AndroidController {
         // A screen shows the toolbar unless it explicitly hides it.
         let hidden = screen.is_none() || toolbar.is_some_and(|toolbar| toolbar.hidden);
 
-        let action_ids = string_array!(env, actions.iter().map(|a| a.action.as_str()));
         let action_labels = string_array!(env, actions.iter().map(|a| a.label.as_str()));
         let action_icons = string_array!(
             env,
@@ -1878,13 +1877,12 @@ impl Controller<Android> for AndroidController {
         env.call_method(
             self.0.as_obj(),
             jni_str!("setToolbar"),
-            jni_sig!("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z[Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V"),
+            jni_sig!("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z[Ljava/lang/String;[Ljava/lang/String;)V"),
             &[
                 JValue::Object(title.as_ref()),
                 JValue::Object(subtitle.as_ref()),
                 JValue::Object(back_title.as_ref()),
                 JValue::Bool(hidden),
-                JValue::Object(&action_ids),
                 JValue::Object(&action_labels),
                 JValue::Object(&action_icons),
             ],
@@ -1917,22 +1915,19 @@ impl Controller<Android> for AndroidController {
         let title = jcall!(env, env.new_string(&dialog.title))?;
         let message = jcall!(env, env.new_string(dialog.message.as_deref().unwrap_or("")))?;
         let labels = string_array!(env, dialog.buttons.iter().map(|b| b.label.as_str()));
-        let actions = string_array!(env, dialog.buttons.iter().map(|b| b.action.as_str()));
         let role_codes: Vec<jint> = dialog.buttons.iter().map(|b| b.role.code()).collect();
         let roles = env.new_int_array(role_codes.len())?;
         roles.set_region(env, 0, &role_codes)?;
-        let dismiss = jcall!(env, env.new_string(dialog.dismiss_action().unwrap_or("")))?;
         env.call_method(
             self.0.as_obj(),
             jni_str!("showDialog"),
-            jni_sig!("(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[I[Ljava/lang/String;Ljava/lang/String;)V"),
+            jni_sig!("(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[IZ)V"),
             &[
                 JValue::Object(title.as_ref()),
                 JValue::Object(message.as_ref()),
                 JValue::Object(&labels),
                 JValue::Object(&roles),
-                JValue::Object(&actions),
-                JValue::Object(dismiss.as_ref()),
+                JValue::Bool(dialog.is_cancelable()),
             ],
         )?;
         Ok(())
@@ -2398,7 +2393,7 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnScr
     });
 }
 
-/// A toolbar item was tapped.
+/// The toolbar item at `index` was tapped.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnToolbarAction<
     'caller,
@@ -2406,15 +2401,17 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnToo
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
-    action: JString<'caller>,
+    index: jint,
 ) {
     run(&mut unenv, "nativeOnToolbarAction", |env| {
-        let action = action.try_to_string(env)?;
-        on_event(handle, |session| session.core.toolbar_action(env, &action))
+        on_event(handle, |session| {
+            session.core.toolbar_action(env, index.max(0) as usize)
+        })
     });
 }
 
-/// The system alert closed, by a button or by the platform.
+/// The system alert closed: by the button at index `button`, or by the
+/// platform itself when `button` is negative.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnDialogAction<
     'caller,
@@ -2422,11 +2419,12 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnDia
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
-    action: JString<'caller>,
+    button: jint,
 ) {
     run(&mut unenv, "nativeOnDialogAction", |env| {
-        let action = action.try_to_string(env)?;
-        on_event(handle, |session| session.core.dialog_closed(env, &action))
+        // A negative index means the platform dismissed the alert itself.
+        let button = usize::try_from(button).ok();
+        on_event(handle, |session| session.core.dialog_closed(env, button))
     });
 }
 

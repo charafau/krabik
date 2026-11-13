@@ -1,6 +1,6 @@
 //! What a platform has to provide.
 
-use crate::element::Element;
+use crate::element::RawElement;
 use crate::engine::runtime::Runtime;
 use crate::engine::tree::NodeId;
 use crate::navigation::{Screen, ScreenTransition};
@@ -48,7 +48,7 @@ pub(crate) trait Host<P: Platform> {
     fn row_of(&self, id: NodeId) -> Option<(NodeId, usize)>;
     /// Reconciles the host with a new description and applies the changes to
     /// the native views.
-    fn render(&mut self, cx: &mut P::Cx<'_>, element: &Element) -> Result<(), P::Error>;
+    fn render(&mut self, cx: &mut P::Cx<'_>, element: &RawElement) -> Result<(), P::Error>;
 }
 
 /// The native chrome: the screen stack, toolbar, bottom navigation, system

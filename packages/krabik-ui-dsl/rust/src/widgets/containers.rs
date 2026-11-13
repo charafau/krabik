@@ -1,16 +1,17 @@
 //! The `containers` widgets: properties and builder.
 
-use crate::element::{Element, ElementKind, style_builder};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::style::IntoPoints;
 
 /// A vertical container.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Column(pub(crate) Element);
+pub struct Column<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl Column {
+impl<M> Column<M> {
     /// Creates an empty column.
     pub fn new() -> Self {
-        Self(Element::container(ElementKind::Column))
+        Self(RawElement::container(ElementKind::Column), PhantomData)
     }
 
     /// Sets the space between children.
@@ -20,32 +21,31 @@ impl Column {
     }
 
     /// Appends a child.
-    pub fn child(mut self, child: impl Into<Element>) -> Self {
-        self.0.children.push(child.into());
+    pub fn child(mut self, child: impl Into<Element<M>>) -> Self {
+        self.0.children.push(child.into().into_raw());
         self
     }
 }
 
-impl Default for Column {
+impl<M> Default for Column<M> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl From<Column> for Element {
-    fn from(component: Column) -> Self {
-        component.0
+impl<M> From<Column<M>> for Element<M> {
+    fn from(component: Column<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 
 /// A horizontal container.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Row(pub(crate) Element);
+pub struct Row<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl Row {
+impl<M> Row<M> {
     /// Creates an empty row.
     pub fn new() -> Self {
-        Self(Element::container(ElementKind::Row))
+        Self(RawElement::container(ElementKind::Row), PhantomData)
     }
 
     /// Sets the space between children.
@@ -55,46 +55,45 @@ impl Row {
     }
 
     /// Appends a child.
-    pub fn child(mut self, child: impl Into<Element>) -> Self {
-        self.0.children.push(child.into());
+    pub fn child(mut self, child: impl Into<Element<M>>) -> Self {
+        self.0.children.push(child.into().into_raw());
         self
     }
 }
 
-impl Default for Row {
+impl<M> Default for Row<M> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl From<Row> for Element {
-    fn from(component: Row) -> Self {
-        component.0
+impl<M> From<Row<M>> for Element<M> {
+    fn from(component: Row<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 
 /// Empty space that grows to fill the available room.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Spacer(pub(crate) Element);
+pub struct Spacer<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl Spacer {
+impl<M> Spacer<M> {
     /// Creates a spacer that grows into the remaining space.
     pub fn new() -> Self {
-        let mut element = Element::leaf(ElementKind::Spacer);
+        let mut element = RawElement::leaf(ElementKind::Spacer);
         element.style.grow = 1.0;
-        Self(element)
+        Self(element, PhantomData)
     }
 }
 
-impl Default for Spacer {
+impl<M> Default for Spacer<M> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl From<Spacer> for Element {
-    fn from(component: Spacer) -> Self {
-        component.0
+impl<M> From<Spacer<M>> for Element<M> {
+    fn from(component: Spacer<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 

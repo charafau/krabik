@@ -404,20 +404,20 @@ class RustRootView(
         }
     }
 
-    /** Forwards a toolbar action back to the application. */
-    fun onToolbarAction(action: String) {
+    /** Reports a tap on the toolbar item at [index]. */
+    fun onToolbarAction(index: Int) {
         if (handle != 0L) {
-            nativeOnToolbarAction(handle, action)
+            nativeOnToolbarAction(handle, index)
         }
     }
 
     /**
-     * Reports that the system alert closed. [action] is the pressed button's
-     * action, or the cancel action (possibly empty) for a native dismissal.
+     * Reports that the system alert closed: by the button at index [button],
+     * or by the platform itself when [button] is negative.
      */
-    fun onDialogAction(action: String) {
+    fun onDialogAction(button: Int) {
         if (handle != 0L) {
-            nativeOnDialogAction(handle, action)
+            nativeOnDialogAction(handle, button)
         }
     }
 
@@ -532,9 +532,9 @@ class RustRootView(
 
     private external fun nativeOnBottomNavigationSelected(handle: Long, index: Int)
 
-    private external fun nativeOnToolbarAction(handle: Long, action: String)
+    private external fun nativeOnToolbarAction(handle: Long, index: Int)
 
-    private external fun nativeOnDialogAction(handle: Long, action: String)
+    private external fun nativeOnDialogAction(handle: Long, button: Int)
 
     private external fun nativeOnPickerChanged(
         handle: Long,

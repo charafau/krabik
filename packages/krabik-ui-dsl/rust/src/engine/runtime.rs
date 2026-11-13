@@ -11,7 +11,7 @@ use crate::layout::{self, LayoutResult};
 use crate::measure::Measure;
 use crate::render::{self, Op, Renderer};
 use crate::tree::{self, BuildInfo, ListExtent, ListMeasurements, NodeId, ROOT_ID, UiNode};
-use crate::ui::{Element, ListProps};
+use crate::ui::{ListProps, RawElement};
 
 /// The result of rebuilding the UI: the used size and the operations to apply.
 #[derive(Clone, Debug, Default)]
@@ -91,7 +91,7 @@ impl Runtime {
     }
 
     /// Rebuilds the tree from `element` and returns the batch to apply.
-    pub fn update(&mut self, element: &Element, viewport: Size) -> Update {
+    pub fn update(&mut self, element: &RawElement, viewport: Size) -> Update {
         // A viewport change relayouts every node; animating that would make a
         // rotation or split-screen resize look like a deliberate transition.
         let suppress_animation = self.viewport != viewport;
@@ -362,7 +362,7 @@ impl Runtime {
     #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
     pub(crate) fn layout_subtree(
         &self,
-        element: &Element,
+        element: &RawElement,
         root: NodeId,
         viewport: Size,
     ) -> (UiNode, LayoutResult) {
@@ -379,7 +379,7 @@ impl Runtime {
     /// Rebuilds the tree and applies the resulting batch in one call.
     pub fn render(
         &mut self,
-        element: &Element,
+        element: &RawElement,
         viewport: Size,
         renderer: &mut dyn Renderer,
     ) -> Size {
@@ -426,6 +426,7 @@ mod tests {
     use crate::measure::ApproximateMeasure;
     use crate::render::RecordingRenderer;
     use crate::tree::NodeKind;
+    use crate::ui::Element;
     use crate::widgets::Widget;
     use std::sync::Arc;
 
@@ -445,7 +446,7 @@ mod tests {
     fn screen(content: &str) -> Element {
         Column::new()
             .child(Text::new(content))
-            .child(Button::new("Click").action("click"))
+            .child(Button::new("Click").on_click(()))
             .into()
     }
 
@@ -546,7 +547,7 @@ mod tests {
     }
 
     #[test]
-    fn clicks_resolve_to_the_button_action() {
+    fn buttons_report_clicks() {
         let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
         runtime.update(&screen("Hello"), viewport());
 
@@ -556,50 +557,51 @@ mod tests {
             .find(|node| matches!(node.kind, NodeKind::Widget(Widget::Button(_))))
             .unwrap();
 
-        assert_eq!(actions(&runtime, button.id).click.as_deref(), Some("click"));
+        assert!(actions(&runtime, button.id).click.is_set());
         assert_eq!(actions(&runtime, ROOT_ID), Actions::default());
     }
 
     #[test]
-    fn text_fields_resolve_to_their_action() {
+    fn text_fields_report_changes_only() {
         let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
         let element: Element = Column::new()
-            .child(TextField::new("").placeholder("Name").action("name"))
+            .child(TextField::new("").placeholder("Name").on_change(|_| ()))
             .into();
         runtime.update(&element, viewport());
 
         let field = runtime.tree().children[0].children[0].id;
-        assert_eq!(actions(&runtime, field).text.as_deref(), Some("name"));
-        assert_eq!(actions(&runtime, field).click, None);
+        assert!(actions(&runtime, field).text.is_set());
+        assert!(!actions(&runtime, field).click.is_set());
     }
 
     #[test]
-    fn switches_resolve_to_their_action() {
+    fn switches_report_toggles() {
         let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
         let element: Element = Column::new()
-            .child(Switch::new(false).action("notifications"))
+            .child(Switch::new(false).on_toggle(|_| ()))
             .into();
         runtime.update(&element, viewport());
 
         let switch = runtime.tree().children[0].children[0].id;
-        assert_eq!(
-            actions(&runtime, switch).toggle.as_deref(),
-            Some("notifications")
-        );
+        assert!(actions(&runtime, switch).toggle.is_set());
     }
 
     #[test]
-    fn actions_can_be_built_dynamically() {
+    fn a_handler_returns_the_message_it_was_given() {
         let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
-        let element: Element = Column::new()
-            // A `String` action takes the owned `Cow::Owned` path.
-            .child(Button::new("Delete").action("note:delete:2".to_string()))
+        // The message is an ordinary value; here a string built at runtime.
+        let element: Element<String> = Column::new()
+            .child(Button::new("Delete").on_click(format!("note:delete:{}", 2)))
             .into();
         runtime.update(&element, viewport());
 
         let button = runtime.tree().children[0].children[0].id;
+        let message = actions(&runtime, button)
+            .click
+            .message(())
+            .expect("the button reports clicks");
         assert_eq!(
-            actions(&runtime, button).click.as_deref(),
+            message.downcast_ref::<String>().map(String::as_str),
             Some("note:delete:2")
         );
     }

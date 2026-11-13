@@ -5,12 +5,12 @@
 
 use std::sync::Arc;
 
-use crate::app::{App, Event};
+use crate::app::{App, Component};
 use crate::ui::{
-    Align, Button, Checkbox, Column, CornerRadii, DatePicker, DateValue, EdgeInsets, Element,
-    Gradient, Image, ImageScale, ImageSource, ImeAction, Justify, KeyboardType, List,
-    ProgressIndicator, RadioGroup, Row, ScrollView, Slider, Spacer, Switch, Text, TextAlign,
-    TextField,
+    Align, Button, Checkbox, Column, CornerRadii, DatePicker, DatePickerValue, DateValue,
+    EdgeInsets, Element, Gradient, Image, ImageScale, ImageSource, ImeAction, Justify,
+    KeyboardType, List, ProgressIndicator, RadioGroup, Row, ScrollView, Slider, Spacer, Switch,
+    Text, TextAlign, TextField,
 };
 
 pub const COLOR_MUTED: u32 = 0xFF66_6666;
@@ -42,6 +42,39 @@ pub enum Demo {
     ListRecycled,
     ListRecycledVariable,
     ListRecycledForm,
+}
+
+/// Everything that can happen in the gallery.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Msg {
+    /// Opens a demo from the list.
+    Open(Demo),
+    /// Returns to the list.
+    Back,
+    CounterAdd,
+    CounterReset,
+    Name(String),
+    Bio(String),
+    Email(String),
+    Submit,
+    BioFocus(bool),
+    ClearForm,
+    /// A button that exists only to show a style.
+    Noop,
+    Notifications(bool),
+    Wifi(bool),
+    Size(usize),
+    Volume(f32),
+    Stepped(f32),
+    Date(DatePickerValue),
+    RecycledTap,
+    RecycledBump,
+    RecycledShrink,
+    RecycledReset,
+    /// Re-renders, which rebinds the visible rows.
+    RecycledRefresh,
+    /// The note at this index was edited.
+    Note(usize, String),
 }
 
 /// The state of the gallery demo application.
@@ -120,7 +153,7 @@ impl GalleryApp {
         Self::default()
     }
 
-    fn gallery(&self) -> Element {
+    fn gallery(&self) -> Element<Msg> {
         ScrollView::new()
             .width_percent(1.0)
             .height_percent(1.0)
@@ -135,23 +168,26 @@ impl GalleryApp {
                         "Every screen is described in Rust and drawn with real native views.",
                     ))
                     .child(Spacer::new().grow(0.0).height(8))
-                    .child(Button::new("Counter").action("open:counter"))
-                    .child(Button::new("Layouts").action("open:layouts"))
-                    .child(Button::new("Typography").action("open:typography"))
-                    .child(Button::new("Alignment").action("open:alignment"))
-                    .child(Button::new("Scroll").action("open:scroll"))
-                    .child(Button::new("Form").action("open:form"))
-                    .child(Button::new("Media").action("open:media"))
-                    .child(Button::new("Styling").action("open:styling"))
-                    .child(Button::new("Controls").action("open:controls"))
-                    .child(Button::new("List").action("open:list"))
-                    .child(Button::new("List (variable)").action("open:list-variable"))
-                    .child(Button::new("List (recycled)").action("open:list-recycled"))
+                    .child(Button::new("Counter").on_click(Msg::Open(Demo::Counter)))
+                    .child(Button::new("Layouts").on_click(Msg::Open(Demo::Layouts)))
+                    .child(Button::new("Typography").on_click(Msg::Open(Demo::Typography)))
+                    .child(Button::new("Alignment").on_click(Msg::Open(Demo::Alignment)))
+                    .child(Button::new("Scroll").on_click(Msg::Open(Demo::Scroll)))
+                    .child(Button::new("Form").on_click(Msg::Open(Demo::Form)))
+                    .child(Button::new("Media").on_click(Msg::Open(Demo::Media)))
+                    .child(Button::new("Styling").on_click(Msg::Open(Demo::Styling)))
+                    .child(Button::new("Controls").on_click(Msg::Open(Demo::Controls)))
+                    .child(Button::new("List").on_click(Msg::Open(Demo::List)))
+                    .child(Button::new("List (variable)").on_click(Msg::Open(Demo::ListVariable)))
+                    .child(Button::new("List (recycled)").on_click(Msg::Open(Demo::ListRecycled)))
                     .child(
                         Button::new("List (recycled, variable)")
-                            .action("open:list-recycled-variable"),
+                            .on_click(Msg::Open(Demo::ListRecycledVariable)),
                     )
-                    .child(Button::new("List (recycled, form)").action("open:list-recycled-form"))
+                    .child(
+                        Button::new("List (recycled, form)")
+                            .on_click(Msg::Open(Demo::ListRecycledForm)),
+                    )
                     .child(caption(
                         "This list scrolls, so every demo stays reachable on small screens.",
                     )),
@@ -159,7 +195,7 @@ impl GalleryApp {
             .into()
     }
 
-    fn counter(&self) -> Element {
+    fn counter(&self) -> Element<Msg> {
         let label = match self.count {
             0 => "Not tapped yet".to_string(),
             1 => "Tapped once".to_string(),
@@ -181,13 +217,13 @@ impl GalleryApp {
             .child(
                 Row::new()
                     .spacing(8)
-                    .child(Button::new("Add one").action("counter:add"))
-                    .child(Button::new("Reset").action("counter:reset")),
+                    .child(Button::new("Add one").on_click(Msg::CounterAdd))
+                    .child(Button::new("Reset").on_click(Msg::CounterReset)),
             )
             .into()
     }
 
-    fn layouts(&self) -> Element {
+    fn layouts(&self) -> Element<Msg> {
         Column::new()
             .padding(24)
             .spacing(14)
@@ -234,7 +270,7 @@ impl GalleryApp {
             .into()
     }
 
-    fn typography(&self) -> Element {
+    fn typography(&self) -> Element<Msg> {
         Column::new()
             .padding(24)
             .spacing(10)
@@ -280,7 +316,7 @@ impl GalleryApp {
             .into()
     }
 
-    fn alignment(&self) -> Element {
+    fn alignment(&self) -> Element<Msg> {
         Column::new()
             .padding(24)
             .spacing(10)
@@ -311,7 +347,7 @@ impl GalleryApp {
             .into()
     }
 
-    fn scroll(&self) -> Element {
+    fn scroll(&self) -> Element<Msg> {
         ScrollView::new()
             .width_percent(1.0)
             .height_percent(1.0)
@@ -335,7 +371,7 @@ impl GalleryApp {
             .into()
     }
 
-    fn form(&self) -> Element {
+    fn form(&self) -> Element<Msg> {
         let greeting = if self.name.is_empty() {
             "Type your name below.".to_string()
         } else {
@@ -369,8 +405,8 @@ impl GalleryApp {
                     .child(
                         TextField::new(self.name.clone())
                             .placeholder("Your name")
-                            .action("form:name")
-                            .submit_action("form:submit")
+                            .on_change(Msg::Name)
+                            .on_submit(Msg::Submit)
                             .ime_action(ImeAction::Next)
                             .size(18)
                             .padding_each(EdgeInsets::symmetric(12, 10))
@@ -383,8 +419,8 @@ impl GalleryApp {
                     .child(
                         TextField::new(self.bio.clone())
                             .placeholder("Tell us about yourself")
-                            .action("form:bio")
-                            .focus_action("form:bio-focus")
+                            .on_change(Msg::Bio)
+                            .on_focus(Msg::BioFocus)
                             .multiline(true)
                             .size(16)
                             .padding_each(EdgeInsets::symmetric(12, 10))
@@ -398,10 +434,10 @@ impl GalleryApp {
                     .child(
                         TextField::new(self.email.clone())
                             .placeholder("you@example.com")
-                            .action("form:email")
+                            .on_change(Msg::Email)
                             .keyboard(KeyboardType::Email)
                             .ime_action(ImeAction::Send)
-                            .submit_action("form:submit")
+                            .on_submit(Msg::Submit)
                             .size(16)
                             .padding_each(EdgeInsets::symmetric(12, 10))
                             .background(COLOR_SURFACE)
@@ -410,12 +446,12 @@ impl GalleryApp {
                             .width_percent(1.0),
                     )
                     .child(caption(submitted))
-                    .child(Button::new("Clear").action("form:clear")),
+                    .child(Button::new("Clear").on_click(Msg::ClearForm)),
             )
             .into()
     }
 
-    fn media(&self) -> Element {
+    fn media(&self) -> Element<Msg> {
         ScrollView::new()
             .width_percent(1.0)
             .height_percent(1.0)
@@ -451,7 +487,7 @@ impl GalleryApp {
             .into()
     }
 
-    fn styling(&self) -> Element {
+    fn styling(&self) -> Element<Msg> {
         ScrollView::new()
             .width_percent(1.0)
             .height_percent(1.0)
@@ -514,14 +550,14 @@ impl GalleryApp {
                             .align_items(Align::Center)
                             .child(
                                 Button::new("Ripple")
-                                    .action("styling:noop")
+                                    .on_click(Msg::Noop)
                                     .background(COLOR_SURFACE)
                                     .corner_radius(22),
                             )
-                            .child(Button::new("Faded").action("styling:noop").opacity(0.45))
+                            .child(Button::new("Faded").on_click(Msg::Noop).opacity(0.45))
                             .child(
                                 Button::new("Disabled")
-                                    .action("styling:noop")
+                                    .on_click(Msg::Noop)
                                     .enabled(false)
                                     .background(COLOR_SURFACE)
                                     .corner_radius(22),
@@ -534,7 +570,7 @@ impl GalleryApp {
             .into()
     }
 
-    fn list(&self) -> Element {
+    fn list(&self) -> Element<Msg> {
         Column::new()
             .padding(24)
             .spacing(12)
@@ -562,7 +598,7 @@ impl GalleryApp {
             .into()
     }
 
-    fn list_variable(&self) -> Element {
+    fn list_variable(&self) -> Element<Msg> {
         Column::new()
             .padding(24)
             .spacing(12)
@@ -590,7 +626,7 @@ impl GalleryApp {
             .into()
     }
 
-    fn list_recycled(&self) -> Element {
+    fn list_recycled(&self) -> Element<Msg> {
         let bumps = self.recycled_bumps;
         Column::new()
             .padding(24)
@@ -608,9 +644,9 @@ impl GalleryApp {
             .child(
                 Row::new()
                     .spacing(8)
-                    .child(Button::new("Bump rows").action("recycled:bump"))
-                    .child(Button::new("Shrink").action("recycled:shrink"))
-                    .child(Button::new("Reset").action("recycled:reset")),
+                    .child(Button::new("Bump rows").on_click(Msg::RecycledBump))
+                    .child(Button::new("Shrink").on_click(Msg::RecycledShrink))
+                    .child(Button::new("Reset").on_click(Msg::RecycledReset)),
             )
             .child(
                 List::new(Arc::clone(&self.recycled_items))
@@ -623,14 +659,14 @@ impl GalleryApp {
                             .padding_each(EdgeInsets::symmetric(12, 6))
                             .align_items(Align::Center)
                             .child(Text::new(format!("{item} · v{}", bumps)).size(15).grow(1.0))
-                            .child(Button::new("Tap").action("recycled:tap"))
+                            .child(Button::new("Tap").on_click(Msg::RecycledTap))
                             .into()
                     }),
             )
             .into()
     }
 
-    fn list_recycled_form(&self) -> Element {
+    fn list_recycled_form(&self) -> Element<Msg> {
         let notes = Arc::clone(&self.recycled_notes);
         Column::new()
             .padding(24)
@@ -643,21 +679,22 @@ impl GalleryApp {
             .child(caption(
                 "A focused field returns with its value after its row is recycled.",
             ))
-            .child(Button::new("Refresh").action("recycled:refresh"))
+            .child(Button::new("Refresh").on_click(Msg::RecycledRefresh))
             .child(
                 List::new(Arc::clone(&self.recycled_form_rows))
                     .item_height(56.0)
                     .recycled()
                     .key(|index| index.to_string())
                     .row(move |index| {
+                        let index = *index;
                         Row::new()
                             .width_percent(1.0)
                             .padding_each(EdgeInsets::symmetric(12, 6))
                             .align_items(Align::Center)
                             .child(
-                                TextField::new(notes[*index].clone())
+                                TextField::new(notes[index].clone())
                                     .placeholder(format!("Note {}", index + 1))
-                                    .action(format!("recycled:note:{index}"))
+                                    .on_change(move |text| Msg::Note(index, text))
                                     .size(15)
                                     .grow(1.0),
                             )
@@ -667,7 +704,7 @@ impl GalleryApp {
             .into()
     }
 
-    fn list_recycled_variable(&self) -> Element {
+    fn list_recycled_variable(&self) -> Element<Msg> {
         let bumps = self.recycled_bumps;
         Column::new()
             .padding(24)
@@ -691,14 +728,14 @@ impl GalleryApp {
                             .padding_each(EdgeInsets::symmetric(12, 10))
                             .align_items(Align::Center)
                             .child(Text::new(format!("{item} · v{}", bumps)).size(15).grow(1.0))
-                            .child(Button::new("Tap").action("recycled:tap"))
+                            .child(Button::new("Tap").on_click(Msg::RecycledTap))
                             .into()
                     }),
             )
             .into()
     }
 
-    fn controls(&self) -> Element {
+    fn controls(&self) -> Element<Msg> {
         let state = if self.notifications {
             "Notifications are on."
         } else {
@@ -732,14 +769,14 @@ impl GalleryApp {
                             .child(Spacer::new())
                             .child(
                                 Switch::new(self.notifications)
-                                    .action("controls:notifications")
+                                    .on_toggle(Msg::Notifications)
                                     .accessibility_label("Notifications"),
                             ),
                     )
                     .child(caption(state))
                     .child(
                         Checkbox::new("Wi-Fi", self.wifi)
-                            .action("controls:wifi")
+                            .on_toggle(Msg::Wifi)
                             .accessibility_label("Wi-Fi"),
                     )
                     .child(caption(if self.wifi {
@@ -751,7 +788,7 @@ impl GalleryApp {
                     .child(
                         RadioGroup::new(["Small", "Medium", "Large"])
                             .selected(self.size_choice)
-                            .action("controls:size")
+                            .on_select(Msg::Size)
                             .accessibility_label("Size")
                             .width_percent(1.0),
                     )
@@ -760,7 +797,7 @@ impl GalleryApp {
                         Slider::new(self.volume)
                             .min(0.0)
                             .max(100.0)
-                            .action("controls:volume")
+                            .on_change(Msg::Volume)
                             .accessibility_label("Volume")
                             .width_percent(1.0),
                     )
@@ -770,7 +807,7 @@ impl GalleryApp {
                             .min(0.0)
                             .max(100.0)
                             .step(10.0)
-                            .action("controls:stepped")
+                            .on_change(Msg::Stepped)
                             .accessibility_label("Stepped")
                             .width_percent(1.0),
                     )
@@ -792,7 +829,7 @@ impl GalleryApp {
                     .child(Text::new(format!("Date: {}", self.date)).size(18))
                     .child(
                         DatePicker::new(self.date)
-                            .action("controls:date")
+                            .on_change(Msg::Date)
                             .accessibility_label("Date"),
                     ),
             )
@@ -801,7 +838,7 @@ impl GalleryApp {
 }
 
 /// Twenty rows that overflow the vertical scroll viewport.
-fn demo_rows() -> Column {
+fn demo_rows() -> Column<Msg> {
     let mut column = Column::new().spacing(8).width_percent(1.0);
     for index in 1..=20 {
         let surface = if index % 2 == 0 {
@@ -822,7 +859,7 @@ fn demo_rows() -> Column {
 }
 
 /// A horizontal strip of chips that overflows its width.
-fn demo_strip() -> ScrollView {
+fn demo_strip() -> ScrollView<Msg> {
     let mut strip = ScrollView::horizontal()
         .width_percent(1.0)
         .height(52)
@@ -842,8 +879,10 @@ fn demo_strip() -> ScrollView {
     strip
 }
 
-impl App for GalleryApp {
-    fn view(&self) -> Element {
+impl Component for GalleryApp {
+    type Msg = Msg;
+
+    fn view(&self) -> Element<Msg> {
         match self.demo {
             Demo::Gallery => self.gallery(),
             Demo::Counter => self.counter(),
@@ -863,137 +902,84 @@ impl App for GalleryApp {
         }
     }
 
-    fn handle(&mut self, event: Event<'_>) -> bool {
-        match event {
-            Event::TextChanged {
-                action: "form:name",
-                value,
-            } => {
-                self.name = value.to_string();
-                self.submitted = false;
-            }
-            Event::TextChanged {
-                action: "form:bio",
-                value,
-            } => self.bio = value.to_string(),
-            Event::TextChanged {
-                action: "form:email",
-                value,
-            } => {
-                self.email = value.to_string();
-                self.submitted = false;
-            }
-            Event::TextChanged { action, value } => {
-                let Some(index) = action
-                    .strip_prefix("recycled:note:")
-                    .and_then(|index| index.parse::<usize>().ok())
-                else {
-                    return false;
-                };
-                if index >= self.recycled_notes.len() {
-                    return false;
-                }
-                Arc::make_mut(&mut self.recycled_notes)[index] = value.to_string();
-                // The native field already shows the text; rebinding the whole
-                // list on every keystroke would only disturb typing.
-                return false;
-            }
-            Event::Submitted {
-                action: "form:submit",
-            } => self.submitted = true,
-            Event::FocusChanged {
-                action: "form:bio-focus",
-                focused,
-            } => self.bio_focused = focused,
-            Event::Back => {
-                if self.demo == Demo::Gallery {
-                    return false;
-                }
-                self.demo = Demo::Gallery;
-            }
-            Event::Toggled {
-                action: "controls:notifications",
-                checked,
-            } => self.notifications = checked,
-            Event::Toggled {
-                action: "controls:wifi",
-                checked,
-            } => self.wifi = checked,
-            Event::Selected {
-                action: "controls:size",
-                index,
-            } => self.size_choice = index,
-            Event::ValueChanged {
-                action: "controls:volume",
-                value,
-            } => self.volume = value,
-            Event::ValueChanged {
-                action: "controls:stepped",
-                value,
-            } => self.stepped = value,
-            Event::DateChanged {
-                action: "controls:date",
-                date,
-            } => self.date = date,
-            Event::Click { action } => match action {
-                "back" => self.demo = Demo::Gallery,
-                "open:counter" => {
-                    self.demo = Demo::Counter;
+    fn update(&mut self, msg: Msg) {
+        match msg {
+            Msg::Open(demo) => {
+                if demo == Demo::Counter {
                     self.count = 0;
                 }
-                "open:layouts" => self.demo = Demo::Layouts,
-                "open:typography" => self.demo = Demo::Typography,
-                "open:alignment" => self.demo = Demo::Alignment,
-                "open:scroll" => self.demo = Demo::Scroll,
-                "open:form" => self.demo = Demo::Form,
-                "open:media" => self.demo = Demo::Media,
-                "open:styling" => self.demo = Demo::Styling,
-                "open:controls" => self.demo = Demo::Controls,
-                "open:list" => self.demo = Demo::List,
-                "open:list-variable" => self.demo = Demo::ListVariable,
-                "open:list-recycled" => self.demo = Demo::ListRecycled,
-                "open:list-recycled-variable" => self.demo = Demo::ListRecycledVariable,
-                "open:list-recycled-form" => self.demo = Demo::ListRecycledForm,
-                "recycled:refresh" => {}
-                "recycled:tap" => self.recycled_taps += 1,
-                "recycled:bump" => self.recycled_bumps += 1,
-                "recycled:shrink" => {
-                    if self.recycled_items.len() > 200 {
-                        self.recycled_items =
-                            Arc::new(self.recycled_items.iter().take(200).cloned().collect());
-                    }
+                self.demo = demo;
+            }
+            Msg::Back => self.demo = Demo::Gallery,
+            Msg::CounterAdd => self.count += 1,
+            Msg::CounterReset => self.count = 0,
+            Msg::Name(name) => {
+                self.name = name;
+                self.submitted = false;
+            }
+            Msg::Bio(bio) => self.bio = bio,
+            Msg::Email(email) => {
+                self.email = email;
+                self.submitted = false;
+            }
+            Msg::Submit => self.submitted = true,
+            Msg::BioFocus(focused) => self.bio_focused = focused,
+            Msg::ClearForm => {
+                self.name.clear();
+                self.bio.clear();
+                self.email.clear();
+                self.submitted = false;
+            }
+            Msg::Noop | Msg::RecycledRefresh => {}
+            Msg::Notifications(on) => self.notifications = on,
+            Msg::Wifi(on) => self.wifi = on,
+            Msg::Size(index) => self.size_choice = index,
+            Msg::Volume(value) => self.volume = value,
+            Msg::Stepped(value) => self.stepped = value,
+            Msg::Date(value) => {
+                if let DatePickerValue::Date(date) = value {
+                    self.date = date;
                 }
-                "recycled:reset" => {
+            }
+            Msg::RecycledTap => self.recycled_taps += 1,
+            Msg::RecycledBump => self.recycled_bumps += 1,
+            Msg::RecycledShrink => {
+                if self.recycled_items.len() > 200 {
                     self.recycled_items =
-                        Arc::new((1..=1000).map(|index| format!("Row {index}")).collect());
-                    self.recycled_taps = 0;
-                    self.recycled_bumps = 0;
+                        Arc::new(self.recycled_items.iter().take(200).cloned().collect());
                 }
-                "counter:add" => self.count += 1,
-                "counter:reset" => self.count = 0,
-                "form:clear" => {
-                    self.name.clear();
-                    self.bio.clear();
-                    self.email.clear();
-                    self.submitted = false;
+            }
+            Msg::RecycledReset => {
+                self.recycled_items =
+                    Arc::new((1..=1000).map(|index| format!("Row {index}")).collect());
+                self.recycled_taps = 0;
+                self.recycled_bumps = 0;
+            }
+            Msg::Note(index, text) => {
+                if let Some(note) = Arc::make_mut(&mut self.recycled_notes).get_mut(index) {
+                    *note = text;
                 }
-                _ => return false,
-            },
-            _ => return false,
+            }
         }
-        true
     }
 }
 
-fn back_button() -> Button {
-    Button::new("Back").action("back")
+impl App for GalleryApp {
+    /// Back returns to the list; on the list the platform leaves the app.
+    fn back(&self) -> Option<Msg> {
+        (self.demo != Demo::Gallery).then_some(Msg::Back)
+    }
 }
 
-fn caption(text: &str) -> Text {
+fn back_button() -> Button<Msg> {
+    Button::new("Back").on_click(Msg::Back)
+}
+
+fn caption(text: &str) -> Text<Msg> {
     Text::new(text).size(13).color(COLOR_MUTED)
 }
 
-fn chip(text: &str, color: u32) -> Text {
+fn chip(text: &str, color: u32) -> Text<Msg> {
     Text::new(text)
         .size(14)
         .color(COLOR_WHITE)
@@ -1001,7 +987,7 @@ fn chip(text: &str, color: u32) -> Text {
         .padding_each(EdgeInsets::symmetric(10, 4))
 }
 
-fn chips(justify: Justify) -> Row {
+fn chips(justify: Justify) -> Row<Msg> {
     Row::new()
         .width_percent(1.0)
         .spacing(8)
@@ -1019,195 +1005,77 @@ mod tests {
     fn initial_state_is_gallery() {
         let app = GalleryApp::new();
         assert_eq!(app.demo, Demo::Gallery);
-        assert_eq!(app.count, 0);
-    }
-
-    fn click(action: &'static str) -> Event<'static> {
-        Event::Click { action }
+        assert_eq!(app.back(), None);
     }
 
     #[test]
-    fn controls_dispatch_typed_events() {
+    fn controls_messages_update_the_state() {
         let mut app = GalleryApp::new();
-        assert!(app.wifi);
-        assert_eq!(app.size_choice, 1);
-        assert_eq!(app.volume, 40.0);
-
-        assert!(app.handle(Event::Toggled {
-            action: "controls:wifi",
-            checked: false,
-        }));
+        app.update(Msg::Wifi(false));
         assert!(!app.wifi);
-
-        assert!(app.handle(Event::Selected {
-            action: "controls:size",
-            index: 2,
-        }));
+        app.update(Msg::Notifications(true));
+        assert!(app.notifications);
+        app.update(Msg::Size(2));
         assert_eq!(app.size_choice, 2);
-
-        assert!(app.handle(Event::ValueChanged {
-            action: "controls:volume",
-            value: 75.0,
-        }));
+        app.update(Msg::Volume(75.0));
         assert_eq!(app.volume, 75.0);
-
-        assert!(app.handle(Event::ValueChanged {
-            action: "controls:stepped",
-            value: 70.0,
-        }));
-        assert_eq!(app.stepped, 70.0);
-
-        assert!(app.handle(Event::DateChanged {
-            action: "controls:date",
-            date: DateValue::new(2027, 1, 2),
-        }));
+        app.update(Msg::Stepped(60.0));
+        assert_eq!(app.stepped, 60.0);
+        app.update(Msg::Date(DatePickerValue::Date(DateValue::new(2027, 1, 2))));
         assert_eq!(app.date, DateValue::new(2027, 1, 2));
     }
 
     #[test]
-    fn navigation_and_counter_actions() {
+    fn opening_a_demo_and_going_back() {
         let mut app = GalleryApp::new();
-
-        assert!(app.handle(click("open:counter")));
+        app.update(Msg::Open(Demo::Counter));
         assert_eq!(app.demo, Demo::Counter);
-        assert_eq!(app.count, 0);
+        assert_eq!(app.back(), Some(Msg::Back));
 
-        assert!(app.handle(click("counter:add")));
-        assert_eq!(app.count, 1);
-
-        assert!(app.handle(click("counter:add")));
+        app.update(Msg::CounterAdd);
+        app.update(Msg::CounterAdd);
         assert_eq!(app.count, 2);
-
-        assert!(app.handle(click("counter:reset")));
+        app.update(Msg::CounterReset);
         assert_eq!(app.count, 0);
 
-        assert!(app.handle(click("back")));
+        app.update(Msg::Back);
         assert_eq!(app.demo, Demo::Gallery);
 
-        assert!(!app.handle(Event::Back));
-        assert!(app.handle(click("open:counter")));
-        assert!(app.handle(Event::Back));
-        assert_eq!(app.demo, Demo::Gallery);
-
-        assert!(app.handle(click("open:layouts")));
-        assert_eq!(app.demo, Demo::Layouts);
-
-        assert!(app.handle(click("open:typography")));
-        assert_eq!(app.demo, Demo::Typography);
-
-        assert!(app.handle(click("open:alignment")));
-        assert_eq!(app.demo, Demo::Alignment);
-
-        assert!(app.handle(click("open:scroll")));
-        assert_eq!(app.demo, Demo::Scroll);
-
-        assert!(app.handle(click("open:form")));
-        assert_eq!(app.demo, Demo::Form);
-
-        assert!(app.handle(click("open:media")));
-        assert_eq!(app.demo, Demo::Media);
-
-        assert!(app.handle(click("open:styling")));
-        assert_eq!(app.demo, Demo::Styling);
-
-        assert!(app.handle(click("open:controls")));
-        assert_eq!(app.demo, Demo::Controls);
-
-        assert!(!app.handle(click("unknown_action")));
+        // Reopening the counter starts from zero again.
+        app.count = 5;
+        app.update(Msg::Open(Demo::Counter));
+        assert_eq!(app.count, 0);
     }
 
     #[test]
-    fn text_changes_update_the_form_state() {
+    fn form_messages_update_the_form_state() {
         let mut app = GalleryApp::new();
-
-        assert!(app.handle(Event::TextChanged {
-            action: "form:name",
-            value: "Ada",
-        }));
+        app.update(Msg::Name("Ada".into()));
+        app.update(Msg::Bio("Engineer".into()));
+        app.update(Msg::Email("ada@example.com".into()));
         assert_eq!(app.name, "Ada");
-
-        assert!(app.handle(Event::TextChanged {
-            action: "form:bio",
-            value: "Loves layout engines.",
-        }));
-        assert_eq!(app.bio, "Loves layout engines.");
-
-        assert!(app.handle(Event::TextChanged {
-            action: "form:email",
-            value: "ada@example.com",
-        }));
+        assert_eq!(app.bio, "Engineer");
         assert_eq!(app.email, "ada@example.com");
 
-        assert!(app.handle(click("form:clear")));
-        assert!(app.name.is_empty());
-        assert!(app.bio.is_empty());
-        assert!(app.email.is_empty());
-        assert!(!app.submitted);
-
-        assert!(!app.handle(Event::TextChanged {
-            action: "unknown",
-            value: "ignored",
-        }));
-    }
-
-    #[test]
-    fn submitting_and_focusing_update_the_form_state() {
-        let mut app = GalleryApp::new();
-        assert!(!app.submitted);
-        assert!(!app.bio_focused);
-
-        assert!(app.handle(Event::FocusChanged {
-            action: "form:bio-focus",
-            focused: true,
-        }));
+        app.update(Msg::BioFocus(true));
         assert!(app.bio_focused);
-
-        assert!(app.handle(Event::FocusChanged {
-            action: "form:bio-focus",
-            focused: false,
-        }));
-        assert!(!app.bio_focused);
-
-        assert!(app.handle(Event::Submitted {
-            action: "form:submit",
-        }));
+        app.update(Msg::Submit);
         assert!(app.submitted);
-
-        // Editing a submitted field clears the confirmation.
-        assert!(app.handle(Event::TextChanged {
-            action: "form:name",
-            value: "Grace",
-        }));
+        // Editing again clears the submitted flag.
+        app.update(Msg::Name("Ada L".into()));
         assert!(!app.submitted);
 
-        assert!(!app.handle(Event::Submitted { action: "unknown" }));
-        assert!(!app.handle(Event::FocusChanged {
-            action: "unknown",
-            focused: true,
-        }));
+        app.update(Msg::ClearForm);
+        assert!(app.name.is_empty() && app.bio.is_empty() && app.email.is_empty());
     }
 
     #[test]
-    fn toggling_a_switch_updates_the_controls_state() {
+    fn notes_are_edited_by_index() {
         let mut app = GalleryApp::new();
-        assert!(!app.notifications);
-
-        assert!(app.handle(Event::Toggled {
-            action: "controls:notifications",
-            checked: true,
-        }));
-        assert!(app.notifications);
-
-        assert!(app.handle(Event::Toggled {
-            action: "controls:notifications",
-            checked: false,
-        }));
-        assert!(!app.notifications);
-
-        assert!(!app.handle(Event::Toggled {
-            action: "unknown",
-            checked: true,
-        }));
+        app.update(Msg::Note(3, "hello".into()));
+        assert_eq!(app.recycled_notes[3], "hello");
+        // An index outside the list is ignored.
+        app.update(Msg::Note(10_000, "nope".into()));
     }
 
     #[test]

@@ -1,176 +1,158 @@
-//! Application interface.
+//! The application interface.
 //!
-//! Applications describe their UI and respond to user interactions by
-//! implementing the [`App`] trait. The platform renderers query the current
-//! UI tree through [`App::view`] and forward native events through
-//! [`App::handle`].
+//! An application is a [`Component`]: state, a message type describing
+//! everything that can happen to it, an `update` that applies a message and a
+//! `view` that describes the UI for the current state. Widgets carry the
+//! message to send, so there is no string matching and the compiler checks
+//! every event:
+//!
+//! ```ignore
+//! #[derive(Clone)]
+//! enum Msg { Increment, Name(String) }
+//!
+//! impl Component for Counter {
+//!     type Msg = Msg;
+//!
+//!     fn update(&mut self, msg: Msg) {
+//!         match msg {
+//!             Msg::Increment => self.count += 1,
+//!             Msg::Name(name) => self.name = name,
+//!         }
+//!     }
+//!
+//!     fn view(&self) -> Element<Msg> {
+//!         Column::new()
+//!             .child(Text::new(format!("{}", self.count)))
+//!             .child(Button::new("+1").on_click(Msg::Increment))
+//!             .child(TextField::new(&self.name).on_change(Msg::Name))
+//!             .into()
+//!     }
+//! }
+//! ```
+//!
+//! A larger application is built from smaller components: the parent keeps
+//! the child in its state, shows `child.view().map(Msg::Child)` and forwards
+//! `Msg::Child(msg)` to `child.update(msg)`.
 
 use std::sync::OnceLock;
 
-use crate::ui::Element;
+use crate::element::{Element, RawElement};
+use crate::message::Message;
+use crate::navigation::{Navigation, Screen};
+use crate::presentation::{BottomSheet, Dialog};
 
-/// A user interaction dispatched by a native widget.
+/// A piece of UI with its own state and messages.
+pub trait Component {
+    /// Everything that can happen to this component.
+    type Msg: 'static;
+
+    /// Applies a message to the state. The UI is rebuilt afterwards.
+    fn update(&mut self, msg: Self::Msg);
+
+    /// Describes the UI for the current state.
+    fn view(&self) -> Element<Self::Msg>;
+}
+
+/// The root component of an application, plus the native chrome around it.
 ///
-/// Actions are borrowed for the duration of the [`App::handle`] call. They may
-/// be built dynamically by the application, such as
-/// `format!("note:delete:{index}")` for a row in a list.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Event<'a> {
-    /// A button was pressed.
-    Click {
-        /// The action configured on the button.
-        action: &'a str,
-    },
-    /// The text of an input changed.
-    TextChanged {
-        /// The action configured on the input.
-        action: &'a str,
-        /// The new text of the input.
-        value: &'a str,
-    },
-    /// The user submitted an input from the keyboard.
-    Submitted {
-        /// The action configured on the input.
-        action: &'a str,
-    },
-    /// An input gained or lost focus.
-    FocusChanged {
-        /// The action configured on the input.
-        action: &'a str,
-        /// Whether the input is now focused.
-        focused: bool,
-    },
-    /// A switch, checkbox or radio button was toggled.
-    Toggled {
-        /// The action configured on the control.
-        action: &'a str,
-        /// Whether the control is now on.
-        checked: bool,
-    },
-    /// A slider value changed.
-    ValueChanged {
-        /// The action configured on the slider.
-        action: &'a str,
-        /// The new value.
-        value: f32,
-    },
-    /// The selection of a radio group or tab bar changed.
-    Selected {
-        /// The action configured on the radio group or tab bar.
-        action: &'a str,
-        /// The index of the newly selected option.
-        index: usize,
-    },
-    /// The date of a date picker changed.
-    DateChanged {
-        /// The action configured on the date picker.
-        action: &'a str,
-        /// The newly selected date.
-        date: crate::ui::DateValue,
-    },
-    /// The time of a time picker changed.
-    TimeChanged {
-        /// The action configured on the time picker.
-        action: &'a str,
-        /// The newly selected time.
-        time: crate::ui::TimeValue,
-    },
-    /// The date and time of a date-and-time picker changed.
-    DateTimeChanged {
-        /// The action configured on the picker.
-        action: &'a str,
-        /// The newly selected date.
-        date: crate::ui::DateValue,
-        /// The newly selected time.
-        time: crate::ui::TimeValue,
-    },
-    /// The user asked to go back, usually from Android's system back button.
-    Back,
-}
-
-impl Event<'_> {
-    /// The action the event was dispatched for.
-    pub fn action(&self) -> &str {
-        match self {
-            Self::Click { action }
-            | Self::TextChanged { action, .. }
-            | Self::Submitted { action }
-            | Self::FocusChanged { action, .. }
-            | Self::Toggled { action, .. }
-            | Self::ValueChanged { action, .. }
-            | Self::Selected { action, .. }
-            | Self::DateChanged { action, .. }
-            | Self::TimeChanged { action, .. }
-            | Self::DateTimeChanged { action, .. } => action,
-            Self::Back => "",
-        }
-    }
-}
-
-/// An interactive application driven by the UI runtime.
-pub trait App: Send + 'static {
-    /// Returns the declarative description of the current screen.
-    fn view(&self) -> Element;
-
-    /// Handles a user interaction dispatched by a native widget.
-    ///
-    /// Returns `true` if the state changed and the UI should be re-rendered.
-    fn handle(&mut self, event: Event<'_>) -> bool;
-
+/// Every method has a default, so a single-screen app only implements
+/// [`Component`].
+pub trait App: Component + Send + 'static {
     /// The native navigation stack, when the app uses one.
     ///
     /// The application owns this state; the runtime mirrors it with native
-    /// navigation controllers. Defaults to no navigation.
-    fn navigation(&self) -> Option<crate::navigation::Navigation> {
+    /// navigation controllers. With navigation, [`Component::view`] is not
+    /// shown: the first screen is the root.
+    fn navigation(&self) -> Option<Navigation<Self::Msg>> {
         None
     }
 
-    /// Builds the content of one navigation screen.
-    ///
-    /// Called once per screen host. The default returns `None`, which is only
-    /// valid when [`App::navigation`] is also `None`.
-    fn screen(&self, _key: &str) -> Option<Element> {
+    /// The content of one navigation screen, by its key.
+    fn screen(&self, _key: &str) -> Option<Element<Self::Msg>> {
         None
     }
 
-    /// The system alert currently shown, if any.
-    ///
-    /// The alert stays up while this returns `Some`. Each button dispatches
-    /// its action as [`Event::Click`]; the application closes the alert by
-    /// returning `None` afterwards.
-    fn dialog(&self) -> Option<crate::presentation::Dialog> {
+    /// The system alert to show, if any. It stays up while this returns
+    /// `Some`; a button sends its message and the application closes the
+    /// alert by returning `None` afterwards.
+    fn dialog(&self) -> Option<Dialog<Self::Msg>> {
         None
     }
 
-    /// The native bottom sheet currently shown, if any.
-    fn sheet(&self) -> Option<crate::presentation::BottomSheet> {
+    /// The native bottom sheet to show, if any.
+    fn sheet(&self) -> Option<BottomSheet<Self::Msg>> {
+        None
+    }
+
+    /// The message to send for the system back action, or `None` to let the
+    /// platform handle it (which leaves the app from its root screen).
+    fn back(&self) -> Option<Self::Msg> {
         None
     }
 }
 
-type AppFactory = Box<dyn Fn() -> Box<dyn App> + Send + Sync>;
+/// An [`App`] with its message type erased, as the runtime holds it.
+pub(crate) trait AnyApp: Send {
+    fn view(&self) -> RawElement;
+    fn update(&mut self, message: Message);
+    fn navigation(&self) -> Option<Vec<Screen>>;
+    fn screen(&self, key: &str) -> Option<RawElement>;
+    fn dialog(&self) -> Option<Dialog>;
+    fn sheet(&self) -> Option<BottomSheet>;
+    fn back(&self) -> Option<Message>;
+}
+
+impl<A: App> AnyApp for A {
+    fn view(&self) -> RawElement {
+        Component::view(self).into_raw()
+    }
+
+    fn update(&mut self, message: Message) {
+        // Every handler in this app's tree was built from `A::Msg`.
+        if let Ok(message) = message.downcast::<A::Msg>() {
+            Component::update(self, *message);
+        }
+    }
+
+    fn navigation(&self) -> Option<Vec<Screen>> {
+        App::navigation(self)
+            .map(|navigation| navigation.screens.into_iter().map(Screen::erase).collect())
+    }
+
+    fn screen(&self, key: &str) -> Option<RawElement> {
+        App::screen(self, key).map(Element::into_raw)
+    }
+
+    fn dialog(&self) -> Option<Dialog> {
+        App::dialog(self).map(Dialog::erase)
+    }
+
+    fn sheet(&self) -> Option<BottomSheet> {
+        App::sheet(self).map(BottomSheet::erase)
+    }
+
+    fn back(&self) -> Option<Message> {
+        App::back(self).map(|message| Box::new(message) as Message)
+    }
+}
+
+type AppFactory = Box<dyn Fn() -> Box<dyn AnyApp> + Send + Sync>;
 
 static APP_FACTORY: OnceLock<AppFactory> = OnceLock::new();
 
-/// Registers the global application factory.
-///
-/// Platform root views invoke this factory when creating their Rust runtime state.
-/// If no factory is registered, platform views fall back to the built-in gallery demo.
-pub fn set_app_factory<F>(factory: F)
-where
-    F: Fn() -> Box<dyn App> + Send + Sync + 'static,
-{
-    let _ = APP_FACTORY.set(Box::new(factory));
+/// Registers the application. Call once at startup, before any native root
+/// view is created; each activity or scene then gets its own instance.
+pub fn set_app_factory<A: App>(factory: impl Fn() -> A + Send + Sync + 'static) {
+    let _ = APP_FACTORY.set(Box::new(move || Box::new(factory())));
 }
 
 /// Creates a new application instance.
 ///
-/// Uses the registered factory if one exists, otherwise instantiates
-/// [`crate::gallery::GalleryApp`].
-pub fn create_app() -> Box<dyn App> {
-    if let Some(factory) = APP_FACTORY.get() {
-        factory()
-    } else {
-        Box::new(crate::gallery::GalleryApp::default())
+/// Uses the registered factory if one exists, otherwise the built-in gallery.
+#[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+pub(crate) fn create_app() -> Box<dyn AnyApp> {
+    match APP_FACTORY.get() {
+        Some(factory) => factory(),
+        None => Box::new(crate::gallery::GalleryApp::default()),
     }
 }

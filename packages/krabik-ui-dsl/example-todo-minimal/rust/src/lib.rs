@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use jni::EnvUnowned;
 use jni::objects::JObject;
-use krabik_ui_dsl::app::{App, Event, set_app_factory};
+use krabik_ui_dsl::app::{App, Component, set_app_factory};
 use krabik_ui_dsl::ui::{
     Align, Button, Checkbox, Column, EdgeInsets, Element, List, Row, Spacer, Text, TextField,
 };
@@ -32,6 +32,21 @@ struct TodoRow {
     id: u64,
     title: String,
     done: bool,
+}
+
+/// Everything the user can do in the app.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Msg {
+    /// The text in the "new task" field changed.
+    Draft(String),
+    /// Adds the draft as a task.
+    Add,
+    /// Marks the task with this id done or not done.
+    SetDone(u64, bool),
+    /// Deletes the task with this id.
+    Delete(u64),
+    /// Removes every completed task.
+    ClearCompleted,
 }
 
 /// The state of the minimal todo application.
@@ -74,7 +89,7 @@ impl MinimalTodoApp {
 
     /// Registers the app as the global application factory.
     pub fn install() {
-        set_app_factory(|| Box::new(Self::new()));
+        set_app_factory(Self::new);
     }
 
     fn summary(&self) -> String {
@@ -140,8 +155,28 @@ impl Default for MinimalTodoApp {
     }
 }
 
-impl App for MinimalTodoApp {
-    fn view(&self) -> Element {
+impl Component for MinimalTodoApp {
+    type Msg = Msg;
+
+    fn update(&mut self, msg: Msg) {
+        match msg {
+            Msg::Draft(text) => self.draft = text,
+            Msg::Add => {
+                self.add_todo();
+            }
+            Msg::SetDone(id, done) => {
+                self.set_done(id, done);
+            }
+            Msg::Delete(id) => {
+                self.delete_todo(id);
+            }
+            Msg::ClearCompleted => {
+                self.clear_completed();
+            }
+        }
+    }
+
+    fn view(&self) -> Element<Msg> {
         let rows = self.visible_rows();
         let done = self.todos.iter().filter(|todo| todo.done).count();
 
@@ -161,11 +196,11 @@ impl App for MinimalTodoApp {
                     .child(
                         TextField::new(self.draft.clone())
                             .placeholder("What needs doing?")
-                            .action("todo:draft")
-                            .submit_action("todo:add")
+                            .on_change(Msg::Draft)
+                            .on_submit(Msg::Add)
                             .grow(1.0),
                     )
-                    .child(Button::new("Add").action("todo:add")),
+                    .child(Button::new("Add").on_click(Msg::Add)),
             )
             .child(
                 Row::new()
@@ -174,7 +209,7 @@ impl App for MinimalTodoApp {
                     .child(Spacer::new())
                     .child(
                         Button::new("Clear completed")
-                            .action("todo:clear-done")
+                            .on_click(Msg::ClearCompleted)
                             .enabled(done > 0),
                     ),
             );
@@ -194,45 +229,12 @@ impl App for MinimalTodoApp {
             )
             .into()
     }
-
-    fn handle(&mut self, event: Event<'_>) -> bool {
-        match event {
-            Event::TextChanged {
-                action: "todo:draft",
-                value,
-            } => {
-                self.draft = value.to_string();
-                true
-            }
-            Event::Submitted { action: "todo:add" } => self.add_todo(),
-            Event::Click { action } => {
-                if let Some(id) = action
-                    .strip_prefix("todo:delete:")
-                    .and_then(|id| id.parse::<u64>().ok())
-                {
-                    return self.delete_todo(id);
-                }
-                match action {
-                    "todo:add" => self.add_todo(),
-                    "todo:clear-done" => self.clear_completed(),
-                    _ => false,
-                }
-            }
-            Event::Toggled { action, checked } => {
-                let Some(id) = action
-                    .strip_prefix("todo:toggle:")
-                    .and_then(|id| id.parse::<u64>().ok())
-                else {
-                    return false;
-                };
-                self.set_done(id, checked)
-            }
-            _ => false,
-        }
-    }
 }
 
-fn todo_row(row: &TodoRow) -> Element {
+impl App for MinimalTodoApp {}
+
+fn todo_row(row: &TodoRow) -> Element<Msg> {
+    let id = row.id;
     Row::new()
         .width_percent(1.0)
         .height(ROW_HEIGHT)
@@ -243,19 +245,19 @@ fn todo_row(row: &TodoRow) -> Element {
         .corner_radius(10)
         .child(
             Checkbox::new(row.title.clone(), row.done)
-                .action(format!("todo:toggle:{}", row.id))
+                .on_toggle(move |done| Msg::SetDone(id, done))
                 .size(15)
                 .grow(1.0),
         )
         .child(
             Button::new("Delete")
-                .action(format!("todo:delete:{}", row.id))
+                .on_click(Msg::Delete(id))
                 .accessibility_label(format!("Delete {}", row.title)),
         )
         .into()
 }
 
-fn caption(content: &str) -> Text {
+fn caption(content: &str) -> Text<Msg> {
     Text::new(content).size(14).color(COLOR_MUTED)
 }
 
@@ -323,5 +325,21 @@ mod tests {
         assert!(app.clear_completed());
         assert!(app.todos.iter().all(|todo| !todo.done));
         assert!(!app.clear_completed());
+    }
+
+    #[test]
+    fn messages_drive_the_same_flow() {
+        let mut app = app();
+        app.update(Msg::Draft("Buy milk".to_string()));
+        app.update(Msg::Add);
+        assert_eq!(app.todos.last().unwrap().title, "Buy milk");
+        let id = app.todos.last().unwrap().id;
+
+        app.update(Msg::SetDone(id, true));
+        assert_eq!(app.summary(), "2 of 5 done");
+        app.update(Msg::Delete(id));
+        assert_eq!(app.todos.len(), 4);
+        app.update(Msg::ClearCompleted);
+        assert!(app.todos.iter().all(|todo| !todo.done));
     }
 }

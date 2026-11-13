@@ -3,17 +3,35 @@
 //! It retains the original example's behavior: fixed tasks with per-task
 //! switches, a notes input, dynamic rows and per-note delete actions.
 
-use krabik_ui_dsl::app::Event;
+use krabik_ui_dsl::app::Component;
 use krabik_ui_dsl::ui::{
     Align, Button, Column, EdgeInsets, Element, Row, ScrollView, Spacer, Switch, Text, TextField,
 };
 
 use crate::pages::{COLOR_DONE, COLOR_MUTED, COLOR_SURFACE, COLOR_TEXT, caption};
 
+/// Everything the user can do on the checklist page.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Msg {
+    /// The text in the "add a note" field changed.
+    Draft(String),
+    /// Adds the draft as a note.
+    AddNote,
+    /// Removes every note.
+    ClearNotes,
+    /// Deletes the note at this index.
+    DeleteNote(usize),
+    /// Marks the task at this index done or not done.
+    SetTask(usize, bool),
+    /// Hides or shows completed tasks.
+    HideDone(bool),
+}
+
 /// One fixed checklist task.
 struct Task {
     title: &'static str,
-    action: &'static str,
+    /// A stable key for the task's row.
+    key: &'static str,
     done: bool,
 }
 
@@ -32,17 +50,17 @@ impl Checklist {
             tasks: vec![
                 Task {
                     title: "Review the renderer",
-                    action: "task:0",
+                    key: "task:0",
                     done: true,
                 },
                 Task {
                     title: "Register the app factory",
-                    action: "task:1",
+                    key: "task:1",
                     done: false,
                 },
                 Task {
                     title: "Ship the checklist",
-                    action: "task:2",
+                    key: "task:2",
                     done: false,
                 },
             ],
@@ -67,14 +85,14 @@ impl Checklist {
         )
     }
 
-    fn task_row(&self, task: &Task) -> Element {
+    fn task_row(&self, index: usize, task: &Task) -> Element<Msg> {
         let title = if task.done {
             format!("✓ {}", task.title)
         } else {
             task.title.to_string()
         };
         Row::new()
-            .key(task.action)
+            .key(task.key)
             .width_percent(1.0)
             .spacing(8)
             .align_items(Align::Center)
@@ -85,14 +103,14 @@ impl Checklist {
             .child(Spacer::new())
             .child(
                 Switch::new(task.done)
-                    .action(task.action)
+                    .on_toggle(move |done| Msg::SetTask(index, done))
                     .accessibility_label(task.title),
             )
             .into()
     }
 
     /// One note row with a delete button whose action is built at runtime.
-    fn note_row(&self, index: usize, note: &str) -> Element {
+    fn note_row(&self, index: usize, note: &str) -> Element<Msg> {
         Row::new()
             .width_percent(1.0)
             .spacing(8)
@@ -104,7 +122,7 @@ impl Checklist {
             .child(Spacer::new())
             .child(
                 Button::new("Delete")
-                    .action(format!("note:delete:{index}"))
+                    .on_click(Msg::DeleteNote(index))
                     .accessibility_label(format!("Delete {note}")),
             )
             .into()
@@ -119,23 +137,13 @@ impl Checklist {
         self.draft.clear();
         true
     }
+}
 
-    fn toggle(&mut self, action: &str, checked: bool) -> bool {
-        for task in &mut self.tasks {
-            if task.action == action {
-                task.done = checked;
-                return true;
-            }
-        }
-        if action == "tasks:hide-done" {
-            self.hide_done = checked;
-            return true;
-        }
-        false
-    }
+impl Component for Checklist {
+    type Msg = Msg;
 
     /// Builds the checklist page.
-    pub(crate) fn view(&self) -> Element {
+    fn view(&self) -> Element<Msg> {
         let mut column = Column::new()
             .padding(24)
             .spacing(12)
@@ -152,16 +160,16 @@ impl Checklist {
                     .child(Spacer::new())
                     .child(
                         Switch::new(self.hide_done)
-                            .action("tasks:hide-done")
+                            .on_toggle(Msg::HideDone)
                             .accessibility_label("Hide completed"),
                     ),
             );
 
-        for task in &self.tasks {
+        for (index, task) in self.tasks.iter().enumerate() {
             if self.hide_done && task.done {
                 continue;
             }
-            column = column.child(self.task_row(task));
+            column = column.child(self.task_row(index, task));
         }
 
         column = column
@@ -178,15 +186,15 @@ impl Checklist {
                     .child(
                         TextField::new(self.draft.clone())
                             .placeholder("Add a note")
-                            .action("notes:draft")
-                            .submit_action("notes:add")
+                            .on_change(Msg::Draft)
+                            .on_submit(Msg::AddNote)
                             .grow(1.0),
                     )
-                    .child(Button::new("Add").action("notes:add")),
+                    .child(Button::new("Add").on_click(Msg::AddNote)),
             );
 
         if !self.notes.is_empty() {
-            column = column.child(Button::new("Clear notes").action("notes:clear"));
+            column = column.child(Button::new("Clear notes").on_click(Msg::ClearNotes));
             for (index, note) in self.notes.iter().enumerate() {
                 column = column.child(self.note_row(index, note));
             }
@@ -199,39 +207,24 @@ impl Checklist {
             .into()
     }
 
-    /// Handles a checklist event. Returns whether the UI should re-render.
-    pub(crate) fn handle(&mut self, event: Event<'_>) -> bool {
-        match event {
-            Event::TextChanged {
-                action: "notes:draft",
-                value,
-            } => {
-                self.draft = value.to_string();
-                true
+    fn update(&mut self, msg: Msg) {
+        match msg {
+            Msg::Draft(text) => self.draft = text,
+            Msg::AddNote => {
+                self.add_note();
             }
-            Event::Click { action } => {
-                if let Some(index) = action
-                    .strip_prefix("note:delete:")
-                    .and_then(|index| index.parse::<usize>().ok())
-                    && index < self.notes.len()
-                {
+            Msg::ClearNotes => self.notes.clear(),
+            Msg::DeleteNote(index) => {
+                if index < self.notes.len() {
                     self.notes.remove(index);
-                    return true;
-                }
-                match action {
-                    "notes:add" => self.add_note(),
-                    "notes:clear" => {
-                        self.notes.clear();
-                        true
-                    }
-                    _ => false,
                 }
             }
-            Event::Submitted {
-                action: "notes:add",
-            } => self.add_note(),
-            Event::Toggled { action, checked } => self.toggle(action, checked),
-            _ => false,
+            Msg::SetTask(index, done) => {
+                if let Some(task) = self.tasks.get_mut(index) {
+                    task.done = done;
+                }
+            }
+            Msg::HideDone(hide) => self.hide_done = hide,
         }
     }
 }

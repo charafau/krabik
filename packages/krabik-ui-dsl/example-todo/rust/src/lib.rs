@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use jni::EnvUnowned;
 use jni::objects::JObject;
-use krabik_ui_dsl::app::{App, Event, set_app_factory};
+use krabik_ui_dsl::app::{App, Component, set_app_factory};
 use krabik_ui_dsl::ui::{
     Align, Button, Checkbox, Column, EdgeInsets, Element, List, ProgressIndicator, RadioButton,
     Row, Slider, Spacer, Switch, Text, TextField,
@@ -28,7 +28,7 @@ const ROW_HEIGHT: f32 = 60.0;
 
 /// Which todos the list shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum Filter {
+pub enum Filter {
     #[default]
     All,
     Active,
@@ -51,6 +51,27 @@ struct TodoRow {
     title: String,
     done: bool,
     priority: u8,
+}
+
+/// Everything the user can do in the app.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Msg {
+    /// The text in the "new task" field changed.
+    Draft(String),
+    /// Adds the draft as a task with the chosen priority.
+    Add,
+    /// Marks the task with this id done or not done.
+    SetDone(u64, bool),
+    /// Deletes the task with this id.
+    Delete(u64),
+    /// Removes every completed task.
+    ClearCompleted,
+    /// Chooses which tasks the list shows.
+    ShowOnly(Filter),
+    /// Turns sorting by priority on or off.
+    SortByPriority(bool),
+    /// The priority slider moved.
+    Priority(f32),
 }
 
 /// The state of the example application.
@@ -106,7 +127,7 @@ impl TodoApp {
     /// The host shell calls this once at startup, before creating the root
     /// view. Without it the platform views fall back to the built-in gallery.
     pub fn install() {
-        set_app_factory(|| Box::new(Self::new()));
+        set_app_factory(Self::new);
     }
 
     fn summary(&self) -> String {
@@ -205,8 +226,34 @@ impl Default for TodoApp {
     }
 }
 
-impl App for TodoApp {
-    fn view(&self) -> Element {
+impl Component for TodoApp {
+    type Msg = Msg;
+
+    fn update(&mut self, msg: Msg) {
+        match msg {
+            Msg::Draft(text) => self.draft = text,
+            Msg::Add => {
+                self.add_todo();
+            }
+            Msg::SetDone(id, done) => {
+                self.set_done(id, done);
+            }
+            Msg::Delete(id) => {
+                self.delete_todo(id);
+            }
+            Msg::ClearCompleted => {
+                self.clear_completed();
+            }
+            Msg::ShowOnly(filter) => {
+                self.set_filter(filter);
+            }
+            Msg::SortByPriority(on) => self.sort_by_priority = on,
+            // The slider reports fractional values; priorities are whole.
+            Msg::Priority(value) => self.priority = value.round().clamp(1.0, 5.0),
+        }
+    }
+
+    fn view(&self) -> Element<Msg> {
         let rows = self.visible_rows();
         let done = self.todos.iter().filter(|todo| todo.done).count();
 
@@ -228,13 +275,17 @@ impl App for TodoApp {
                     .width_percent(1.0)
                     .spacing(8)
                     .align_items(Align::Center)
-                    .child(RadioButton::new("All", self.filter == Filter::All).action("filter:all"))
                     .child(
-                        RadioButton::new("Active", self.filter == Filter::Active)
-                            .action("filter:active"),
+                        RadioButton::new("All", self.filter == Filter::All)
+                            .on_toggle(|_| Msg::ShowOnly(Filter::All)),
                     )
                     .child(
-                        RadioButton::new("Done", self.filter == Filter::Done).action("filter:done"),
+                        RadioButton::new("Active", self.filter == Filter::Active)
+                            .on_toggle(|_| Msg::ShowOnly(Filter::Active)),
+                    )
+                    .child(
+                        RadioButton::new("Done", self.filter == Filter::Done)
+                            .on_toggle(|_| Msg::ShowOnly(Filter::Done)),
                     ),
             )
             .child(
@@ -245,11 +296,11 @@ impl App for TodoApp {
                     .child(
                         TextField::new(self.draft.clone())
                             .placeholder("What needs doing?")
-                            .action("todo:draft")
-                            .submit_action("todo:add")
+                            .on_change(Msg::Draft)
+                            .on_submit(Msg::Add)
                             .grow(1.0),
                     )
-                    .child(Button::new("Add").action("todo:add")),
+                    .child(Button::new("Add").on_click(Msg::Add)),
             )
             .child(
                 Row::new()
@@ -265,7 +316,7 @@ impl App for TodoApp {
                         Slider::new(self.priority)
                             .min(1.0)
                             .max(5.0)
-                            .action("todo:priority")
+                            .on_change(Msg::Priority)
                             .grow(1.0),
                     ),
             )
@@ -277,7 +328,7 @@ impl App for TodoApp {
                     .child(Spacer::new())
                     .child(
                         Switch::new(self.sort_by_priority)
-                            .action("todo:sort")
+                            .on_toggle(Msg::SortByPriority)
                             .accessibility_label("Sort by priority"),
                     ),
             )
@@ -288,7 +339,7 @@ impl App for TodoApp {
                     .child(Spacer::new())
                     .child(
                         Button::new("Clear completed")
-                            .action("todo:clear-done")
+                            .on_click(Msg::ClearCompleted)
                             .enabled(done > 0),
                     ),
             );
@@ -308,67 +359,13 @@ impl App for TodoApp {
             )
             .into()
     }
-
-    fn handle(&mut self, event: Event<'_>) -> bool {
-        match event {
-            Event::TextChanged {
-                action: "todo:draft",
-                value,
-            } => {
-                self.draft = value.to_string();
-                true
-            }
-            Event::Submitted { action: "todo:add" } => self.add_todo(),
-            Event::Click { action } => {
-                if let Some(id) = action
-                    .strip_prefix("todo:delete:")
-                    .and_then(|id| id.parse::<u64>().ok())
-                {
-                    return self.delete_todo(id);
-                }
-                match action {
-                    "todo:add" => self.add_todo(),
-                    "todo:clear-done" => self.clear_completed(),
-                    _ => false,
-                }
-            }
-            Event::Toggled { action, checked } => {
-                if let Some(id) = action
-                    .strip_prefix("todo:toggle:")
-                    .and_then(|id| id.parse::<u64>().ok())
-                {
-                    return self.set_done(id, checked);
-                }
-                match action {
-                    "filter:all" if checked => self.set_filter(Filter::All),
-                    "filter:active" if checked => self.set_filter(Filter::Active),
-                    "filter:done" if checked => self.set_filter(Filter::Done),
-                    "todo:sort" => {
-                        self.sort_by_priority = checked;
-                        true
-                    }
-                    _ => false,
-                }
-            }
-            Event::ValueChanged {
-                action: "todo:priority",
-                value,
-            } => {
-                let snapped = value.round().clamp(1.0, 5.0);
-                if (snapped - self.priority).abs() > f32::EPSILON {
-                    self.priority = snapped;
-                    true
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        }
-    }
 }
 
+impl App for TodoApp {}
+
 /// One recycled row: a checkbox, a priority chip and a delete button.
-fn todo_row(row: &TodoRow) -> Element {
+fn todo_row(row: &TodoRow) -> Element<Msg> {
+    let id = row.id;
     Row::new()
         .width_percent(1.0)
         .height(ROW_HEIGHT)
@@ -379,7 +376,7 @@ fn todo_row(row: &TodoRow) -> Element {
         .corner_radius(10)
         .child(
             Checkbox::new(row.title.clone(), row.done)
-                .action(format!("todo:toggle:{}", row.id))
+                .on_toggle(move |done| Msg::SetDone(id, done))
                 .size(15)
                 .grow(1.0),
         )
@@ -390,14 +387,14 @@ fn todo_row(row: &TodoRow) -> Element {
         )
         .child(
             Button::new("Delete")
-                .action(format!("todo:delete:{}", row.id))
+                .on_click(Msg::Delete(id))
                 .accessibility_label(format!("Delete {}", row.title)),
         )
         .into()
 }
 
 /// A muted secondary line of copy.
-fn caption(content: &str) -> Text {
+fn caption(content: &str) -> Text<Msg> {
     Text::new(content).size(14).color(COLOR_MUTED)
 }
 
@@ -507,18 +504,23 @@ mod tests {
     #[test]
     fn priority_values_are_snapped_to_the_slider_range() {
         let mut app = app();
-        let event = Event::ValueChanged {
-            action: "todo:priority",
-            value: 9.4,
-        };
-        assert!(app.handle(event));
+        app.update(Msg::Priority(9.4));
         assert_eq!(app.priority, 5.0);
-
-        let event = Event::ValueChanged {
-            action: "todo:priority",
-            value: 0.2,
-        };
-        assert!(app.handle(event));
+        app.update(Msg::Priority(0.2));
         assert_eq!(app.priority, 1.0);
+        app.update(Msg::Priority(2.6));
+        assert_eq!(app.priority, 3.0);
+    }
+
+    #[test]
+    fn messages_drive_filtering_and_sorting() {
+        let mut app = app();
+        app.update(Msg::ShowOnly(Filter::Done));
+        assert_eq!(app.filter, Filter::Done);
+        app.update(Msg::SortByPriority(true));
+        assert!(app.sort_by_priority);
+        app.update(Msg::Draft("Write tests".to_string()));
+        app.update(Msg::Add);
+        assert_eq!(app.todos.last().unwrap().title, "Write tests");
     }
 }

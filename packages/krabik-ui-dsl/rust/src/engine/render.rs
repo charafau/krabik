@@ -270,7 +270,7 @@ mod tests {
         let new = tree(
             Column::new()
                 .child(Text::new("a"))
-                .child(Button::new("b").action("b"))
+                .child(Button::new("b").on_click(()))
                 .into(),
         );
 
@@ -341,12 +341,12 @@ mod tests {
     fn toggling_a_switch_updates_the_same_widget() {
         let old = tree(
             Column::new()
-                .child(Switch::new(false).action("toggle"))
+                .child(Switch::new(false).on_toggle(|_| ()))
                 .into(),
         );
         let new = tree(
             Column::new()
-                .child(Switch::new(true).action("toggle"))
+                .child(Switch::new(true).on_toggle(|_| ()))
                 .into(),
         );
 

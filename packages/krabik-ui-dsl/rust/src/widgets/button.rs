@@ -1,20 +1,22 @@
 //! The `button` widget: properties and builder.
 
-use crate::element::{Element, ElementKind, style_builder, text_builder};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement, style_builder, text_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
+use crate::message::Handler;
 use crate::style::FontWeight;
 use crate::widgets::TextProps;
 use crate::widgets::Widget;
-use std::borrow::Cow;
 
 /// Platform-independent properties of a button node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ButtonProps {
     /// The label shown on the button.
     pub label: String,
-    /// The action dispatched when the button is pressed.
-    pub action: Cow<'static, str>,
+    /// Reported when the button is pressed.
+    pub on_click: Handler<()>,
     /// Font size in logical points.
     pub size: f32,
     /// ARGB text color.
@@ -28,7 +30,7 @@ impl ButtonProps {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
-            action: Cow::Borrowed(""),
+            on_click: Handler::none(),
             size: 16.0,
             color: 0xFF00_0000,
             weight: FontWeight::Normal,
@@ -37,32 +39,32 @@ impl ButtonProps {
 }
 
 /// A native button.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Button(pub(crate) Element);
+pub struct Button<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl Button {
+impl<M> Button<M> {
     /// Creates a button.
     pub fn new(label: impl Into<String>) -> Self {
-        Self(Element::leaf(ElementKind::Widget(Widget::Button(
-            ButtonProps::new(label),
-        ))))
+        Self(
+            RawElement::leaf(ElementKind::Widget(Widget::Button(ButtonProps::new(label)))),
+            PhantomData,
+        )
     }
 
-    /// Sets the action dispatched when the button is pressed.
-    ///
-    /// Accepts a `&'static str` or an owned `String` for actions built at
-    /// runtime, such as `format!("note:delete:{index}")`.
-    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+    /// Sends `message` when the button is pressed.
+    pub fn on_click(mut self, message: M) -> Self
+    where
+        M: Clone + Send + Sync + 'static,
+    {
         if let ElementKind::Widget(Widget::Button(props)) = &mut self.0.kind {
-            props.action = action.into();
+            props.on_click = Handler::new(move |()| message.clone());
         }
         self
     }
 }
 
-impl From<Button> for Element {
-    fn from(component: Button) -> Self {
-        component.0
+impl<M> From<Button<M>> for Element<M> {
+    fn from(component: Button<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 
