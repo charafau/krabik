@@ -1,5 +1,7 @@
 package com.example.krabik_ui_dsl
 
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.widget.ProgressBar
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
@@ -134,6 +136,23 @@ class ShowcaseTest {
 
             openPage("Styling")
             onView(withText("Disabled action")).check(matches(not(isEnabled())))
+            tapBack()
+        }
+    }
+
+    @Test
+    fun navigationScreensPaintAnOpaqueBackground() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            openPage("Text")
+            scenario.onActivity { activity ->
+                val screen = activity.supportFragmentManager.fragments
+                    .last { it.view != null && it is KrabikScreenFragment }
+                val background = screen.requireView().background as? ColorDrawable
+                assertTrue(
+                    "navigation screens must be opaque",
+                    background != null && Color.alpha(background.color) == 255,
+                )
+            }
             tapBack()
         }
     }
