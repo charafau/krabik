@@ -14,10 +14,11 @@ use taffy::prelude::{
 };
 use taffy::tree::{Layout, LayoutInput, LayoutOutput};
 
-use crate::geometry::{Constraints, Rect, Size};
+use crate::geometry::{Rect, Size};
 use crate::measure::Measure;
 use crate::tree::{self, NodeId, NodeKind, UiNode};
-use crate::ui::{Align, Axis, Justify, Length, TextProps};
+use crate::ui::{Align, Axis, Justify, Length};
+use crate::widgets::Widget;
 
 /// The result of one layout pass.
 #[derive(Clone, Debug, Default)]
@@ -27,40 +28,6 @@ pub struct LayoutResult {
     /// The scrollable content size of scroll containers, keyed by node.
     pub content_sizes: HashMap<NodeId, Size>,
 }
-
-/// The horizontal padding a button adds around its label.
-const BUTTON_PADDING_X: f32 = 16.0;
-/// The vertical padding a button adds around its label.
-const BUTTON_PADDING_Y: f32 = 12.0;
-/// The smallest height a button is allowed to have.
-const BUTTON_MIN_HEIGHT: f32 = 20.0;
-/// The side of a checkbox or radio indicator in logical points.
-const CHECK_INDICATOR: f32 = 20.0;
-/// The space reserved between a check indicator and its label.
-///
-/// This covers the native button drawable and the control's internal text
-/// inset, so the measured label always fits next to the indicator.
-const CHECK_GAP: f32 = 28.0;
-/// The minimum touch height of a checkbox or radio button.
-const CHECK_HEIGHT: f32 = 48.0;
-/// The height of a native tab bar.
-const TAB_BAR_HEIGHT: f32 = 48.0;
-/// The intrinsic height of a slider.
-const SLIDER_HEIGHT: f32 = 40.0;
-/// The intrinsic height of a progress indicator.
-const PROGRESS_HEIGHT: f32 = 6.0;
-/// The default side of an indeterminate spinner in logical points.
-const SPINNER_SIZE: f32 = 24.0;
-/// The width assumed for a compact date field without a constraint.
-const DATE_PICKER_WIDTH: f32 = 200.0;
-/// The width assumed for a compact time field.
-const TIME_PICKER_WIDTH: f32 = 120.0;
-/// The width assumed for a compact date-and-time field.
-const DATETIME_PICKER_WIDTH: f32 = 240.0;
-/// The height of a compact picker field.
-const DATE_PICKER_HEIGHT: f32 = 48.0;
-/// The width assumed for a slider or progress indicator without a constraint.
-const CONTROL_WIDTH: f32 = 200.0;
 
 /// Calculates the absolute frame of every node in the tree.
 pub fn compute(root: &UiNode, viewport: Size, measurer: &dyn Measure) -> LayoutResult {
@@ -201,7 +168,7 @@ fn taffy_style(node: &UiNode, scroll_child: bool, pager_child: bool) -> TaffySty
         // from shrinking next to a sibling (for example in a list row). A text
         // node may shrink to the space its parent leaves and wrap instead.
         min_size: TaffySize {
-            width: if pager_child || matches!(node.kind, NodeKind::Text(_)) {
+            width: if pager_child || matches!(node.kind, NodeKind::Widget(Widget::Text(_))) {
                 LengthPercentageAuto::length(0.0)
             } else {
                 LengthPercentageAuto::auto()
@@ -316,156 +283,24 @@ fn content_size(
     };
 
     match &node.kind {
-        NodeKind::Text(props) => measurer.measure(
-            props,
-            Constraints {
-                max_width,
-                max_height: None,
-            },
-        ),
-        NodeKind::Button(props) => {
-            // The label sits inside the button chrome, which the layout adds
-            // back below.
-            let inner_width = max_width.map(|width| (width - BUTTON_PADDING_X * 2.0).max(0.0));
-            let label = TextProps {
-                content: props.label.clone(),
-                size: props.size,
-                color: props.color,
-                weight: props.weight,
-                ..TextProps::new("")
-            };
-            let text = measurer.measure(
-                &label,
-                Constraints {
-                    max_width: inner_width,
-                    max_height: None,
-                },
-            );
-
-            Size::new(
-                text.width + BUTTON_PADDING_X * 2.0,
-                text.height.max(BUTTON_MIN_HEIGHT) + BUTTON_PADDING_Y * 2.0,
-            )
-        }
-        NodeKind::TextField(props) => {
-            // An empty input is measured from its hint, so the field keeps a
-            // stable height and width before the user types.
-            let content = if props.value.is_empty() {
-                &props.placeholder
+        // An image is scaled from its natural size to fit the node's style.
+        NodeKind::Widget(widget @ Widget::Image(_)) => {
+            let natural = widget.intrinsic_size(max_width, measurer);
+            if natural == Size::ZERO {
+                Size::ZERO
             } else {
-                &props.value
-            };
-            let mut text = TextProps {
-                content: content.clone(),
-                size: props.size,
-                color: props.color,
-                weight: props.weight,
-                ..TextProps::new("")
-            };
-            if !props.multiline {
-                // A single-line input never grows taller when the text is
-                // longer than the available width.
-                text.max_lines = Some(1);
-                text.ellipsis = true;
-            }
-            measurer.measure(
-                &text,
-                Constraints {
-                    max_width,
-                    max_height: None,
-                },
-            )
-        }
-        // Switches have a platform-defined intrinsic size. The measurer keeps
-        // the native control's size; an explicit dimension still overrides it.
-        NodeKind::Switch(_) => {
-            let size = measurer.switch_size();
-            Size::new(
-                max_width.map_or(size.width, |width| width.min(size.width)),
-                size.height,
-            )
-        }
-        NodeKind::Checkbox(props) | NodeKind::RadioButton(props) => {
-            let inner_width = max_width.map(|width| (width - CHECK_INDICATOR - CHECK_GAP).max(0.0));
-            let label = TextProps {
-                content: props.label.clone(),
-                size: props.size,
-                color: props.color,
-                weight: props.weight,
-                ..TextProps::new("")
-            };
-            let text = measurer.measure(
-                &label,
-                Constraints {
-                    max_width: inner_width,
-                    max_height: None,
-                },
-            );
-            Size::new(
-                text.width + CHECK_INDICATOR + CHECK_GAP,
-                text.height.max(CHECK_HEIGHT),
-            )
-        }
-        NodeKind::RadioGroup(props) => {
-            if props.options.is_empty() {
-                return Size::ZERO;
-            }
-            let inner_width = max_width.map(|width| (width - CHECK_INDICATOR - CHECK_GAP).max(0.0));
-            let mut widest = 0.0f32;
-            let mut height = 0.0f32;
-            for option in &props.options {
-                let label = TextProps {
-                    content: option.clone(),
-                    size: props.size,
-                    color: props.color,
-                    weight: props.weight,
-                    ..TextProps::new("")
-                };
-                let text = measurer.measure(
-                    &label,
-                    Constraints {
-                        max_width: inner_width,
-                        max_height: None,
-                    },
-                );
-                widest = widest.max(text.width);
-                height += text.height.max(CHECK_HEIGHT);
-            }
-            height += props.spacing * (props.options.len() - 1) as f32;
-            Size::new(widest + CHECK_INDICATOR + CHECK_GAP, height)
-        }
-        // A tab bar fills the available width and has a fixed touch height.
-        NodeKind::TabBar(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), TAB_BAR_HEIGHT),
-        NodeKind::DatePicker(props) => {
-            let (compact_width, inline_width, inline_height) = match props.value {
-                crate::ui::DatePickerValue::Date(_) => (DATE_PICKER_WIDTH, 320.0, 320.0),
-                crate::ui::DatePickerValue::Time(_) => (TIME_PICKER_WIDTH, 240.0, 240.0),
-                crate::ui::DatePickerValue::DateTime { .. } => {
-                    (DATETIME_PICKER_WIDTH, 360.0, 480.0)
-                }
-            };
-            match props.mode {
-                // A field keeps its compact size unless the style sets one.
-                crate::ui::DatePickerMode::Compact => Size::new(compact_width, DATE_PICKER_HEIGHT),
-                // An inline picker fits the available width up to its natural size.
-                crate::ui::DatePickerMode::Inline => Size::new(
-                    max_width.unwrap_or(inline_width).min(inline_width),
-                    inline_height,
-                ),
-            }
-        }
-        // A slider fills the width it is given and has a fixed touch height.
-        NodeKind::Slider(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), SLIDER_HEIGHT),
-        NodeKind::Progress(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), PROGRESS_HEIGHT),
-        NodeKind::Spinner(_) => Size::new(SPINNER_SIZE, SPINNER_SIZE),
-        // Images are sized explicitly by the application in this milestone.
-        NodeKind::Image(props) => match measurer.image_size(props) {
-            Some(natural) if natural.width > 0.0 && natural.height > 0.0 => {
                 image_content_size(node, natural, max_width)
             }
-            _ => Size::ZERO,
-        },
-        _ => Size::ZERO,
+        }
+        NodeKind::Widget(widget) => widget.intrinsic_size(max_width, measurer),
+        // Containers are sized by their children.
+        NodeKind::Root
+        | NodeKind::Column
+        | NodeKind::Row
+        | NodeKind::Spacer
+        | NodeKind::Scroll(_)
+        | NodeKind::Pager(_)
+        | NodeKind::Recycler(_) => Size::ZERO,
     }
 }
 
@@ -523,6 +358,7 @@ fn scroll_content_size(node: &UiNode, layout: &Layout) -> Option<Size> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::Constraints;
     use crate::measure::ApproximateMeasure;
     use crate::tree::ROOT_ID;
     use crate::ui::{
@@ -530,6 +366,7 @@ mod tests {
         Image, ImageSource, Pager, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView,
         Slider, Spacer, Switch, TabBar, Text, TextField, TimeValue,
     };
+    use crate::widgets::TextProps;
 
     /// Measures every text as the same fixed box.
     struct FixedMeasure;

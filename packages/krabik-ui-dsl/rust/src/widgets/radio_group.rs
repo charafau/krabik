@@ -1,0 +1,119 @@
+//! The `radio_group` widget: properties and builder.
+
+use crate::element::{Element, ElementKind, style_builder, text_builder};
+use crate::engine::geometry::Size;
+use crate::engine::measure::Measure;
+use crate::style::{FontWeight, IntoPoints};
+use crate::widgets::Widget;
+use crate::widgets::{CHECK_GAP, CHECK_HEIGHT, CHECK_INDICATOR, TextProps};
+use std::borrow::Cow;
+
+/// Platform-independent properties of a group of mutually exclusive radio buttons.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RadioGroupProps {
+    /// The labels of the options, in display order.
+    pub options: Vec<String>,
+    /// The index of the selected option, or `None` when nothing is selected.
+    pub selected: Option<usize>,
+    /// The action dispatched whenever the selection changes.
+    pub action: Cow<'static, str>,
+    /// Font size of the labels in logical points.
+    pub size: f32,
+    /// ARGB color of the labels and indicators.
+    pub color: u32,
+    /// Font weight of the labels.
+    pub weight: FontWeight,
+    /// Space between two options in logical points.
+    pub spacing: f32,
+}
+
+impl RadioGroupProps {
+    /// Creates a radio group with the given option labels.
+    pub fn new(options: Vec<String>) -> Self {
+        Self {
+            options,
+            selected: None,
+            action: Cow::Borrowed(""),
+            size: 16.0,
+            color: 0xFF00_0000,
+            weight: FontWeight::Normal,
+            spacing: 8.0,
+        }
+    }
+}
+
+/// A native group of mutually exclusive radio buttons.
+///
+/// Unlike individual [`RadioButton`]s, the group owns the selection: tapping an
+/// option reports the chosen index through [`Event::Selected`](crate::app::Event::Selected).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RadioGroup(pub(crate) Element);
+
+impl RadioGroup {
+    /// Creates a radio group with the given option labels.
+    pub fn new(options: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        let options: Vec<String> = options.into_iter().map(Into::into).collect();
+        Self(Element::leaf(ElementKind::Widget(Widget::RadioGroup(
+            RadioGroupProps::new(options),
+        ))))
+    }
+
+    /// Sets the index of the selected option.
+    pub fn selected(mut self, index: usize) -> Self {
+        if let ElementKind::Widget(Widget::RadioGroup(props)) = &mut self.0.kind {
+            props.selected = Some(index);
+        }
+        self
+    }
+
+    /// Sets the action dispatched whenever the selection changes.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+        if let ElementKind::Widget(Widget::RadioGroup(props)) = &mut self.0.kind {
+            props.action = action.into();
+        }
+        self
+    }
+
+    /// Sets the space between two options in logical points.
+    pub fn spacing(mut self, spacing: impl IntoPoints) -> Self {
+        if let ElementKind::Widget(Widget::RadioGroup(props)) = &mut self.0.kind {
+            props.spacing = spacing.into_points();
+        }
+        self
+    }
+}
+
+impl From<RadioGroup> for Element {
+    fn from(component: RadioGroup) -> Self {
+        component.0
+    }
+}
+
+style_builder!(RadioGroup);
+text_builder!(RadioGroup);
+
+impl RadioGroupProps {
+    /// The options stacked vertically, as wide as the widest one.
+    pub(crate) fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
+        if self.options.is_empty() {
+            return Size::ZERO;
+        }
+        let inner_width = max_width.map(|width| (width - CHECK_INDICATOR - CHECK_GAP).max(0.0));
+        let mut widest = 0.0f32;
+        let mut height = 0.0f32;
+        for option in &self.options {
+            let label = TextProps {
+                content: option.clone(),
+                size: self.size,
+                color: self.color,
+                weight: self.weight,
+                ..TextProps::new("")
+            };
+            let text = label.intrinsic_size(inner_width, measurer);
+            widest = widest.max(text.width);
+            height += text.height.max(CHECK_HEIGHT);
+        }
+        height += self.spacing * (self.options.len() - 1) as f32;
+        Size::new(widest + CHECK_INDICATOR + CHECK_GAP, height)
+    }
+}

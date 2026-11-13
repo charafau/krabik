@@ -254,6 +254,7 @@ mod tests {
     use super::*;
     use crate::layout::LayoutResult;
     use crate::ui::{Button, Column, Element, Row, ScrollView, Switch, Text};
+    use crate::widgets::Widget;
 
     fn tree(element: Element) -> UiNode {
         crate::tree::build(&element)
@@ -290,7 +291,9 @@ mod tests {
             Op::Update(node) => {
                 assert_eq!(node.id, new.children[0].children[0].id);
                 assert_eq!(node.id, old.children[0].children[0].id);
-                assert!(matches!(&node.kind, NodeKind::Text(props) if props.content == "two"));
+                assert!(
+                    matches!(&node.kind, NodeKind::Widget(Widget::Text(props)) if props.content == "two")
+                );
             }
             other => panic!("expected update, got {other:?}"),
         }
@@ -352,7 +355,9 @@ mod tests {
         match &ops[0] {
             Op::Update(node) => {
                 assert_eq!(node.id, old.children[0].children[0].id);
-                assert!(matches!(&node.kind, NodeKind::Switch(props) if props.checked));
+                assert!(
+                    matches!(&node.kind, NodeKind::Widget(Widget::Switch(props)) if props.checked)
+                );
             }
             other => panic!("expected update, got {other:?}"),
         }

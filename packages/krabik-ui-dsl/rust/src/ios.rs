@@ -59,6 +59,7 @@ use crate::ui::{
     RadioGroupProps, SliderProps, SpinnerProps, TabBarProps, TextAlign, TextFieldProps, TextProps,
     TimeValue, dim_color, snap_slider_value,
 };
+use crate::widgets::Widget;
 
 /// Measures text with an off-screen `UILabel`.
 ///
@@ -1347,7 +1348,7 @@ impl IosState {
                 }
                 // Image updates can start downloads, which needs the state
                 // itself, so they are handled separately from `update_content`.
-                if let NodeKind::Image(props) = &node.kind {
+                if let NodeKind::Widget(Widget::Image(props)) = &node.kind {
                     let view = match views.get(&node.id) {
                         Some(handle) => match &handle.content {
                             Content::Image(image) => Some(image.clone()),
@@ -1443,14 +1444,14 @@ impl IosState {
 
     fn create_handle(&mut self, node: &RenderNode, mtm: MainThreadMarker) -> ViewHandle {
         let mut handle = match &node.kind {
-            NodeKind::Text(props) => {
+            NodeKind::Widget(Widget::Text(props)) => {
                 let wrapper = UIView::new(mtm);
                 let label = UILabel::new(mtm);
                 update_label(&label, props);
                 wrapper.addSubview(&label);
                 ViewHandle::new(wrapper, Content::Label(label), node)
             }
-            NodeKind::TextField(props) => {
+            NodeKind::Widget(Widget::TextField(props)) => {
                 let wrapper = UIView::new(mtm);
                 let field = UITextField::new(mtm);
                 field.setBorderStyle(UITextBorderStyle::None);
@@ -1459,21 +1460,21 @@ impl IosState {
                 wrapper.addSubview(&field);
                 ViewHandle::new(wrapper, Content::Field(field), node)
             }
-            NodeKind::Button(props) => {
+            NodeKind::Widget(Widget::Button(props)) => {
                 let button = UIButton::buttonWithType(UIButtonType::System, mtm);
                 update_button(&button, props);
                 wire_click(&button, self.handle, self.host, node.id, mtm);
                 let view = cast_view(button.clone());
                 ViewHandle::new(view, Content::Button(button), node)
             }
-            NodeKind::Switch(props) => {
+            NodeKind::Widget(Widget::Switch(props)) => {
                 let switch = UISwitch::new(mtm);
                 switch.setOn(props.checked);
                 wire_switch(&switch, self.handle, self.host, node.id, mtm);
                 let view = cast_view(switch.clone());
                 ViewHandle::new(view, Content::Switch(switch), node)
             }
-            NodeKind::Checkbox(props) => {
+            NodeKind::Widget(Widget::Checkbox(props)) => {
                 let button = UIButton::buttonWithType(UIButtonType::Custom, mtm);
                 update_check(&button, props, false);
                 wire_check(&button, self.handle, self.host, node.id, mtm);
@@ -1487,7 +1488,7 @@ impl IosState {
                     node,
                 )
             }
-            NodeKind::RadioButton(props) => {
+            NodeKind::Widget(Widget::RadioButton(props)) => {
                 let button = UIButton::buttonWithType(UIButtonType::Custom, mtm);
                 update_check(&button, props, true);
                 wire_check(&button, self.handle, self.host, node.id, mtm);
@@ -1501,7 +1502,7 @@ impl IosState {
                     node,
                 )
             }
-            NodeKind::RadioGroup(props) => {
+            NodeKind::Widget(Widget::RadioGroup(props)) => {
                 let stack = UIStackView::new(mtm);
                 stack.setAxis(UILayoutConstraintAxis::Vertical);
                 stack.setAlignment(UIStackViewAlignment::Fill);
@@ -1529,14 +1530,14 @@ impl IosState {
                     node,
                 )
             }
-            NodeKind::DatePicker(props) => {
+            NodeKind::Widget(Widget::DatePicker(props)) => {
                 let picker = UIDatePicker::new(mtm);
                 update_date_picker(&picker, props);
                 wire_date_picker(&picker, self.handle, self.host, node.id, mtm);
                 let view = cast_view(picker.clone());
                 ViewHandle::new(view, Content::DatePicker(picker), node)
             }
-            NodeKind::TabBar(props) => {
+            NodeKind::Widget(Widget::TabBar(props)) => {
                 let control = UISegmentedControl::new(mtm);
                 update_tab_bar(&control, props);
                 wire_tab_bar(&control, self.handle, self.host, node.id, mtm);
@@ -1563,20 +1564,20 @@ impl IosState {
                     node,
                 )
             }
-            NodeKind::Slider(props) => {
+            NodeKind::Widget(Widget::Slider(props)) => {
                 let slider = UISlider::new(mtm);
                 update_slider(&slider, props);
                 wire_slider(&slider, self.handle, self.host, node.id, mtm);
                 let view = cast_view(slider.clone());
                 ViewHandle::new(view, Content::Slider(slider), node)
             }
-            NodeKind::Progress(props) => {
+            NodeKind::Widget(Widget::Progress(props)) => {
                 let progress = UIProgressView::new(mtm);
                 update_progress(&progress, props);
                 let view = cast_view(progress.clone());
                 ViewHandle::new(view, Content::Progress(progress), node)
             }
-            NodeKind::Spinner(props) => {
+            NodeKind::Widget(Widget::Spinner(props)) => {
                 let spinner = UIActivityIndicatorView::initWithActivityIndicatorStyle(
                     UIActivityIndicatorView::alloc(mtm),
                     UIActivityIndicatorViewStyle::Medium,
@@ -1585,7 +1586,7 @@ impl IosState {
                 let view = cast_view(spinner.clone());
                 ViewHandle::new(view, Content::Spinner(spinner), node)
             }
-            NodeKind::Image(props) => {
+            NodeKind::Widget(Widget::Image(props)) => {
                 let image = UIImageView::new(mtm);
                 self.load_image(node.id, &image, props);
                 let view = cast_view(image.clone());
@@ -2083,27 +2084,27 @@ impl IosState {
             let mut action = RowAction::default();
             let mut any = false;
             match &node.kind {
-                NodeKind::Button(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::Button(props)) if !props.action.is_empty() => {
                     action.click = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::Switch(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::Switch(props)) if !props.action.is_empty() => {
                     action.toggle = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::Checkbox(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::Checkbox(props)) if !props.action.is_empty() => {
                     action.toggle = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::RadioButton(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::RadioButton(props)) if !props.action.is_empty() => {
                     action.toggle = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::RadioGroup(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::RadioGroup(props)) if !props.action.is_empty() => {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::TabBar(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::TabBar(props)) if !props.action.is_empty() => {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
@@ -2111,20 +2112,20 @@ impl IosState {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
-                NodeKind::DatePicker(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::DatePicker(props)) if !props.action.is_empty() => {
                     action.date = Some(props.action.clone());
                     action.date_range = props.date_range;
                     action.time_range = props.time_range;
                     any = true;
                 }
-                NodeKind::Slider(props) if !props.action.is_empty() => {
+                NodeKind::Widget(Widget::Slider(props)) if !props.action.is_empty() => {
                     action.value = Some(props.action.clone());
                     action.value_min = props.min;
                     action.value_max = props.max;
                     action.value_step = props.step;
                     any = true;
                 }
-                NodeKind::TextField(props) => {
+                NodeKind::Widget(Widget::TextField(props)) => {
                     if !props.action.is_empty() {
                         action.text = Some(props.action.clone());
                         any = true;
@@ -2195,14 +2196,22 @@ fn update_content(
     mtm: MainThreadMarker,
 ) {
     match (content, &node.kind) {
-        (Content::Label(label), NodeKind::Text(props)) => update_label(label, props),
-        (Content::Field(field), NodeKind::TextField(props)) => update_field(field, props),
-        (Content::Button(button), NodeKind::Button(props)) => update_button(button, props),
-        (Content::Switch(switch), NodeKind::Switch(props)) => switch.setOn(props.checked),
-        (Content::Check { button, radio }, NodeKind::Checkbox(props)) => {
+        (Content::Label(label), NodeKind::Widget(Widget::Text(props))) => {
+            update_label(label, props)
+        }
+        (Content::Field(field), NodeKind::Widget(Widget::TextField(props))) => {
+            update_field(field, props)
+        }
+        (Content::Button(button), NodeKind::Widget(Widget::Button(props))) => {
+            update_button(button, props)
+        }
+        (Content::Switch(switch), NodeKind::Widget(Widget::Switch(props))) => {
+            switch.setOn(props.checked)
+        }
+        (Content::Check { button, radio }, NodeKind::Widget(Widget::Checkbox(props))) => {
             update_check(button, props, *radio);
         }
-        (Content::Check { button, radio }, NodeKind::RadioButton(props)) => {
+        (Content::Check { button, radio }, NodeKind::Widget(Widget::RadioButton(props))) => {
             update_check(button, props, *radio);
         }
         (
@@ -2211,12 +2220,14 @@ fn update_content(
                 buttons,
                 labels,
             },
-            NodeKind::RadioGroup(props),
+            NodeKind::Widget(Widget::RadioGroup(props)),
         ) => update_radio_group(stack, buttons, labels, props, handle, host, node.id, mtm),
-        (Content::DatePicker(picker), NodeKind::DatePicker(props)) => {
+        (Content::DatePicker(picker), NodeKind::Widget(Widget::DatePicker(props))) => {
             update_date_picker(picker, props);
         }
-        (Content::TabBar(control), NodeKind::TabBar(props)) => update_tab_bar(control, props),
+        (Content::TabBar(control), NodeKind::Widget(Widget::TabBar(props))) => {
+            update_tab_bar(control, props)
+        }
         (
             Content::Pager {
                 scroll,
@@ -2241,11 +2252,15 @@ fn update_content(
                 }
             }
         }
-        (Content::Slider(slider), NodeKind::Slider(props)) => update_slider(slider, props),
-        (Content::Progress(progress), NodeKind::Progress(props)) => {
+        (Content::Slider(slider), NodeKind::Widget(Widget::Slider(props))) => {
+            update_slider(slider, props)
+        }
+        (Content::Progress(progress), NodeKind::Widget(Widget::Progress(props))) => {
             update_progress(progress, props);
         }
-        (Content::Spinner(spinner), NodeKind::Spinner(props)) => update_spinner(spinner, props),
+        (Content::Spinner(spinner), NodeKind::Widget(Widget::Spinner(props))) => {
+            update_spinner(spinner, props)
+        }
         // Images are updated by `IosState::load_image`, which starts async
         // downloads and therefore needs the state itself.
         _ => {}
@@ -2665,8 +2680,7 @@ fn apply_style(view: &UIView, node: &RenderNode, gradient: &mut Option<Retained<
     layer.setCornerRadius(radius);
     layer.setMaskedCorners(corners);
 
-    let fills_frame =
-        matches!(&node.kind, NodeKind::Image(props) if props.scale == ImageScale::Fill);
+    let fills_frame = matches!(&node.kind, NodeKind::Widget(Widget::Image(props)) if props.scale == ImageScale::Fill);
     let clips = matches!(&node.kind, NodeKind::Scroll(_) | NodeKind::Recycler(_))
         || fills_frame
         || (radius > 0.0 && elevation <= 0.0);
@@ -2741,7 +2755,10 @@ fn apply_accessibility(view: &UIView, node: &RenderNode, mtm: MainThreadMarker) 
         // A radio group must stay a plain container so its options remain
         // individually reachable by accessibility services.
         view.setIsAccessibilityElement(
-            !matches!(node.kind, NodeKind::RadioGroup(_) | NodeKind::TabBar(_)),
+            !matches!(
+                node.kind,
+                NodeKind::Widget(Widget::RadioGroup(_)) | NodeKind::Widget(Widget::TabBar(_))
+            ),
             mtm,
         );
     } else {
