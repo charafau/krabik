@@ -1,5 +1,6 @@
 package com.example.krabik_ui_dsl
 
+import dev.krabik.ui.*
 /**
  * Installs the example's checklist app.
  *

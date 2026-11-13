@@ -1,5 +1,6 @@
 package com.example.krabik_ui_dsl
 
+import dev.krabik.ui.*
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click

@@ -1,4 +1,4 @@
-package com.example.krabik_ui_dsl
+package dev.krabik.ui
 
 import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
@@ -41,12 +41,10 @@ object KrabikStyle {
         gradientEnd: Int,
         hasGradient: Boolean,
         gradientHorizontal: Boolean,
-        cornerRadius: Float,
         topLeftRadius: Float,
         topRightRadius: Float,
         bottomRightRadius: Float,
         bottomLeftRadius: Float,
-        hasCornerRadii: Boolean,
         borderWidth: Float,
         borderColor: Int,
         hasBorder: Boolean,
@@ -60,43 +58,23 @@ object KrabikStyle {
         p3: Int,
         p4: Int,
     ) {
-        val target = if (hasCornerRadii) {
-            StyleValues(
-                backgroundColor = backgroundColor,
-                hasBackground = hasBackground,
-                gradientStart = gradientStart,
-                gradientEnd = gradientEnd,
-                hasGradient = hasGradient,
-                gradientHorizontal = gradientHorizontal,
-                topLeft = topLeftRadius,
-                topRight = topRightRadius,
-                bottomRight = bottomRightRadius,
-                bottomLeft = bottomLeftRadius,
-                borderWidth = borderWidth,
-                borderColor = borderColor,
-                hasBorder = hasBorder,
-                alpha = opacity.coerceIn(0f, 1f),
-                elevation = elevation,
-            )
-        } else {
-            StyleValues(
-                backgroundColor = backgroundColor,
-                hasBackground = hasBackground,
-                gradientStart = gradientStart,
-                gradientEnd = gradientEnd,
-                hasGradient = hasGradient,
-                gradientHorizontal = gradientHorizontal,
-                topLeft = cornerRadius,
-                topRight = cornerRadius,
-                bottomRight = cornerRadius,
-                bottomLeft = cornerRadius,
-                borderWidth = borderWidth,
-                borderColor = borderColor,
-                hasBorder = hasBorder,
-                alpha = opacity.coerceIn(0f, 1f),
-                elevation = elevation,
-            )
-        }
+        val target = StyleValues(
+            backgroundColor = backgroundColor,
+            hasBackground = hasBackground,
+            gradientStart = gradientStart,
+            gradientEnd = gradientEnd,
+            hasGradient = hasGradient,
+            gradientHorizontal = gradientHorizontal,
+            topLeft = topLeftRadius,
+            topRight = topRightRadius,
+            bottomRight = bottomRightRadius,
+            bottomLeft = bottomLeftRadius,
+            borderWidth = borderWidth,
+            borderColor = borderColor,
+            hasBorder = hasBorder,
+            alpha = opacity.coerceIn(0f, 1f),
+            elevation = elevation,
+        )
 
         val style = states.getOrPut(view) { ViewStyle() }
         // A cancelled animator must not apply its old target; the new

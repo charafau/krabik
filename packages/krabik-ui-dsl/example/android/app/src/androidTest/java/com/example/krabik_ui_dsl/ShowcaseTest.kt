@@ -1,5 +1,6 @@
 package com.example.krabik_ui_dsl
 
+import dev.krabik.ui.*
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.widget.ProgressBar

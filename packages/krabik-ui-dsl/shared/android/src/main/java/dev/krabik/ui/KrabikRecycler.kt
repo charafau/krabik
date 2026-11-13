@@ -1,4 +1,4 @@
-package com.example.krabik_ui_dsl
+package dev.krabik.ui
 
 import android.content.Context
 import android.view.View

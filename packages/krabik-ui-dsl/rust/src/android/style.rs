@@ -75,12 +75,10 @@ pub(crate) fn apply_style(
                 gradient
                     .is_some_and(|gradient| gradient.direction == GradientDirection::Horizontal),
             ),
-            JValue::Float(node.style.corner_radius),
             JValue::Float(radii.top_left),
             JValue::Float(radii.top_right),
             JValue::Float(radii.bottom_right),
             JValue::Float(radii.bottom_left),
-            JValue::Bool(node.style.corner_radii.is_some()),
             JValue::Float(border.map_or(0.0, |border| border.width)),
             JValue::Int(border.map_or(0, |border| border.color) as jint),
             JValue::Bool(border.is_some()),
