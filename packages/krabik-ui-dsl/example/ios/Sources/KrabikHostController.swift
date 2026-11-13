@@ -11,6 +11,7 @@ final class KrabikHostController: UIViewController {
     private var mainHost: RustHostView!
     private var navigation: UINavigationController!
     private weak var presented: UIViewController?
+    private var toolbarActions: [String] = []
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -82,6 +83,95 @@ final class KrabikHostController: UIViewController {
         if toRoot {
             navigation.setNavigationBarHidden(true, animated: transition == 0)
         }
+    }
+
+    @objc func krabikSetToolbar(
+        _ title: String,
+        subtitle: String,
+        backTitle: String,
+        hidden: Bool,
+        actionIds: [String],
+        actionLabels: [String],
+        actionIcons: [String]
+    ) {
+        toolbarActions = actionIds
+        guard let top = navigation.viewControllers.last else { return }
+
+        if subtitle.isEmpty {
+            top.navigationItem.title = title
+            top.navigationItem.titleView = nil
+        } else {
+            let titleLabel = UILabel()
+            titleLabel.text = title
+            titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+            titleLabel.textAlignment = .center
+            let subtitleLabel = UILabel()
+            subtitleLabel.text = subtitle
+            subtitleLabel.font = .systemFont(ofSize: 12)
+            subtitleLabel.textColor = .secondaryLabel
+            subtitleLabel.textAlignment = .center
+            let stack = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
+            stack.axis = .vertical
+            stack.alignment = .center
+            stack.spacing = 0
+            stack.sizeToFit()
+            top.navigationItem.titleView = stack
+        }
+
+        if navigation.viewControllers.count > 1 {
+            navigation.viewControllers[navigation.viewControllers.count - 2]
+                .navigationItem.backButtonTitle = backTitle
+        }
+
+        var items: [UIBarButtonItem] = []
+        for index in actionLabels.indices {
+            let label = actionLabels[index]
+            let iconName = actionIcons.indices.contains(index) ? actionIcons[index] : ""
+            if iconName.isEmpty {
+                let item = UIBarButtonItem(
+                    title: label,
+                    style: .plain,
+                    target: self,
+                    action: #selector(toolbarTapped(_:))
+                )
+                item.tag = index
+                items.append(item)
+            } else {
+                let button = UIButton(type: .system)
+                button.setTitle(label, for: .normal)
+                if let image = toolbarImage(iconName) {
+                    button.setImage(image, for: .normal)
+                }
+                button.sizeToFit()
+                button.tag = index
+                button.addTarget(self, action: #selector(toolbarTapped(_:)), for: .touchUpInside)
+                items.append(UIBarButtonItem(customView: button))
+            }
+        }
+        top.navigationItem.rightBarButtonItems = items
+        navigation.setNavigationBarHidden(
+            hidden || navigation.viewControllers.count <= 1,
+            animated: false
+        )
+    }
+
+    @objc private func toolbarTapped(_ sender: Any) {
+        let index: Int
+        if let item = sender as? UIBarButtonItem {
+            index = item.tag
+        } else if let button = sender as? UIButton {
+            index = button.tag
+        } else {
+            return
+        }
+        guard toolbarActions.indices.contains(index) else { return }
+        toolbarActions[index].withCString { action in
+            krabik_ios_on_toolbar_action(session, action)
+        }
+    }
+
+    private func toolbarImage(_ name: String) -> UIImage? {
+        UIImage(systemName: name) ?? UIImage(named: name)
     }
 
     private func addFadeTransition() {

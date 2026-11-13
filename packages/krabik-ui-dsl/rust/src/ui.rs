@@ -687,6 +687,206 @@ impl DatePickerProps {
     }
 }
 
+/// Platform-independent properties of a swipeable page container.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PagerProps {
+    /// The number of pages.
+    pub pages: usize,
+    /// The index of the selected page.
+    pub selected: usize,
+    /// The action dispatched when the user swipes to another page.
+    pub action: Cow<'static, str>,
+}
+
+/// A native horizontally paged container.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pager(pub(crate) Element);
+
+impl Pager {
+    /// Creates an empty pager that fills the available width.
+    pub fn new() -> Self {
+        let mut element = Element::container(ElementKind::Pager(PagerProps::default()));
+        element.style.width = Length::Percent(1.0);
+        Self(element)
+    }
+
+    /// Sets the selected page index.
+    ///
+    /// The selection is part of the node key when the application did not
+    /// supply one, so a programmatic page change recreates the native pager at
+    /// the right offset instead of relying on an in-place update.
+    pub fn selected(mut self, index: usize) -> Self {
+        if let ElementKind::Pager(props) = &mut self.0.kind {
+            props.selected = index;
+        }
+        if self.0.key.is_none() {
+            self.0.key = Some(Cow::Owned(format!("pager-{index}")));
+        }
+        self
+    }
+
+    /// Sets the action dispatched when the page changes.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+        if let ElementKind::Pager(props) = &mut self.0.kind {
+            props.action = action.into();
+        }
+        self
+    }
+
+    /// Appends one page.
+    pub fn child(mut self, child: impl Into<Element>) -> Self {
+        self.0.children.push(child.into());
+        self
+    }
+}
+
+impl Default for Pager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<Pager> for Element {
+    fn from(component: Pager) -> Self {
+        component.0
+    }
+}
+
+/// A tab strip above a swipeable pager.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TabsView(pub(crate) Element);
+
+impl TabsView {
+    /// Creates a tabs view with the given labels and no pages.
+    pub fn new(tabs: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        let column = Column::new()
+            .width_percent(1.0)
+            .child(TabBar::new(tabs))
+            .child(Pager::new().grow(1.0));
+        Self(column.0)
+    }
+
+    /// Sets the selected tab and page.
+    pub fn selected(mut self, index: usize) -> Self {
+        if let Some(bar) = self.0.children.first_mut()
+            && let ElementKind::TabBar(props) = &mut bar.kind
+        {
+            props.selected = index;
+        }
+        if let Some(pager) = self.0.children.get_mut(1) {
+            if let ElementKind::Pager(props) = &mut pager.kind {
+                props.selected = index;
+            }
+            if pager.key.is_none() {
+                pager.key = Some(Cow::Owned(format!("pager-{index}")));
+            }
+        }
+        self
+    }
+
+    /// Sets the action dispatched for tab taps and page swipes.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+        let action = action.into();
+        if let Some(bar) = self.0.children.first_mut()
+            && let ElementKind::TabBar(props) = &mut bar.kind
+        {
+            props.action = action.clone();
+        }
+        if let Some(pager) = self.0.children.get_mut(1)
+            && let ElementKind::Pager(props) = &mut pager.kind
+        {
+            props.action = action;
+        }
+        self
+    }
+
+    /// Appends one page.
+    pub fn child(mut self, child: impl Into<Element>) -> Self {
+        if let Some(pager) = self.0.children.get_mut(1) {
+            pager.children.push(child.into());
+        }
+        self
+    }
+}
+
+impl From<TabsView> for Element {
+    fn from(component: TabsView) -> Self {
+        component.0
+    }
+}
+
+/// One item in a [`BottomNavigation`] bar.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BottomNavItem {
+    /// The text label.
+    pub label: String,
+    /// The optional icon.
+    pub icon: Icon,
+}
+
+impl BottomNavItem {
+    /// Creates an item with a label and an icon.
+    pub fn new(label: impl Into<String>, icon: Icon) -> Self {
+        Self {
+            label: label.into(),
+            icon,
+        }
+    }
+}
+
+/// Platform-independent properties of a bottom navigation bar.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BottomNavigationProps {
+    /// The items in display order.
+    pub items: Vec<BottomNavItem>,
+    /// The index of the selected destination.
+    pub selected: usize,
+    /// The action dispatched when the selection changes.
+    pub action: Cow<'static, str>,
+    /// ARGB color of the selected item.
+    pub color: u32,
+}
+
+/// A native bottom navigation bar with icons and labels.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BottomNavigation(pub(crate) Element);
+
+impl BottomNavigation {
+    /// Creates a bottom navigation bar with the given items.
+    pub fn new(items: impl IntoIterator<Item = BottomNavItem>) -> Self {
+        Self(Element::leaf(ElementKind::BottomNavigation(
+            BottomNavigationProps {
+                items: items.into_iter().collect(),
+                selected: 0,
+                action: Cow::Borrowed(""),
+                color: CONTROL_ACCENT,
+            },
+        )))
+    }
+
+    /// Sets the selected destination.
+    pub fn selected(mut self, index: usize) -> Self {
+        if let ElementKind::BottomNavigation(props) = &mut self.0.kind {
+            props.selected = index;
+        }
+        self
+    }
+
+    /// Sets the action dispatched when the selection changes.
+    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+        if let ElementKind::BottomNavigation(props) = &mut self.0.kind {
+            props.action = action.into();
+        }
+        self
+    }
+}
+
+impl From<BottomNavigation> for Element {
+    fn from(component: BottomNavigation) -> Self {
+        component.0
+    }
+}
+
 /// The axis a scroll container scrolls along.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Axis {
@@ -1008,6 +1208,56 @@ impl Default for Transition {
     }
 }
 
+/// A platform icon reference.
+///
+/// Android names resolve to drawable resources; iOS names resolve to an SF
+/// Symbol or an asset-catalog image. A shared name is used when the
+/// platform-specific name is absent.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Icon {
+    /// Fallback name used on both platforms.
+    pub shared: Option<String>,
+    /// Android drawable resource name.
+    pub android: Option<String>,
+    /// iOS SF Symbol or asset-catalog name.
+    pub ios: Option<String>,
+}
+
+impl Icon {
+    /// Creates an empty icon.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets a fallback name used on both platforms.
+    pub fn shared(mut self, name: impl Into<String>) -> Self {
+        self.shared = Some(name.into());
+        self
+    }
+
+    /// Sets the Android drawable resource name.
+    pub fn drawable(mut self, name: impl Into<String>) -> Self {
+        self.android = Some(name.into());
+        self
+    }
+
+    /// Sets the iOS SF Symbol or asset-catalog name.
+    pub fn sf(mut self, name: impl Into<String>) -> Self {
+        self.ios = Some(name.into());
+        self
+    }
+
+    /// The name Android should resolve.
+    pub fn android_name(&self) -> Option<&str> {
+        self.android.as_deref().or(self.shared.as_deref())
+    }
+
+    /// The name iOS should resolve.
+    pub fn ios_name(&self) -> Option<&str> {
+        self.ios.as_deref().or(self.shared.as_deref())
+    }
+}
+
 /// The layout and decoration properties shared by every component.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Style {
@@ -1096,7 +1346,9 @@ pub(crate) enum ElementKind {
     RadioButton(CheckProps),
     RadioGroup(RadioGroupProps),
     TabBar(TabBarProps),
+    Pager(PagerProps),
     DatePicker(DatePickerProps),
+    BottomNavigation(BottomNavigationProps),
     Slider(SliderProps),
     Progress(ProgressProps),
     Spinner(SpinnerProps),
@@ -1123,7 +1375,9 @@ impl ElementKind {
             Self::RadioButton(_) => 13,
             Self::RadioGroup(_) => 16,
             Self::TabBar(_) => 19,
+            Self::Pager(_) => 20,
             Self::DatePicker(_) => 18,
+            Self::BottomNavigation(_) => 21,
             Self::Slider(_) => 14,
             Self::Progress(_) => 15,
             Self::Spinner(_) => 17,
@@ -2321,6 +2575,7 @@ impl Element {
             ElementKind::RadioGroup(props) => props.color = color,
             ElementKind::TabBar(props) => props.color = color,
             ElementKind::DatePicker(props) => props.color = color,
+            ElementKind::BottomNavigation(props) => props.color = color,
             _ => {}
         }
     }
@@ -2350,7 +2605,10 @@ style_builder!(Checkbox);
 style_builder!(RadioButton);
 style_builder!(RadioGroup);
 style_builder!(TabBar);
+style_builder!(Pager);
+style_builder!(TabsView);
 style_builder!(DatePicker);
+style_builder!(BottomNavigation);
 style_builder!(Slider);
 style_builder!(ProgressIndicator);
 style_builder!(Image);
@@ -2622,6 +2880,71 @@ mod tests {
         let exit = element.style.exit.as_ref().unwrap();
         assert_eq!(exit.duration_ms, 160);
         assert_eq!(exit.curve, AnimationCurve::EaseIn);
+    }
+
+    #[test]
+    fn pager_and_tabs_view_keep_pages_and_selection() {
+        let pager: Element = Pager::new()
+            .selected(1)
+            .action("page")
+            .child(Text::new("one"))
+            .child(Text::new("two"))
+            .into();
+        let ElementKind::Pager(props) = &pager.kind else {
+            panic!("expected pager");
+        };
+        assert_eq!(props.selected, 1);
+        assert_eq!(props.action, "page");
+        assert_eq!(pager.children.len(), 2);
+
+        let tabs: Element = TabsView::new(["One", "Two"])
+            .selected(1)
+            .action("tab")
+            .child(Text::new("one"))
+            .child(Text::new("two"))
+            .into();
+        assert_eq!(tabs.children.len(), 2);
+        let ElementKind::TabBar(bar) = &tabs.children[0].kind else {
+            panic!("expected tab bar");
+        };
+        assert_eq!(bar.selected, 1);
+        let ElementKind::Pager(pager) = &tabs.children[1].kind else {
+            panic!("expected pager");
+        };
+        assert_eq!(pager.selected, 1);
+        assert_eq!(tabs.children[1].children.len(), 2);
+    }
+
+    #[test]
+    fn icons_prefer_platform_names_over_the_shared_name() {
+        let icon = Icon::new().shared("home").drawable("ic_home");
+        assert_eq!(icon.android_name(), Some("ic_home"));
+        assert_eq!(icon.ios_name(), Some("home"));
+
+        let icon = Icon::new().shared("home").sf("house.fill");
+        assert_eq!(icon.android_name(), Some("home"));
+        assert_eq!(icon.ios_name(), Some("house.fill"));
+    }
+
+    #[test]
+    fn bottom_navigation_keeps_icons_and_selection() {
+        let items = [
+            BottomNavItem::new("Home", Icon::new().drawable("ic_home").sf("house.fill")),
+            BottomNavItem::new("Search", Icon::new().shared("search")),
+        ];
+        let element: Element = BottomNavigation::new(items)
+            .selected(1)
+            .action("tab")
+            .into();
+        let ElementKind::BottomNavigation(props) = &element.kind else {
+            panic!("expected bottom navigation");
+        };
+        assert_eq!(props.selected, 1);
+        assert_eq!(props.action, "tab");
+        assert_eq!(props.items[0].icon.android_name(), Some("ic_home"));
+        assert_eq!(props.items[0].icon.ios_name(), Some("house.fill"));
+        assert_eq!(props.items[1].icon.android_name(), Some("search"));
+        assert_eq!(props.items[1].icon.ios_name(), Some("search"));
     }
 
     #[test]

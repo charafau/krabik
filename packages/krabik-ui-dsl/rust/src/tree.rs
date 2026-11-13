@@ -10,9 +10,10 @@ use std::collections::HashMap;
 
 use crate::geometry::Size;
 use crate::ui::{
-    Axis, ButtonProps, CheckProps, DatePickerProps, Element, ElementKind, ImageProps, Length,
-    ListMode, ListProps, ProgressProps, RadioGroupProps, ScrollProps, SliderProps, SpinnerProps,
-    Style, SwitchProps, TabBarProps, TextFieldProps, TextProps,
+    Axis, BottomNavigationProps, ButtonProps, CheckProps, DatePickerProps, Element, ElementKind,
+    ImageProps, Length, ListMode, ListProps, PagerProps, ProgressProps, RadioGroupProps,
+    ScrollProps, SliderProps, SpinnerProps, Style, SwitchProps, TabBarProps, TextFieldProps,
+    TextProps,
 };
 
 /// The identifier of the synthetic root node.
@@ -49,8 +50,12 @@ pub enum NodeKind {
     RadioGroup(RadioGroupProps),
     /// A native tab bar.
     TabBar(TabBarProps),
+    /// A native swipeable page container.
+    Pager(PagerProps),
     /// A native date picker.
     DatePicker(DatePickerProps),
+    /// A native bottom navigation bar.
+    BottomNavigation(BottomNavigationProps),
     /// A native slider.
     Slider(SliderProps),
     /// A native determinate progress indicator.
@@ -78,7 +83,9 @@ impl NodeKind {
                 | Self::RadioButton(_)
                 | Self::RadioGroup(_)
                 | Self::TabBar(_)
+                | Self::Pager(_)
                 | Self::DatePicker(_)
+                | Self::BottomNavigation(_)
                 | Self::Slider(_)
                 | Self::Progress(_)
                 | Self::Spinner(_)
@@ -92,7 +99,7 @@ impl NodeKind {
     pub fn is_container(&self) -> bool {
         matches!(
             self,
-            Self::Root | Self::Column | Self::Row | Self::Scroll(_)
+            Self::Root | Self::Column | Self::Row | Self::Scroll(_) | Self::Pager(_)
         )
     }
 }
@@ -444,7 +451,12 @@ fn build_node(element: &Element, parent: NodeId, index: usize, cx: &mut BuildCon
         ElementKind::RadioButton(props) => NodeKind::RadioButton(props.clone()),
         ElementKind::RadioGroup(props) => NodeKind::RadioGroup(props.clone()),
         ElementKind::TabBar(props) => NodeKind::TabBar(props.clone()),
+        ElementKind::Pager(props) => NodeKind::Pager(PagerProps {
+            pages: element.children.len(),
+            ..props.clone()
+        }),
         ElementKind::DatePicker(props) => NodeKind::DatePicker(props.clone()),
+        ElementKind::BottomNavigation(props) => NodeKind::BottomNavigation(props.clone()),
         ElementKind::Slider(props) => NodeKind::Slider(props.clone()),
         ElementKind::Progress(props) => NodeKind::Progress(props.clone()),
         ElementKind::Spinner(props) => NodeKind::Spinner(props.clone()),

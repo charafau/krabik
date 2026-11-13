@@ -26,10 +26,10 @@ use crate::render::{self, Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{self, NodeId, NodeKind, RecyclerProps, UiNode};
 use crate::ui::{
-    Axis, CheckProps, DatePickerMode, DatePickerProps, DatePickerValue, DateValue, EdgeInsets,
-    FontWeight, GradientDirection, ImageProps, ImageScale, ImageSource, ImeAction, KeyboardType,
-    ProgressProps, RadioGroupProps, SliderProps, SwitchProps, TabBarProps, TextAlign,
-    TextFieldProps, TextProps, TimeValue, snap_slider_value,
+    Axis, BottomNavigationProps, CheckProps, DatePickerMode, DatePickerProps, DatePickerValue,
+    DateValue, EdgeInsets, FontWeight, GradientDirection, ImageProps, ImageScale, ImageSource,
+    ImeAction, KeyboardType, PagerProps, ProgressProps, RadioGroupProps, SliderProps, SwitchProps,
+    TabBarProps, TextAlign, TextFieldProps, TextProps, TimeValue, snap_slider_value,
 };
 
 mod handles;
@@ -57,6 +57,8 @@ const CHECKBOX_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikCheckB
 const RADIO_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioButton");
 const RADIO_GROUP_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikRadioGroup");
 const TAB_BAR_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikTabBar");
+const PAGER_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikPager");
+const BOTTOM_NAV_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikBottomNavigation");
 const DATE_PICKER_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikDatePicker");
 const SEEK_BAR_CLASS: &JNIStr = jni_str!("com/example/krabik_ui_dsl/KrabikSeekBar");
 const PROGRESS_BAR_CLASS: &JNIStr = jni_str!("android/widget/ProgressBar");
@@ -405,6 +407,50 @@ impl AndroidState {
         Ok(())
     }
 
+    fn create_and_insert(
+        &self,
+        env: &mut Env<'_>,
+        node: crate::render::RenderNode,
+        register: bool,
+        views: &mut HashMap<NodeId, ViewHandle>,
+        root_host: &JObject<'_>,
+    ) -> JniResult<()> {
+        let view = self.create_view(env, &node, register)?;
+        if view.is_null() {
+            return Ok(());
+        }
+
+        {
+            let parent_host = match node.parent.and_then(|id| views.get(&id)) {
+                Some(handle) => handle.children_host.as_obj(),
+                None => root_host,
+            };
+            jni_handles(env)?
+                .add_view
+                .call_void(env, parent_host, &[JValue::Object(&view)])?;
+        }
+
+        let children_host = if matches!(node.kind, NodeKind::Scroll(_)) {
+            let host = jni_handles(env)?
+                .get_child_at
+                .call(env, &view, &[JValue::Int(0)])?
+                .l()?;
+            jcall!(env, env.new_global_ref(&host))?
+        } else {
+            jcall!(env, env.new_global_ref(&view))?
+        };
+        views.insert(
+            node.id,
+            ViewHandle {
+                view: jcall!(env, env.new_global_ref(&view))?,
+                children_host,
+                parent: node.parent,
+                frame: None,
+            },
+        );
+        Ok(())
+    }
+
     /// Applies one renderer operation to a set of views.
     ///
     /// The main tree and a recycled row share this code; they only differ in
@@ -421,46 +467,15 @@ impl AndroidState {
     ) -> JniResult<()> {
         match op {
             Op::Create(node) => {
-                let view = self.create_view(env, &node, register)?;
-                if view.is_null() {
-                    return Ok(());
-                }
-
-                {
-                    let parent_host = match node.parent.and_then(|id| views.get(&id)) {
-                        Some(handle) => handle.children_host.as_obj(),
-                        None => root_host,
-                    };
-                    jni_handles(env)?.add_view.call_void(
-                        env,
-                        parent_host,
-                        &[JValue::Object(&view)],
-                    )?;
-                }
-
-                let children_host = if matches!(node.kind, NodeKind::Scroll(_)) {
-                    // A scroll view wraps a single host that holds the content.
-                    let host = jni_handles(env)?
-                        .get_child_at
-                        .call(env, &view, &[JValue::Int(0)])?
-                        .l()?;
-                    jcall!(env, env.new_global_ref(&host))?
-                } else {
-                    jcall!(env, env.new_global_ref(&view))?
-                };
-                views.insert(
-                    node.id,
-                    ViewHandle {
-                        view: jcall!(env, env.new_global_ref(&view))?,
-                        children_host,
-                        parent: node.parent,
-                        frame: None,
-                    },
-                );
+                self.create_and_insert(env, node, register, views, root_host)?;
             }
             Op::Update(node) => {
                 if let Some(handle) = views.get(&node.id) {
                     update_view(env, handle.view.as_obj(), &node, self.density)?;
+                } else {
+                    // A view can be missing after a screen or host swap. Rebuild
+                    // it rather than leaving the node without a native widget.
+                    self.create_and_insert(env, node, register, views, root_host)?;
                 }
             }
             Op::Reparent { id, parent } => {
@@ -680,6 +695,11 @@ impl AndroidState {
                     ids.tab_bar_ctor
                         .construct(env, &ids.tab_bar, &child_context)?
                 }
+                NodeKind::Pager(_) => ids.pager_ctor.construct(env, &ids.pager, &child_context)?,
+                NodeKind::BottomNavigation(_) => {
+                    ids.bottom_nav_ctor
+                        .construct(env, &ids.bottom_nav, &child_context)?
+                }
                 NodeKind::DatePicker(_) => {
                     ids.date_picker_ctor
                         .construct(env, &ids.date_picker, &child_context)?
@@ -735,6 +755,10 @@ impl AndroidState {
             update_radio_group(env, &view, props)?;
         } else if let NodeKind::TabBar(props) = &node.kind {
             update_tab_bar(env, &view, props)?;
+        } else if let NodeKind::Pager(props) = &node.kind {
+            update_pager(env, &view, props)?;
+        } else if let NodeKind::BottomNavigation(props) = &node.kind {
+            update_bottom_navigation(env, &view, props)?;
         } else if let NodeKind::DatePicker(props) = &node.kind {
             update_date_picker(env, &view, props)?;
         } else if let NodeKind::Slider(props) = &node.kind {
@@ -933,6 +957,14 @@ impl AndroidState {
                     any = true;
                 }
                 NodeKind::TabBar(props) if !props.action.is_empty() => {
+                    action.selected = Some(props.action.clone());
+                    any = true;
+                }
+                NodeKind::Pager(props) if !props.action.is_empty() => {
+                    action.selected = Some(props.action.clone());
+                    any = true;
+                }
+                NodeKind::BottomNavigation(props) if !props.action.is_empty() => {
                     action.selected = Some(props.action.clone());
                     any = true;
                 }
@@ -1184,6 +1216,54 @@ fn update_check(
         ids.checkbox_set_checked_silently
     };
     setter.call_void(env, view, &[JValue::Bool(props.checked)])
+}
+
+fn update_pager(env: &mut Env<'_>, view: &JObject<'_>, props: &PagerProps) -> JniResult<()> {
+    let ids = jni_handles(env)?;
+    ids.configure_pager.call_void(
+        env,
+        view,
+        &[
+            JValue::Int(props.pages as jint),
+            JValue::Int(props.selected as jint),
+        ],
+    )
+}
+
+fn update_bottom_navigation(
+    env: &mut Env<'_>,
+    view: &JObject<'_>,
+    props: &BottomNavigationProps,
+) -> JniResult<()> {
+    let ids = jni_handles(env)?;
+    let labels = env.new_object_array(
+        props.items.len() as jint,
+        jni_str!("java/lang/String"),
+        JObject::null(),
+    )?;
+    let icons = env.new_object_array(
+        props.items.len() as jint,
+        jni_str!("java/lang/String"),
+        JObject::null(),
+    )?;
+    for (index, item) in props.items.iter().enumerate() {
+        let label = jcall!(env, env.new_string(&item.label))?;
+        let label: &JObject<'_> = label.as_ref();
+        labels.set_element(env, index, label)?;
+        let icon = jcall!(env, env.new_string(item.icon.android_name().unwrap_or("")))?;
+        let icon: &JObject<'_> = icon.as_ref();
+        icons.set_element(env, index, icon)?;
+    }
+    ids.configure_bottom_nav.call_void(
+        env,
+        view,
+        &[
+            JValue::Object(&labels),
+            JValue::Object(&icons),
+            JValue::Int(props.selected as jint),
+            JValue::Int(props.color as jint),
+        ],
+    )
 }
 
 fn update_date_picker(
@@ -1684,6 +1764,7 @@ struct AndroidSession {
     density: f32,
     controller: Option<Global<JObject<'static>>>,
     navigation: Vec<crate::navigation::Screen>,
+    toolbar: Option<crate::navigation::Toolbar>,
     presentation: Option<crate::presentation::Presentation>,
 }
 
@@ -1706,6 +1787,7 @@ impl AndroidSession {
             density,
             controller: None,
             navigation: Vec::new(),
+            toolbar: None,
             presentation: None,
         })
     }
@@ -1743,6 +1825,7 @@ impl AndroidSession {
             .navigation()
             .map(|nav| nav.screens)
             .unwrap_or_default();
+        let toolbar = navigation.last().and_then(|screen| screen.toolbar.clone());
         if navigation != self.navigation {
             self.sync_navigation(env, &navigation)?;
             self.navigation = navigation;
@@ -1752,6 +1835,81 @@ impl AndroidSession {
             self.sync_presentation(env, presentation.as_ref())?;
             self.presentation = presentation;
         }
+        if toolbar != self.toolbar {
+            let screen = self.navigation.last().cloned();
+            self.sync_toolbar(env, screen.as_ref(), &toolbar)?;
+            self.toolbar = toolbar;
+        }
+        Ok(())
+    }
+
+    fn sync_toolbar(
+        &mut self,
+        env: &mut Env<'_>,
+        screen: Option<&crate::navigation::Screen>,
+        toolbar: &Option<crate::navigation::Toolbar>,
+    ) -> JniResult<()> {
+        let controller = self.controller.as_ref().map(|c| c.as_obj());
+        let Some(controller) = controller else {
+            return Ok(());
+        };
+        let title = screen.map_or("", |screen| screen.title.as_str());
+        let subtitle = toolbar
+            .as_ref()
+            .and_then(|toolbar| toolbar.subtitle.as_deref())
+            .unwrap_or("");
+        let back_title = toolbar
+            .as_ref()
+            .and_then(|toolbar| toolbar.back_title.as_deref())
+            .unwrap_or("Back");
+        let hidden = toolbar.as_ref().is_none_or(|toolbar| toolbar.hidden);
+        let actions = toolbar
+            .as_ref()
+            .map(|toolbar| toolbar.actions.as_slice())
+            .unwrap_or(&[]);
+        let action_ids = env.new_object_array(
+            actions.len() as jint,
+            jni_str!("java/lang/String"),
+            JObject::null(),
+        )?;
+        let action_labels = env.new_object_array(
+            actions.len() as jint,
+            jni_str!("java/lang/String"),
+            JObject::null(),
+        )?;
+        let action_icons = env.new_object_array(
+            actions.len() as jint,
+            jni_str!("java/lang/String"),
+            JObject::null(),
+        )?;
+        for (index, action) in actions.iter().enumerate() {
+            for (array, value) in [
+                (&action_ids, action.action.as_str()),
+                (&action_labels, action.label.as_str()),
+                (&action_icons, action.icon.android_name().unwrap_or("")),
+            ] {
+                let text = jcall!(env, env.new_string(value))?;
+                let text: &JObject<'_> = text.as_ref();
+                array.set_element(env, index, text)?;
+            }
+        }
+        let title = jcall!(env, env.new_string(title))?;
+        let subtitle = jcall!(env, env.new_string(subtitle))?;
+        let back_title = jcall!(env, env.new_string(back_title))?;
+        env.call_method(
+            controller,
+            jni_str!("setToolbar"),
+            jni_sig!("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z[Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V"),
+            &[
+                JValue::Object(title.as_ref()),
+                JValue::Object(subtitle.as_ref()),
+                JValue::Object(back_title.as_ref()),
+                JValue::Bool(hidden),
+                JValue::Object(&action_ids),
+                JValue::Object(&action_labels),
+                JValue::Object(&action_icons),
+            ],
+        )?;
         Ok(())
     }
 
@@ -2382,6 +2540,113 @@ pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnRad
         let id = NodeId(node_id as u64);
         let action = session.hosts.get(&(host as u64)).and_then(|state| {
             state.runtime.radio_group_action(id).or_else(|| {
+                state
+                    .row_actions
+                    .get(&id)
+                    .and_then(|row| row.selected.clone())
+            })
+        });
+        if let Some(action) = action
+            && session.app.handle(Event::Selected {
+                action: &action,
+                index: index.max(0) as usize,
+            })
+        {
+            session.render_all(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Dispatches a pager selection back into the Rust tree.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnPageSelected<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    host: jlong,
+    node_id: jlong,
+    index: jint,
+) {
+    run(&mut unenv, "nativeOnPageSelected", |env| {
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        let Some(session) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+
+        let id = NodeId(node_id as u64);
+        let action = session.hosts.get(&(host as u64)).and_then(|state| {
+            state.runtime.pager_action(id).or_else(|| {
+                state
+                    .row_actions
+                    .get(&id)
+                    .and_then(|row| row.selected.clone())
+            })
+        });
+        if let Some(action) = action
+            && session.app.handle(Event::Selected {
+                action: &action,
+                index: index.max(0) as usize,
+            })
+        {
+            session.render_all(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Dispatches a toolbar action back into the application.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnToolbarAction<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    action: JString<'caller>,
+) {
+    run(&mut unenv, "nativeOnToolbarAction", |env| {
+        let action = action.try_to_string(env)?;
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        let Some(session) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+        if session.app.handle(Event::Click { action: &action }) {
+            session.render_all(env)?;
+        }
+        Ok(())
+    });
+}
+
+/// Dispatches a bottom-navigation selection back into the Rust tree.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_example_krabik_1ui_1dsl_RustRootView_nativeOnBottomNavigationSelected<
+    'caller,
+>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    host: jlong,
+    node_id: jlong,
+    index: jint,
+) {
+    run(&mut unenv, "nativeOnBottomNavigationSelected", |env| {
+        let Some(mut states) = lock_states_for_event() else {
+            return Ok(());
+        };
+        let Some(session) = states.get_mut(&handle) else {
+            return Ok(());
+        };
+
+        let id = NodeId(node_id as u64);
+        let action = session.hosts.get(&(host as u64)).and_then(|state| {
+            state.runtime.bottom_navigation_action(id).or_else(|| {
                 state
                     .row_actions
                     .get(&id)
