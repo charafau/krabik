@@ -1,9 +1,14 @@
-//! A declarative, platform-independent UI runtime.
+//! A mobile UI framework: describe the interface in Rust, draw it with native
+//! Android and iOS widgets.
 //!
-//! Applications describe their interface with [`ui`], the [`runtime`] reconciles
-//! the description into a minimal batch of operations, [`layout`] calculates
-//! positions with Taffy, and the platform renderer maps the operations onto
-//! native widgets.
+//! An application implements [`Component`] (state, messages, `update`, `view`)
+//! and [`App`], builds its view from the widgets in [`ui`], and registers
+//! itself with [`set_app_factory`]. The [`engine`] turns each view into a tree,
+//! lays it out with Taffy and diffs it against the previous one; the platform
+//! renderer applies the resulting operations to native views and reports
+//! events back as the application's messages.
+//!
+//! The guide in `docs/` walks through all of it.
 
 pub mod app;
 pub(crate) mod element;

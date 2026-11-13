@@ -46,7 +46,7 @@ impl RadioGroupProps {
 
 /// A native group of mutually exclusive radio buttons.
 ///
-/// Unlike individual [`RadioButton`]s, the group owns the selection: tapping an
+/// Unlike individual [`RadioButton`](crate::ui::RadioButton)s, the group owns the selection: tapping an
 /// option reports the chosen index through [`RadioGroup::on_select`].
 pub struct RadioGroup<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
