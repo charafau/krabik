@@ -23,7 +23,7 @@ import org.hamcrest.Matchers.allOf
 internal fun openPage(label: String) {
     swipeTo(label)
     onView(allOf(withText(label), isCompletelyDisplayed())).perform(click())
-    Thread.sleep(300)
+    Thread.sleep(400)
 }
 
 /**

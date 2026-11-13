@@ -3089,7 +3089,7 @@ impl IosSession {
             .count();
 
         for screen in self.navigation.iter().skip(common).rev() {
-            controller_pop(controller);
+            controller_pop(controller, screen.transition.code());
             if let Some(host) = self.screen_host(&screen.key) {
                 self.hosts.remove(&host);
                 self.pending.remove(&host);
@@ -3100,7 +3100,7 @@ impl IosSession {
             self.next_host += 1;
             self.pending
                 .insert(host, IosHostKind::Screen(screen.key.clone()));
-            controller_push(controller, host, &screen.title);
+            controller_push(controller, host, &screen.title, screen.transition.code());
         }
 
         controller_set_root_visible(controller, screens.is_empty());
@@ -3149,15 +3149,22 @@ impl IosSession {
     }
 }
 
-fn controller_push(controller: &NSObject, host: u64, title: &str) {
+fn controller_push(controller: &NSObject, host: u64, title: &str, transition: i32) {
     let title = NSString::from_str(title);
     // SAFETY: the controller is a live Swift object with this @objc method.
-    let _: () = unsafe { objc2::msg_send![controller, krabikPush: host as i64, title: &*title] };
+    let _: () = unsafe {
+        objc2::msg_send![
+            controller,
+            krabikPush: host as i64,
+            title: &*title,
+            transition: transition as i64
+        ]
+    };
 }
 
-fn controller_pop(controller: &NSObject) {
+fn controller_pop(controller: &NSObject, transition: i32) {
     // SAFETY: see `controller_push`.
-    let _: () = unsafe { objc2::msg_send![controller, krabikPop] };
+    let _: () = unsafe { objc2::msg_send![controller, krabikPop: transition as i64] };
 }
 
 fn controller_set_root_visible(controller: &NSObject, visible: bool) {
