@@ -74,7 +74,7 @@ pub fn compute(root: &UiNode, viewport: Size, measurer: &dyn Measure) -> LayoutR
     taffy.disable_rounding();
 
     let mut taffy_ids = HashMap::new();
-    let taffy_root = build_taffy(&mut taffy, root, &mut taffy_ids, false);
+    let taffy_root = build_taffy(&mut taffy, root, &mut taffy_ids, false, false);
 
     let nodes = tree::index(root);
     let by_taffy: HashMap<TaffyId, NodeId> = taffy_ids
@@ -138,30 +138,37 @@ fn build_taffy(
     node: &UiNode,
     ids: &mut HashMap<NodeId, TaffyId>,
     scroll_child: bool,
+    pager_child: bool,
 ) -> TaffyId {
     let is_scroll = matches!(node.kind, NodeKind::Scroll(_));
+    let is_pager = matches!(node.kind, NodeKind::Pager(_));
     let children: Vec<TaffyId> = node
         .children
         .iter()
-        .map(|child| build_taffy(taffy, child, ids, is_scroll))
+        .map(|child| build_taffy(taffy, child, ids, is_scroll, is_pager))
         .collect();
 
     let taffy_id = taffy
-        .new_with_children(taffy_style(node, scroll_child), &children)
+        .new_with_children(taffy_style(node, scroll_child, pager_child), &children)
         .expect("taffy node");
 
     ids.insert(node.id, taffy_id);
     taffy_id
 }
 
-fn taffy_style(node: &UiNode, scroll_child: bool) -> TaffyStyle {
+fn taffy_style(node: &UiNode, scroll_child: bool, pager_child: bool) -> TaffyStyle {
     let direction = match node.kind {
         NodeKind::Row => FlexDirection::Row,
+        NodeKind::Pager(_) => FlexDirection::Row,
         NodeKind::Scroll(props) if props.axis == Axis::Horizontal => FlexDirection::Row,
         _ => FlexDirection::Column,
     };
 
     let overflow = match node.kind {
+        NodeKind::Pager(_) => TaffyPoint {
+            x: Overflow::Hidden,
+            y: Overflow::Hidden,
+        },
         NodeKind::Scroll(props) => TaffyPoint {
             x: if props.axis == Axis::Horizontal {
                 Overflow::Scroll
@@ -180,16 +187,25 @@ fn taffy_style(node: &UiNode, scroll_child: bool) -> TaffyStyle {
     TaffyStyle {
         display: Display::Flex,
         flex_direction: direction,
-        size: TaffySize {
-            width: dimension(node.style.width),
-            height: dimension(node.style.height),
+        size: if pager_child {
+            // Every pager page fills the pager viewport; the row overflows
+            // horizontally so the native pager can scroll between pages.
+            TaffySize {
+                width: Dimension::percent(1.0),
+                height: Dimension::percent(1.0),
+            }
+        } else {
+            TaffySize {
+                width: dimension(node.style.width),
+                height: dimension(node.style.height),
+            }
         },
         // Taffy's automatic minimum size uses the content's min-content size.
         // For text that is the full unwrapped line, which would stop a label
         // from shrinking next to a sibling (for example in a list row). A text
         // node may shrink to the space its parent leaves and wrap instead.
         min_size: TaffySize {
-            width: if matches!(node.kind, NodeKind::Text(_)) {
+            width: if pager_child || matches!(node.kind, NodeKind::Text(_)) {
                 LengthPercentageAuto::length(0.0)
             } else {
                 LengthPercentageAuto::auto()
@@ -216,7 +232,11 @@ fn taffy_style(node: &UiNode, scroll_child: bool) -> TaffyStyle {
         flex_grow: node.style.grow,
         // Scroll containers must let their content keep its natural size in
         // the scroll axis instead of shrinking it into the viewport.
-        flex_shrink: if scroll_child { 0.0 } else { 1.0 },
+        flex_shrink: if scroll_child || pager_child {
+            0.0
+        } else {
+            1.0
+        },
         align_items: align_items(node.style.align_items),
         justify_content: justify_content(node.style.justify_content),
         overflow,
@@ -392,6 +412,8 @@ fn content_size(
         }
         // A tab bar fills the available width and has a fixed touch height.
         NodeKind::TabBar(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), TAB_BAR_HEIGHT),
+        // A bottom navigation bar fills the width below its content.
+        NodeKind::BottomNavigation(_) => Size::new(max_width.unwrap_or(CONTROL_WIDTH), 56.0),
         NodeKind::DatePicker(props) => {
             let (compact_width, inline_width, inline_height) = match props.value {
                 crate::ui::DatePickerValue::Date(_) => (DATE_PICKER_WIDTH, 320.0, 320.0),
@@ -478,8 +500,8 @@ mod tests {
     use crate::tree::ROOT_ID;
     use crate::ui::{
         Button, Checkbox, Column, DatePicker, DatePickerMode, DateValue, EdgeInsets, Element,
-        Image, ImageSource, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider,
-        Spacer, Switch, TabBar, Text, TextField, TimeValue,
+        Image, ImageSource, Pager, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView,
+        Slider, Spacer, Switch, TabBar, Text, TextField, TimeValue,
     };
 
     /// Measures every text as the same fixed box.
@@ -913,6 +935,28 @@ mod tests {
         assert_eq!(compact_date.height, 48.0);
         assert_eq!(inline_date.width, 300.0);
         assert_eq!(inline_date.height, 320.0);
+    }
+
+    #[test]
+    fn pager_pages_fill_the_viewport_side_by_side() {
+        let element: Element = Pager::new()
+            .height(400)
+            .child(Text::new("one"))
+            .child(Text::new("two"))
+            .into();
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(300.0, 600.0), &ApproximateMeasure).frames;
+        let pager = &tree.children[0];
+
+        assert_eq!(frames[&pager.id], Rect::new(0.0, 0.0, 300.0, 400.0));
+        assert_eq!(
+            frames[&pager.children[0].id],
+            Rect::new(0.0, 0.0, 300.0, 400.0)
+        );
+        assert_eq!(
+            frames[&pager.children[1].id],
+            Rect::new(300.0, 0.0, 300.0, 400.0)
+        );
     }
 
     #[test]

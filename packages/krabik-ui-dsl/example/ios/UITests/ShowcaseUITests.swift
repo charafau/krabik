@@ -117,6 +117,35 @@ final class ShowcaseUITests: XCTestCase {
         backToCatalog()
     }
 
+    func testContainerWidgets() throws {
+        open("View pager")
+        XCTAssertTrue(app.staticTexts["Page 1 of 3"].waitForExistence(timeout: 5))
+        app.scrollViews["View pager"].swipeLeft()
+        XCTAssertTrue(app.staticTexts["Page 2 of 3"].waitForExistence(timeout: 5))
+        backToCatalog()
+
+        open("Tabs view")
+        XCTAssertTrue(app.staticTexts["Selected: Overview"].waitForExistence(timeout: 5))
+        app.segmentedControls.firstMatch.buttons["Details"].tap()
+        XCTAssertTrue(app.staticTexts["Selected: Details"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Details page content."].waitForExistence(timeout: 5))
+        backToCatalog()
+
+        open("Bottom navigation")
+        XCTAssertTrue(app.staticTexts["Home destination"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Search"].tap()
+        XCTAssertTrue(app.staticTexts["Search destination"].waitForExistence(timeout: 5))
+        backToCatalog()
+
+        open("Toolbar")
+        XCTAssertTrue(app.staticTexts["Toolbar taps: 0"].waitForExistence(timeout: 5))
+        app.buttons["Refresh"].tap()
+        XCTAssertTrue(app.staticTexts["Toolbar taps: 1"].waitForExistence(timeout: 5))
+        app.buttons["Save"].tap()
+        XCTAssertTrue(app.staticTexts["Toolbar taps: 2"].waitForExistence(timeout: 5))
+        backToCatalog()
+    }
+
     func testPageTransitions() throws {
         open("Page transitions")
 

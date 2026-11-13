@@ -443,6 +443,26 @@ impl Runtime {
         }
     }
 
+    /// Returns the action of the bottom navigation bar with the given identifier, if any.
+    pub fn bottom_navigation_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
+        let node = tree::find(&self.tree, id)?;
+        match &node.kind {
+            NodeKind::BottomNavigation(props) if !props.action.is_empty() => {
+                Some(props.action.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// Returns the action of the pager with the given identifier, if any.
+    pub fn pager_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
+        let node = tree::find(&self.tree, id)?;
+        match &node.kind {
+            NodeKind::Pager(props) if !props.action.is_empty() => Some(props.action.clone()),
+            _ => None,
+        }
+    }
+
     /// Returns the action of the tab bar with the given identifier, if any.
     pub fn tab_bar_action(&self, id: NodeId) -> Option<Cow<'static, str>> {
         let node = tree::find(&self.tree, id)?;

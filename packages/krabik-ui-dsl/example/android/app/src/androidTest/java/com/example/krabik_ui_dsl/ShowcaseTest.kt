@@ -8,6 +8,7 @@ import androidx.test.espresso.action.GeneralSwipeAction
 import androidx.test.espresso.action.Press
 import androidx.test.espresso.action.Swipe
 import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.action.ViewActions.swipeLeft
 import androidx.test.espresso.action.ViewActions.swipeUp
 import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.assertion.ViewAssertions.matches
@@ -16,6 +17,7 @@ import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.hamcrest.Matchers.anyOf
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -147,6 +149,41 @@ class ShowcaseTest {
             onView(withText("Close")).perform(click())
             onView(withText("Filters")).check(doesNotExist())
             onView(withText("Open bottom sheet")).check(matches(isDisplayed()))
+            tapBack()
+        }
+    }
+
+    @Test
+    fun containersDemo() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openPage("View pager")
+            onView(withText("Page 1 of 3")).check(matches(isDisplayed()))
+            onView(withContentDescription("View pager")).perform(swipeLeft())
+            Thread.sleep(700)
+            onView(anyOf(withText("Page 2 of 3"), withText("Page 3 of 3")))
+                .check(matches(isDisplayed()))
+            tapBack()
+
+            openPage("Tabs view")
+            onView(withText("Selected: Overview")).check(matches(isDisplayed()))
+            onView(withText("Details")).perform(click())
+            Thread.sleep(500)
+            onView(withText("Selected: Details")).check(matches(isDisplayed()))
+            onView(withText("Details page content.")).check(matches(isDisplayed()))
+            tapBack()
+
+            openPage("Bottom navigation")
+            onView(withText("Home destination")).check(matches(isDisplayed()))
+            onView(withContentDescription("Search")).perform(click())
+            onView(withText("Search destination")).check(matches(isDisplayed()))
+            tapBack()
+
+            openPage("Toolbar")
+            onView(withText("Toolbar taps: 0")).check(matches(isDisplayed()))
+            onView(withText("Refresh")).perform(click())
+            onView(withText("Toolbar taps: 1")).check(matches(isDisplayed()))
+            onView(withText("Save")).perform(click())
+            onView(withText("Toolbar taps: 2")).check(matches(isDisplayed()))
             tapBack()
         }
     }

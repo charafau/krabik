@@ -35,6 +35,7 @@ void krabik_ios_on_modal_dismiss(uint64_t handle);
 
 /// Dispatches a native back action. Returns whether the application handled it.
 bool krabik_ios_on_back(uint64_t handle);
+void krabik_ios_on_toolbar_action(uint64_t handle, const char *action);
 
 void krabik_ios_on_click(uint64_t handle, uint64_t host, uint64_t node_id);
 void krabik_ios_on_text_changed(uint64_t handle, uint64_t host, uint64_t node_id, const char *text);

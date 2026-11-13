@@ -234,6 +234,31 @@ renderer diff; nodes without an animation behave exactly as before.
   creation/removal and four timing curves; Rust renderer/frame-batch tests and
   both UI suites cover them.
 
+### 2i. Pager, tabs view, bottom navigation and toolbar ✅
+
+Four container/navigation widgets round out the native set:
+
+- **Pager** — a horizontal, swipeable page container. Android uses a custom
+  `KrabikPager` with `OverScroller` and velocity tracking; iOS uses a paging
+  `UIScrollView`. Pages are ordinary Rust children laid out side by side.
+  Swiping reports `Event::Selected`; programmatic selection re-creates the
+  native pager at the requested offset.
+- **TabsView** — a `TabBar` above a `Pager`; tab taps and page swipes share one
+  action and one selected index.
+- **BottomNavigation** — a widget-level icon+text bar (`BottomNavigationView`
+  on Android, `UITabBar` on iOS). Items use custom `Icon` values with optional
+  platform-specific names (`drawable` / `sf`) and a shared fallback.
+- **Toolbar** — host-level chrome configured by `Screen::toolbar`: subtitle,
+  back title, hidden flag, and text actions with optional icons. Android uses
+  the framework `Toolbar`; iOS uses the native navigation item. Toolbar
+  actions dispatch `Event::Click`.
+
+The showcase has a Containers section with View pager, Tabs view, Bottom
+navigation and Toolbar pages, and platform tests cover swipes, tab sync,
+destination changes and toolbar actions.
+
+Per-tab navigation stacks and collapsing/large toolbars remain future work.
+
 ### 3b. Virtualized lists ✅
 
 [`List`](rust/src/ui.rs) (`List::new(items).item_height(..).buffer(..).key(..).row(..)`)
@@ -333,6 +358,10 @@ All core widgets from SPEC.md §7.1 are implemented on Android and iOS.
 | `ProgressIndicator::indeterminate()` | [`update_spinner()`](rust/src/android.rs) | Circular `ProgressBar` |
 | `DatePicker` (date/time/date-time) | [`update_date_picker()`](rust/src/android.rs) | Custom `KrabikDatePicker` (`DatePickerDialog`, `TimePickerDialog`, inline `DatePicker`/`TimePicker`) |
 | `TabBar` | [`update_tab_bar()`](rust/src/android.rs) | Custom `KrabikTabBar` (horizontal `LinearLayout`) |
+| `Pager` | [`update_pager()`](rust/src/android.rs) | Custom `KrabikPager` (`FrameLayout` + `OverScroller`) |
+| `TabsView` | [`TabsView`](rust/src/ui.rs) | `TabBar` + `Pager` composition |
+| `BottomNavigation` | [`update_bottom_navigation()`](rust/src/android.rs) | Material `BottomNavigationView` |
+| Host toolbar | [`sync_toolbar()`](rust/src/android.rs) | Framework `Toolbar` with menu/custom action views |
 | `Image` | [`update_image()`](rust/src/android.rs) | `ImageView` (assets + URLs) |
 | `ScrollView` | [`create_scroll()`](rust/src/android.rs) | Custom scroll container (vertical + horizontal) |
 

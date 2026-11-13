@@ -385,6 +385,27 @@ class RustRootView(
         }
     }
 
+    /** Forwards the selected page of a native pager back to Rust. */
+    fun onPageSelected(nodeId: Long, index: Int) {
+        if (handle != 0L) {
+            nativeOnPageSelected(handle, hostId, nodeId, index)
+        }
+    }
+
+    /** Forwards a toolbar action back to the application. */
+    fun onToolbarAction(action: String) {
+        if (handle != 0L) {
+            nativeOnToolbarAction(handle, action)
+        }
+    }
+
+    /** Forwards the selected destination of a bottom navigation bar back to Rust. */
+    fun onBottomNavigationSelected(nodeId: Long, index: Int) {
+        if (handle != 0L) {
+            nativeOnBottomNavigationSelected(handle, hostId, nodeId, index)
+        }
+    }
+
     /** Forwards a date, time or date-and-time selection back to Rust. */
     fun onPickerChanged(
         nodeId: Long,
@@ -481,6 +502,17 @@ class RustRootView(
     private external fun nativeOnRadioGroupSelected(handle: Long, host: Long, nodeId: Long, index: Int)
 
     private external fun nativeOnTabSelected(handle: Long, host: Long, nodeId: Long, index: Int)
+
+    private external fun nativeOnPageSelected(handle: Long, host: Long, nodeId: Long, index: Int)
+
+    private external fun nativeOnBottomNavigationSelected(
+        handle: Long,
+        host: Long,
+        nodeId: Long,
+        index: Int,
+    )
+
+    private external fun nativeOnToolbarAction(handle: Long, action: String)
 
     private external fun nativeOnPickerChanged(
         handle: Long,
