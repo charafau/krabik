@@ -830,38 +830,7 @@ impl AndroidState {
             }
         };
 
-        if let NodeKind::TextField(props) = &node.kind {
-            update_text_field(env, &view, props)?;
-        } else if let NodeKind::Switch(props) = &node.kind {
-            update_switch(env, &view, props)?;
-        } else if let NodeKind::Checkbox(props) = &node.kind {
-            update_check(env, &view, props, false)?;
-        } else if let NodeKind::RadioButton(props) = &node.kind {
-            update_check(env, &view, props, true)?;
-        } else if let NodeKind::RadioGroup(props) = &node.kind {
-            update_radio_group(env, &view, props)?;
-        } else if let NodeKind::TabBar(props) = &node.kind {
-            update_tab_bar(env, &view, props)?;
-        } else if let NodeKind::Pager(props) = &node.kind {
-            update_pager(env, &view, props)?;
-        } else if let NodeKind::DatePicker(props) = &node.kind {
-            update_date_picker(env, &view, props)?;
-        } else if let NodeKind::Slider(props) = &node.kind {
-            update_slider(env, &view, props)?;
-        } else if let NodeKind::Progress(props) = &node.kind {
-            update_progress(env, &view, props)?;
-        } else if let NodeKind::Spinner(props) = &node.kind {
-            let ids = jni_handles(env)?;
-            ids.update_spinner.call_void(
-                env,
-                &ids.krabik_views,
-                &[JValue::Object(&view), JValue::Int(props.color as jint)],
-            )?;
-        } else if let NodeKind::Image(props) = &node.kind {
-            update_image(env, &view, props)?;
-        } else {
-            update_text(env, &view, &node.kind)?;
-        }
+        configure_view(env, &view, &node.kind, self.density)?;
         if matches!(node.kind, NodeKind::Button(_)) {
             configure_button(env, &view)?;
             jni_handles(env)?.set_on_click_listener.call_void(
@@ -1196,28 +1165,51 @@ fn update_view(
     node: &RenderNode,
     density: f32,
 ) -> JniResult<()> {
-    if let NodeKind::Recycler(props) = &node.kind {
-        update_recycler(env, view, props, density)?;
-    } else if let NodeKind::TextField(props) = &node.kind {
-        update_text_field(env, view, props)?;
-    } else if let NodeKind::Switch(props) = &node.kind {
-        update_switch(env, view, props)?;
-    } else if let NodeKind::Checkbox(props) = &node.kind {
-        update_check(env, view, props, false)?;
-    } else if let NodeKind::RadioButton(props) = &node.kind {
-        update_check(env, view, props, true)?;
-    } else if let NodeKind::Slider(props) = &node.kind {
-        update_slider(env, view, props)?;
-    } else if let NodeKind::Progress(props) = &node.kind {
-        update_progress(env, view, props)?;
-    } else if let NodeKind::Image(props) = &node.kind {
-        update_image(env, view, props)?;
-    } else {
-        update_text(env, view, &node.kind)?;
-    }
+    configure_view(env, view, &node.kind, density)?;
     apply_padding(env, view, node.style.padding, density)?;
     apply_style(env, view, node, true)?;
     apply_accessibility(env, view, node)
+}
+
+/// Applies a node's own properties to its native view.
+///
+/// A new view and an updated view go through this same function, and the
+/// match is exhaustive, so a widget cannot be configured on creation and then
+/// ignore later changes.
+fn configure_view(
+    env: &mut Env<'_>,
+    view: &JObject<'_>,
+    kind: &NodeKind,
+    density: f32,
+) -> JniResult<()> {
+    match kind {
+        NodeKind::Root
+        | NodeKind::Column
+        | NodeKind::Row
+        | NodeKind::Spacer
+        | NodeKind::Scroll(_) => Ok(()),
+        NodeKind::Text(_) | NodeKind::Button(_) => update_text(env, view, kind),
+        NodeKind::TextField(props) => update_text_field(env, view, props),
+        NodeKind::Switch(props) => update_switch(env, view, props),
+        NodeKind::Checkbox(props) => update_check(env, view, props, false),
+        NodeKind::RadioButton(props) => update_check(env, view, props, true),
+        NodeKind::RadioGroup(props) => update_radio_group(env, view, props),
+        NodeKind::TabBar(props) => update_tab_bar(env, view, props),
+        NodeKind::Pager(props) => update_pager(env, view, props),
+        NodeKind::DatePicker(props) => update_date_picker(env, view, props),
+        NodeKind::Slider(props) => update_slider(env, view, props),
+        NodeKind::Progress(props) => update_progress(env, view, props),
+        NodeKind::Spinner(props) => {
+            let ids = jni_handles(env)?;
+            ids.update_spinner.call_void(
+                env,
+                &ids.krabik_views,
+                &[JValue::Object(view), JValue::Int(props.color as jint)],
+            )
+        }
+        NodeKind::Image(props) => update_image(env, view, props),
+        NodeKind::Recycler(props) => update_recycler(env, view, props, density),
+    }
 }
 
 fn update_image(env: &mut Env<'_>, view: &JObject<'_>, props: &ImageProps) -> JniResult<()> {

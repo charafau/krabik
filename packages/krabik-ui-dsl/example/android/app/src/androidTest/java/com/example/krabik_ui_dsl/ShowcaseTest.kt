@@ -17,6 +17,7 @@ import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.isEnabled
 import androidx.test.espresso.matcher.ViewMatchers.isRoot
+import androidx.test.espresso.matcher.ViewMatchers.isSelected
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -236,6 +237,14 @@ class ShowcaseTest {
             Thread.sleep(500)
             onView(withText("Selected: Details")).check(matches(isDisplayed()))
             onView(withText("Details page content.")).check(matches(isDisplayed()))
+
+            // Swiping the pager moves the tab highlight: the tab bar is
+            // updated in place from the application's new selection.
+            onView(withText("Details page content.")).perform(swipeLeft())
+            Thread.sleep(700)
+            onView(withText("Selected: Settings")).check(matches(isDisplayed()))
+            onView(withText("Settings")).check(matches(isSelected()))
+            onView(withText("Details")).check(matches(not(isSelected())))
             tapBack()
 
             openPage("Bottom navigation")
