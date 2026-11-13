@@ -1,17 +1,20 @@
 package dev.krabik.ui
 
-import android.os.Build
+import android.content.res.Configuration
 import android.os.Bundle
 import android.view.ViewGroup
-import android.view.WindowInsets
+import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toolbar
 import androidx.activity.OnBackPressedCallback
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.FragmentActivity
 
 /**
- * Hosts the Rust session full screen and keeps it inside the system bars.
+ * Hosts the Rust session full screen, edge to edge.
  *
  * The main root, navigation screens and modal hosts share one session handle.
  * A [KrabikHostController] owns the native toolbar, bottom navigation bar,
@@ -33,8 +36,22 @@ abstract class KrabikActivity : FragmentActivity() {
     /** Registers the app factory, when the shell ships its own app. */
     protected open fun installApp() {}
 
+    /**
+     * Sends the system back action to Rust. It is only enabled while the
+     * application says it handles back; otherwise the system's own behaviour
+     * applies, including the predictive "back to home" animation.
+     */
+    private val backCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            root.onBackPressed()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+        // The Rust session does not survive the activity, so fragments saved
+        // by a previous instance would point at a session that no longer
+        // exists. Start clean instead of restoring them.
+        super.onCreate(null)
 
         loadNativeLibrary()
         installApp()
@@ -98,37 +115,8 @@ abstract class KrabikActivity : FragmentActivity() {
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                 ),
             )
-            setOnApplyWindowInsetsListener { view, insets ->
-                val left: Int
-                val top: Int
-                val right: Int
-                val bottom: Int
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    val bars = insets.getInsets(
-                        WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
-                    )
-                    val ime = insets.getInsets(WindowInsets.Type.ime())
-                    left = bars.left
-                    top = bars.top
-                    right = bars.right
-                    // Keep the focused field above the keyboard when it opens.
-                    bottom = maxOf(bars.bottom, ime.bottom)
-                } else {
-                    @Suppress("DEPRECATION")
-                    left = insets.systemWindowInsetLeft
-                    @Suppress("DEPRECATION")
-                    top = insets.systemWindowInsetTop
-                    @Suppress("DEPRECATION")
-                    right = insets.systemWindowInsetRight
-                    @Suppress("DEPRECATION")
-                    bottom = insets.systemWindowInsetBottom
-                }
-
-                view.setPadding(left, top, right, bottom)
-                insets
-            }
         }
+        drawEdgeToEdge(column, toolbar, content, bottomNavigation)
 
         setContentView(
             column,
@@ -138,6 +126,7 @@ abstract class KrabikActivity : FragmentActivity() {
             ),
         )
 
+        onBackPressedDispatcher.addCallback(this, backCallback)
         controller = KrabikHostController(
             this,
             root.session,
@@ -146,23 +135,52 @@ abstract class KrabikActivity : FragmentActivity() {
             mainContainer,
             navContainer,
             root,
+            onBackEnabled = { enabled -> backCallback.isEnabled = enabled },
         )
+    }
 
-        // Rust owns the screen stack, so it decides what back does. When it
-        // declines (the root screen), the system default runs and leaves the
-        // app; the callback is re-armed for when the user returns.
-        onBackPressedDispatcher.addCallback(
-            this,
-            object : OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() {
-                    if (!root.onBackPressed()) {
-                        isEnabled = false
-                        onBackPressedDispatcher.onBackPressed()
-                        isEnabled = true
-                    }
-                }
-            },
-        )
+    /**
+     * Lets the app draw behind the system bars and keeps its content clear of
+     * them.
+     *
+     * The toolbar extends under the status bar and the bottom navigation bar
+     * under the gesture area, the way native Material screens do. When either
+     * is hidden, the content takes that padding instead.
+     */
+    private fun drawEdgeToEdge(
+        column: View,
+        toolbar: View,
+        content: View,
+        bottomNavigation: View,
+    ) {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        // Dark icons on a light theme, light icons on a dark one.
+        val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+            Configuration.UI_MODE_NIGHT_YES
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !night
+            isAppearanceLightNavigationBars = !night
+        }
+
+        ViewCompat.setOnApplyWindowInsetsListener(column) { _, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+            )
+            val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+
+            // Sides always; the bottom only for the keyboard, so a focused
+            // field stays above it.
+            column.setPadding(bars.left, 0, bars.right, keyboard)
+            toolbar.setPadding(0, bars.top, 0, 0)
+            bottomNavigation.setPadding(0, 0, 0, if (keyboard > 0) 0 else bars.bottom)
+            content.setPadding(
+                0,
+                if (toolbar.visibility == View.VISIBLE) 0 else bars.top,
+                0,
+                if (bottomNavigation.visibility == View.VISIBLE || keyboard > 0) 0 else bars.bottom,
+            )
+            WindowInsetsCompat.CONSUMED
+        }
     }
 
     override fun onDestroy() {

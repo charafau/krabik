@@ -68,6 +68,10 @@ pub(crate) trait Controller<P: Platform> {
     fn set_root_visible(&self, cx: &mut P::Cx<'_>, visible: bool) -> Result<(), P::Error>;
     /// Applies the top screen's toolbar and bottom navigation; `None` hides both.
     fn set_chrome(&self, cx: &mut P::Cx<'_>, screen: Option<&Screen>) -> Result<(), P::Error>;
+    /// Tells the platform whether the application currently handles the
+    /// system back action. When it does not, the platform's own behaviour
+    /// (leaving the app, with its predictive animation) applies.
+    fn set_back_enabled(&self, cx: &mut P::Cx<'_>, enabled: bool) -> Result<(), P::Error>;
     /// Shows the system alert.
     fn show_dialog(&self, cx: &mut P::Cx<'_>, dialog: &Dialog) -> Result<(), P::Error>;
     /// Closes the system alert without reporting back.
