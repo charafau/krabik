@@ -53,7 +53,6 @@ pub enum NodeKind {
     Pager(PagerProps),
     /// A native date picker.
     DatePicker(DatePickerProps),
-    /// A native bottom navigation bar.
     /// A native slider.
     Slider(SliderProps),
     /// A native determinate progress indicator.
@@ -89,14 +88,6 @@ impl NodeKind {
                 | Self::Image(_)
                 | Self::Scroll(_)
                 | Self::Recycler(_)
-        )
-    }
-
-    /// Whether the node lays out children in a flex container.
-    pub fn is_container(&self) -> bool {
-        matches!(
-            self,
-            Self::Root | Self::Column | Self::Row | Self::Scroll(_) | Self::Pager(_)
         )
     }
 }
