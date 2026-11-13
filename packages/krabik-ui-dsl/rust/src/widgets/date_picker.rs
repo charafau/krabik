@@ -1,10 +1,12 @@
 //! The `date_picker` widget: properties and builder.
 
-use crate::element::{Element, ElementKind, style_builder, text_builder};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement, style_builder, text_builder};
 use crate::engine::geometry::Size;
+use crate::message::Handler;
 use crate::style::FontWeight;
 use crate::widgets::Widget;
-use std::borrow::Cow;
 use std::fmt;
 
 /// A calendar date in the device's local calendar.
@@ -93,6 +95,22 @@ pub enum DatePickerValue {
 }
 
 impl DatePickerValue {
+    /// The date part, for a date or a date-and-time value.
+    pub fn date(&self) -> Option<DateValue> {
+        match *self {
+            Self::Date(date) | Self::DateTime { date, .. } => Some(date),
+            Self::Time(_) => None,
+        }
+    }
+
+    /// The time part, for a time or a date-and-time value.
+    pub fn time(&self) -> Option<TimeValue> {
+        match *self {
+            Self::Time(time) | Self::DateTime { time, .. } => Some(time),
+            Self::Date(_) => None,
+        }
+    }
+
     /// Clamps this value to the optional date and time ranges.
     pub fn clamped(
         self,
@@ -155,8 +173,8 @@ pub struct DatePickerProps {
     pub date_range: Option<(DateValue, DateValue)>,
     /// The optional inclusive time range.
     pub time_range: Option<(TimeValue, TimeValue)>,
-    /// The action dispatched whenever the value changes.
-    pub action: Cow<'static, str>,
+    /// Reported with the new value whenever it changes.
+    pub on_change: Handler<DatePickerValue>,
     /// Font size of the compact field in logical points.
     pub size: f32,
     /// ARGB color of the compact field's text.
@@ -173,7 +191,7 @@ impl DatePickerProps {
             mode: DatePickerMode::Compact,
             date_range: None,
             time_range: None,
-            action: Cow::Borrowed(""),
+            on_change: Handler::none(),
             size: 16.0,
             color: 0xFF00_0000,
             weight: FontWeight::Normal,
@@ -186,29 +204,37 @@ impl DatePickerProps {
 /// The value kind is chosen by the constructor: [`DatePicker::new`] for a
 /// date, [`DatePicker::time`] for a time, and [`DatePicker::date_time`] for
 /// both. The reported event matches the kind.
-#[derive(Clone, Debug, PartialEq)]
-pub struct DatePicker(pub(crate) Element);
+pub struct DatePicker<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl DatePicker {
+impl<M> DatePicker<M> {
     /// Creates a compact date picker with the given date.
     pub fn new(value: DateValue) -> Self {
-        Self(Element::leaf(ElementKind::Widget(Widget::DatePicker(
-            DatePickerProps::new(DatePickerValue::Date(value)),
-        ))))
+        Self(
+            RawElement::leaf(ElementKind::Widget(Widget::DatePicker(
+                DatePickerProps::new(DatePickerValue::Date(value)),
+            ))),
+            PhantomData,
+        )
     }
 
     /// Creates a compact time picker with the given time.
     pub fn time(value: TimeValue) -> Self {
-        Self(Element::leaf(ElementKind::Widget(Widget::DatePicker(
-            DatePickerProps::new(DatePickerValue::Time(value)),
-        ))))
+        Self(
+            RawElement::leaf(ElementKind::Widget(Widget::DatePicker(
+                DatePickerProps::new(DatePickerValue::Time(value)),
+            ))),
+            PhantomData,
+        )
     }
 
     /// Creates a compact date-and-time picker.
     pub fn date_time(date: DateValue, time: TimeValue) -> Self {
-        Self(Element::leaf(ElementKind::Widget(Widget::DatePicker(
-            DatePickerProps::new(DatePickerValue::DateTime { date, time }),
-        ))))
+        Self(
+            RawElement::leaf(ElementKind::Widget(Widget::DatePicker(
+                DatePickerProps::new(DatePickerValue::DateTime { date, time }),
+            ))),
+            PhantomData,
+        )
     }
 
     /// Chooses between the compact field and the inline picker.
@@ -235,18 +261,24 @@ impl DatePicker {
         self
     }
 
-    /// Sets the action dispatched whenever the date changes.
-    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+    /// Reports the new value whenever it changes.
+    pub fn on_change(
+        mut self,
+        message: impl Fn(DatePickerValue) -> M + Send + Sync + 'static,
+    ) -> Self
+    where
+        M: 'static,
+    {
         if let ElementKind::Widget(Widget::DatePicker(props)) = &mut self.0.kind {
-            props.action = action.into();
+            props.on_change = Handler::new(message);
         }
         self
     }
 }
 
-impl From<DatePicker> for Element {
-    fn from(component: DatePicker) -> Self {
-        component.0
+impl<M> From<DatePicker<M>> for Element<M> {
+    fn from(component: DatePicker<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 

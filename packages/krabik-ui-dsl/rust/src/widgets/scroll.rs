@@ -1,6 +1,8 @@
 //! The `scroll` widget: properties and builder.
 
-use crate::element::{Element, ElementKind, style_builder};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement, style_builder};
 
 /// The axis a scroll container scrolls along.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -23,22 +25,27 @@ pub struct ScrollProps {
 ///
 /// Give it a bounded size (`.grow(1)`, a fixed height, or a parent-provided
 /// constraint) so its content can actually overflow.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ScrollView(pub(crate) Element);
+pub struct ScrollView<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl ScrollView {
+impl<M> ScrollView<M> {
     /// Creates a vertical scroll container.
     pub fn new() -> Self {
-        Self(Element::container(ElementKind::Scroll(ScrollProps {
-            axis: Axis::Vertical,
-        })))
+        Self(
+            RawElement::container(ElementKind::Scroll(ScrollProps {
+                axis: Axis::Vertical,
+            })),
+            PhantomData,
+        )
     }
 
     /// Creates a horizontal scroll container.
     pub fn horizontal() -> Self {
-        Self(Element::container(ElementKind::Scroll(ScrollProps {
-            axis: Axis::Horizontal,
-        })))
+        Self(
+            RawElement::container(ElementKind::Scroll(ScrollProps {
+                axis: Axis::Horizontal,
+            })),
+            PhantomData,
+        )
     }
 
     /// The axis the container scrolls along.
@@ -50,21 +57,21 @@ impl ScrollView {
     }
 
     /// Appends a child.
-    pub fn child(mut self, child: impl Into<Element>) -> Self {
-        self.0.children.push(child.into());
+    pub fn child(mut self, child: impl Into<Element<M>>) -> Self {
+        self.0.children.push(child.into().into_raw());
         self
     }
 }
 
-impl Default for ScrollView {
+impl<M> Default for ScrollView<M> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl From<ScrollView> for Element {
-    fn from(component: ScrollView) -> Self {
-        component.0
+impl<M> From<ScrollView<M>> for Element<M> {
+    fn from(component: ScrollView<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 

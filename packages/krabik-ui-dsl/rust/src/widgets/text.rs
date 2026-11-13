@@ -1,6 +1,8 @@
 //! The `text` widget: properties and builder.
 
-use crate::element::{Element, ElementKind, style_builder, text_builder};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement, style_builder, text_builder};
 use crate::engine::geometry::{Constraints, Size};
 use crate::engine::measure::Measure;
 use crate::style::{FontWeight, TextAlign};
@@ -41,15 +43,15 @@ impl TextProps {
 }
 
 /// A run of text.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Text(pub(crate) Element);
+pub struct Text<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl Text {
+impl<M> Text<M> {
     /// Creates a text node.
     pub fn new(content: impl Into<String>) -> Self {
-        Self(Element::leaf(ElementKind::Widget(Widget::Text(
-            TextProps::new(content),
-        ))))
+        Self(
+            RawElement::leaf(ElementKind::Widget(Widget::Text(TextProps::new(content)))),
+            PhantomData,
+        )
     }
 
     /// Aligns the text horizontally inside its frame.
@@ -77,9 +79,9 @@ impl Text {
     }
 }
 
-impl From<Text> for Element {
-    fn from(component: Text) -> Self {
-        component.0
+impl<M> From<Text<M>> for Element<M> {
+    fn from(component: Text<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 

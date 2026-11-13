@@ -1,6 +1,6 @@
 //! The platform-independent engine.
 //!
-//! An [`Element`](crate::element::Element) description is built into a
+//! An [`RawElement`](crate::element::RawElement) description is built into a
 //! [`tree`] of nodes with stable identifiers, sized and positioned by
 //! [`layout`] (Taffy, with text measured through [`measure`]), and compared
 //! with the previous tree by [`render`] to produce the operations a platform

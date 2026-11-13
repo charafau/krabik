@@ -1,12 +1,14 @@
 //! The `text_field` widget: properties and builder.
 
-use crate::element::{Element, ElementKind, style_builder, text_builder};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement, style_builder, text_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
+use crate::message::Handler;
 use crate::style::FontWeight;
 use crate::widgets::TextProps;
 use crate::widgets::Widget;
-use std::borrow::Cow;
 
 /// Which on-screen keyboard an input requests.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -45,12 +47,12 @@ pub struct TextFieldProps {
     pub value: String,
     /// Hint shown while the input is empty.
     pub placeholder: String,
-    /// The action dispatched whenever the text changes.
-    pub action: Cow<'static, str>,
-    /// The action dispatched when the user submits the input.
-    pub submit_action: Cow<'static, str>,
-    /// The action dispatched when the input gains or loses focus.
-    pub focus_action: Cow<'static, str>,
+    /// Reported with the new text whenever it changes.
+    pub on_change: Handler<String>,
+    /// Reported when the user submits the input from the keyboard.
+    pub on_submit: Handler<()>,
+    /// Reported with `true` when the input gains focus and `false` when it loses it.
+    pub on_focus: Handler<bool>,
     /// Whether the input accepts multiple lines of text.
     pub multiline: bool,
     /// Whether the text is obscured while typing.
@@ -73,9 +75,9 @@ impl TextFieldProps {
         Self {
             value: value.into(),
             placeholder: String::new(),
-            action: Cow::Borrowed(""),
-            submit_action: Cow::Borrowed(""),
-            focus_action: Cow::Borrowed(""),
+            on_change: Handler::none(),
+            on_submit: Handler::none(),
+            on_focus: Handler::none(),
             multiline: false,
             secure: false,
             keyboard: KeyboardType::Text,
@@ -88,15 +90,17 @@ impl TextFieldProps {
 }
 
 /// A native text input.
-#[derive(Clone, Debug, PartialEq)]
-pub struct TextField(pub(crate) Element);
+pub struct TextField<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl TextField {
+impl<M> TextField<M> {
     /// Creates an input with the given initial value.
     pub fn new(value: impl Into<String>) -> Self {
-        Self(Element::leaf(ElementKind::Widget(Widget::TextField(
-            TextFieldProps::new(value),
-        ))))
+        Self(
+            RawElement::leaf(ElementKind::Widget(Widget::TextField(TextFieldProps::new(
+                value,
+            )))),
+            PhantomData,
+        )
     }
 
     /// Sets the hint shown while the input is empty.
@@ -107,35 +111,36 @@ impl TextField {
         self
     }
 
-    /// Sets the action dispatched whenever the text changes.
-    ///
-    /// Accepts a `&'static str` or an owned `String` for actions built at
-    /// runtime, such as `format!("field:{index}")`.
-    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+    /// Reports the new text whenever it changes, for example
+    /// `.on_change(Msg::NameChanged)`.
+    pub fn on_change(mut self, message: impl Fn(String) -> M + Send + Sync + 'static) -> Self
+    where
+        M: 'static,
+    {
         if let ElementKind::Widget(Widget::TextField(props)) = &mut self.0.kind {
-            props.action = action.into();
+            props.on_change = Handler::new(message);
         }
         self
     }
 
-    /// Sets the action dispatched when the user submits the input.
-    ///
-    /// Accepts a `&'static str` or an owned `String` for actions built at
-    /// runtime.
-    pub fn submit_action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+    /// Sends `message` when the user submits the input from the keyboard.
+    pub fn on_submit(mut self, message: M) -> Self
+    where
+        M: Clone + Send + Sync + 'static,
+    {
         if let ElementKind::Widget(Widget::TextField(props)) = &mut self.0.kind {
-            props.submit_action = action.into();
+            props.on_submit = Handler::new(move |()| message.clone());
         }
         self
     }
 
-    /// Sets the action dispatched when the input gains or loses focus.
-    ///
-    /// Accepts a `&'static str` or an owned `String` for actions built at
-    /// runtime.
-    pub fn focus_action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+    /// Reports `true` when the input gains focus and `false` when it loses it.
+    pub fn on_focus(mut self, message: impl Fn(bool) -> M + Send + Sync + 'static) -> Self
+    where
+        M: 'static,
+    {
         if let ElementKind::Widget(Widget::TextField(props)) = &mut self.0.kind {
-            props.focus_action = action.into();
+            props.on_focus = Handler::new(message);
         }
         self
     }
@@ -181,9 +186,9 @@ impl TextField {
     }
 }
 
-impl From<TextField> for Element {
-    fn from(component: TextField) -> Self {
-        component.0
+impl<M> From<TextField<M>> for Element<M> {
+    fn from(component: TextField<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 

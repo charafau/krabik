@@ -1,11 +1,13 @@
 //! The `slider` widget: properties and builder.
 
-use crate::element::{Element, ElementKind, style_builder};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::engine::geometry::Size;
+use crate::message::Handler;
 use crate::style::CONTROL_ACCENT;
 use crate::widgets::CONTROL_WIDTH;
 use crate::widgets::Widget;
-use std::borrow::Cow;
 
 /// Platform-independent properties of a slider.
 #[derive(Clone, Debug, PartialEq)]
@@ -18,8 +20,8 @@ pub struct SliderProps {
     pub max: f32,
     /// The interval values snap to, or `None` for a continuous slider.
     pub step: Option<f32>,
-    /// The action dispatched whenever the value changes.
-    pub action: Cow<'static, str>,
+    /// Reported with the new value whenever it changes.
+    pub on_change: Handler<f32>,
     /// ARGB color of the active track and thumb.
     pub color: u32,
 }
@@ -32,7 +34,7 @@ impl SliderProps {
             min: 0.0,
             max: 1.0,
             step: None,
-            action: Cow::Borrowed(""),
+            on_change: Handler::none(),
             color: CONTROL_ACCENT,
         }
     }
@@ -54,15 +56,15 @@ pub(crate) fn snap_slider_value(value: f32, min: f32, max: f32, step: Option<f32
 }
 
 /// A native slider.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Slider(pub(crate) Element);
+pub struct Slider<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl Slider {
+impl<M> Slider<M> {
     /// Creates a slider with the given value and the default range `0..=1`.
     pub fn new(value: f32) -> Self {
-        Self(Element::leaf(ElementKind::Widget(Widget::Slider(
-            SliderProps::new(value),
-        ))))
+        Self(
+            RawElement::leaf(ElementKind::Widget(Widget::Slider(SliderProps::new(value)))),
+            PhantomData,
+        )
     }
 
     /// Sets the lowest selectable value.
@@ -91,10 +93,13 @@ impl Slider {
         self
     }
 
-    /// Sets the action dispatched whenever the value changes.
-    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+    /// Reports the new value whenever it changes.
+    pub fn on_change(mut self, message: impl Fn(f32) -> M + Send + Sync + 'static) -> Self
+    where
+        M: 'static,
+    {
         if let ElementKind::Widget(Widget::Slider(props)) = &mut self.0.kind {
-            props.action = action.into();
+            props.on_change = Handler::new(message);
         }
         self
     }
@@ -108,9 +113,9 @@ impl Slider {
     }
 }
 
-impl From<Slider> for Element {
-    fn from(component: Slider) -> Self {
-        component.0
+impl<M> From<Slider<M>> for Element<M> {
+    fn from(component: Slider<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 

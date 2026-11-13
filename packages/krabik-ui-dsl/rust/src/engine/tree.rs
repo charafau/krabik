@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use crate::geometry::Size;
 use crate::ui::{
-    Axis, Element, ElementKind, Length, ListMode, ListProps, PagerProps, ScrollProps, Style,
+    Axis, ElementKind, Length, ListMode, ListProps, PagerProps, RawElement, ScrollProps, Style,
 };
 use crate::widgets::Widget;
 
@@ -185,7 +185,7 @@ pub struct BuildInfo {
 ///
 /// Lists are materialized at offset zero; use [`build_with`] to account for
 /// scroll positions.
-pub fn build(element: &Element) -> UiNode {
+pub fn build(element: &RawElement) -> UiNode {
     let offsets = HashMap::new();
     build_with(element, &offsets, Size::ZERO).0
 }
@@ -195,7 +195,7 @@ pub fn build(element: &Element) -> UiNode {
 /// Recycler rows use their own root id so their node identifiers cannot collide
 /// with identifiers in the main tree, while a rebind of the same item keeps the
 /// same ids.
-pub fn build_at(element: &Element, root: NodeId) -> (UiNode, BuildInfo) {
+pub fn build_at(element: &RawElement, root: NodeId) -> (UiNode, BuildInfo) {
     let offsets = HashMap::new();
     let mut measurements = HashMap::new();
     let mut info = BuildInfo::default();
@@ -250,7 +250,7 @@ pub(crate) fn stamp_recycler_revision(node: &mut UiNode, revision: u64) {
 
 /// Converts a declarative element into the internal tree with scroll state.
 pub fn build_with(
-    element: &Element,
+    element: &RawElement,
     offsets: &HashMap<NodeId, f32>,
     viewport: Size,
 ) -> (UiNode, BuildInfo) {
@@ -261,7 +261,7 @@ pub fn build_with(
 /// Converts a declarative element into the internal tree, reusing measured
 /// row heights across rebuilds.
 pub fn build_with_measurements(
-    element: &Element,
+    element: &RawElement,
     offsets: &HashMap<NodeId, f32>,
     viewport: Size,
     measurements: &mut HashMap<NodeId, ListMeasurements>,
@@ -273,7 +273,7 @@ pub fn build_with_measurements(
 /// Converts a declarative element into the internal tree, keeping the row that
 /// holds `focused` materialized.
 pub fn build_with_focus(
-    element: &Element,
+    element: &RawElement,
     offsets: &HashMap<NodeId, f32>,
     viewport: Size,
     measurements: &mut HashMap<NodeId, ListMeasurements>,
@@ -380,7 +380,7 @@ fn root_style() -> Style {
     }
 }
 
-fn build_node(element: &Element, parent: NodeId, index: usize, cx: &mut BuildContext) -> UiNode {
+fn build_node(element: &RawElement, parent: NodeId, index: usize, cx: &mut BuildContext) -> UiNode {
     let id = node_id(parent, index, element.key(), element.kind.tag());
 
     if let ElementKind::List(props) = &element.kind {
@@ -410,7 +410,7 @@ fn build_node(element: &Element, parent: NodeId, index: usize, cx: &mut BuildCon
     }
 }
 
-fn build_children(element: &Element, parent: NodeId, cx: &mut BuildContext) -> Vec<UiNode> {
+fn build_children(element: &RawElement, parent: NodeId, cx: &mut BuildContext) -> Vec<UiNode> {
     // Duplicate keys would hash two siblings to the same identifier, which
     // silently aliases their native views. Fail loudly in debug builds.
     #[cfg(debug_assertions)]
@@ -440,7 +440,12 @@ fn build_children(element: &Element, parent: NodeId, cx: &mut BuildContext) -> V
 /// platform scroll extent is the full list height while only the window exists
 /// as native views. Rows sit at their absolute content position, which means a
 /// native scroll needs no repositioning when the window changes.
-fn build_list(element: &Element, id: NodeId, props: &ListProps, cx: &mut BuildContext) -> UiNode {
+fn build_list(
+    element: &RawElement,
+    id: NodeId,
+    props: &ListProps,
+    cx: &mut BuildContext,
+) -> UiNode {
     if props.mode == ListMode::Recycled && cfg!(any(target_os = "android", target_os = "ios")) {
         cx.info.recycled.insert(id, props.clone());
         return UiNode {
@@ -509,7 +514,7 @@ fn build_fixed_rows(
     }
 
     for index in start..end {
-        let mut row = Element::container(ElementKind::Column);
+        let mut row = RawElement::container(ElementKind::Column);
         row.style.width = Length::Percent(1.0);
         row.style.height = Length::Points(height);
         row.key = Some(Cow::Owned((props.keys)(index)));
@@ -663,7 +668,7 @@ fn build_variable_rows(
             Some(keys) => keys[index].clone(),
             None => (props.keys)(index),
         };
-        let mut row = Element::container(ElementKind::Column);
+        let mut row = RawElement::container(ElementKind::Column);
         row.style.width = Length::Percent(1.0);
         row.key = Some(Cow::Owned(key.clone()));
         row.children.push((props.rows)(index));
@@ -723,7 +728,7 @@ fn content_column(id: NodeId, children: Vec<UiNode>) -> UiNode {
 }
 
 fn build_spacer(parent: NodeId, index: usize, height: f32, cx: &mut BuildContext) -> UiNode {
-    let mut spacer = Element::leaf(ElementKind::Spacer);
+    let mut spacer = RawElement::leaf(ElementKind::Spacer);
     spacer.style.height = Length::Points(height.max(0.0));
     build_node(&spacer, parent, index, cx)
 }
@@ -818,6 +823,7 @@ fn collect_renderable_parents(
 
 #[cfg(test)]
 mod tests {
+    use crate::ui::Element;
     use std::sync::Arc;
 
     use super::*;
@@ -826,7 +832,7 @@ mod tests {
     fn sample() -> Element {
         Column::new()
             .child(Text::new("Hello"))
-            .child(Button::new("Click").action("click"))
+            .child(Button::new("Click").on_click(()))
             .into()
     }
 

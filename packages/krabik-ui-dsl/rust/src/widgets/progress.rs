@@ -1,6 +1,8 @@
 //! The `progress` widget: properties and builder.
 
-use crate::element::{Element, ElementKind, style_builder};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::engine::geometry::Size;
 use crate::style::CONTROL_ACCENT;
 use crate::widgets::CONTROL_WIDTH;
@@ -48,22 +50,25 @@ impl Default for SpinnerProps {
 }
 
 /// A native determinate progress indicator.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProgressIndicator(pub(crate) Element);
+pub struct ProgressIndicator<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl ProgressIndicator {
+impl<M> ProgressIndicator<M> {
     /// Creates a determinate progress indicator with a fraction in `0.0..=1.0`.
     pub fn new(value: f32) -> Self {
-        Self(Element::leaf(ElementKind::Widget(Widget::Progress(
-            ProgressProps::new(value.clamp(0.0, 1.0)),
-        ))))
+        Self(
+            RawElement::leaf(ElementKind::Widget(Widget::Progress(ProgressProps::new(
+                value.clamp(0.0, 1.0),
+            )))),
+            PhantomData,
+        )
     }
 
     /// Creates an indeterminate progress spinner.
     pub fn indeterminate() -> Self {
-        Self(Element::leaf(ElementKind::Widget(Widget::Spinner(
-            SpinnerProps::new(),
-        ))))
+        Self(
+            RawElement::leaf(ElementKind::Widget(Widget::Spinner(SpinnerProps::new()))),
+            PhantomData,
+        )
     }
 
     /// Sets the ARGB color of the filled part or spinner.
@@ -77,9 +82,9 @@ impl ProgressIndicator {
     }
 }
 
-impl From<ProgressIndicator> for Element {
-    fn from(component: ProgressIndicator) -> Self {
-        component.0
+impl<M> From<ProgressIndicator<M>> for Element<M> {
+    fn from(component: ProgressIndicator<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 

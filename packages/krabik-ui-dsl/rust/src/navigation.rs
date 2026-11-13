@@ -4,6 +4,9 @@
 //! mirrors it with native navigation controllers. A screen's content is built
 //! on demand through [`App::screen`](crate::app::App::screen).
 
+use std::marker::PhantomData;
+
+use crate::message::Handler;
 use crate::ui::Icon;
 
 /// How a screen enters and leaves the native navigation stack.
@@ -32,7 +35,7 @@ impl ScreenTransition {
 
 /// One screen in a navigation stack.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Screen {
+pub struct Screen<M = ()> {
     /// A stable identifier used to match the screen across renders.
     pub key: String,
     /// The title shown by the native navigation bar.
@@ -40,12 +43,12 @@ pub struct Screen {
     /// The native transition used when this screen is pushed.
     pub transition: ScreenTransition,
     /// Extra native toolbar configuration, when the screen needs it.
-    pub toolbar: Option<Toolbar>,
+    pub toolbar: Option<Toolbar<M>>,
     /// The native bottom navigation bar shown under this screen, if any.
-    pub bottom_navigation: Option<BottomNavigation>,
+    pub bottom_navigation: Option<BottomNavigation<M>>,
 }
 
-impl Screen {
+impl<M> Screen<M> {
     /// Creates a screen with a key and a navigation-bar title.
     pub fn new(key: impl Into<String>, title: impl Into<String>) -> Self {
         Self {
@@ -64,7 +67,7 @@ impl Screen {
     }
 
     /// Configures the native toolbar for this screen.
-    pub fn toolbar(mut self, toolbar: Toolbar) -> Self {
+    pub fn toolbar(mut self, toolbar: Toolbar<M>) -> Self {
         self.toolbar = Some(toolbar);
         self
     }
@@ -73,9 +76,20 @@ impl Screen {
     ///
     /// Give every top-level destination the same bar so it stays in place
     /// while the content changes.
-    pub fn bottom_navigation(mut self, bar: BottomNavigation) -> Self {
+    pub fn bottom_navigation(mut self, bar: BottomNavigation<M>) -> Self {
         self.bottom_navigation = Some(bar);
         self
+    }
+
+    /// Drops the message type; the handlers inside are already erased.
+    pub(crate) fn erase(self) -> Screen {
+        Screen {
+            key: self.key,
+            title: self.title,
+            transition: self.transition,
+            toolbar: self.toolbar.map(Toolbar::erase),
+            bottom_navigation: self.bottom_navigation.map(BottomNavigation::erase),
+        }
     }
 }
 
@@ -102,24 +116,25 @@ impl BottomNavItem {
 ///
 /// iOS shows a system tab bar and Android a Material bottom navigation bar,
 /// each at its platform height and pinned to the bottom edge of the screen.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct BottomNavigation {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BottomNavigation<M = ()> {
     /// The destinations in display order.
     pub items: Vec<BottomNavItem>,
     /// The index of the selected destination.
     pub selected: usize,
-    /// The action dispatched as [`Event::Selected`](crate::app::Event::Selected)
-    /// when the user picks a destination.
-    pub action: String,
+    /// Reported with the index of the destination the user picked.
+    pub on_select: Handler<usize>,
+    marker: PhantomData<fn() -> M>,
 }
 
-impl BottomNavigation {
+impl<M> BottomNavigation<M> {
     /// Creates a bar with the given destinations.
     pub fn new(items: impl IntoIterator<Item = BottomNavItem>) -> Self {
         Self {
             items: items.into_iter().collect(),
             selected: 0,
-            action: String::new(),
+            on_select: Handler::none(),
+            marker: PhantomData,
         }
     }
 
@@ -129,44 +144,39 @@ impl BottomNavigation {
         self
     }
 
-    /// Sets the action dispatched when the selection changes.
-    pub fn action(mut self, action: impl Into<String>) -> Self {
-        self.action = action.into();
+    /// Reports the index of the destination the user picked.
+    pub fn on_select(mut self, message: impl Fn(usize) -> M + Send + Sync + 'static) -> Self
+    where
+        M: 'static,
+    {
+        self.on_select = Handler::new(message);
         self
+    }
+
+    fn erase(self) -> BottomNavigation {
+        BottomNavigation {
+            items: self.items,
+            selected: self.selected,
+            on_select: self.on_select,
+            marker: PhantomData,
+        }
     }
 }
 
 /// An action shown on the native toolbar.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolbarAction {
-    /// The action dispatched when the item is tapped.
-    pub action: String,
     /// The visible text. Always present.
     pub label: String,
     /// The optional icon.
     pub icon: Icon,
-}
-
-impl ToolbarAction {
-    /// Creates a text-only toolbar action.
-    pub fn new(action: impl Into<String>, label: impl Into<String>) -> Self {
-        Self {
-            action: action.into(),
-            label: label.into(),
-            icon: Icon::new(),
-        }
-    }
-
-    /// Adds an icon to this action.
-    pub fn icon(mut self, icon: Icon) -> Self {
-        self.icon = icon;
-        self
-    }
+    /// What to tell the application when the item is tapped.
+    pub on_tap: Handler<()>,
 }
 
 /// Extra configuration for the host-level native toolbar.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Toolbar {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Toolbar<M = ()> {
     /// An optional second line under the title.
     pub subtitle: Option<String>,
     /// An optional back-button title.
@@ -175,9 +185,22 @@ pub struct Toolbar {
     pub hidden: bool,
     /// Right-side actions.
     pub actions: Vec<ToolbarAction>,
+    marker: PhantomData<fn() -> M>,
 }
 
-impl Toolbar {
+impl<M> Default for Toolbar<M> {
+    fn default() -> Self {
+        Self {
+            subtitle: None,
+            back_title: None,
+            hidden: false,
+            actions: Vec::new(),
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<M> Toolbar<M> {
     /// Creates an empty toolbar configuration.
     pub fn new() -> Self {
         Self::default()
@@ -201,40 +224,49 @@ impl Toolbar {
         self
     }
 
-    /// Adds a text-only action.
-    pub fn action(mut self, action: impl Into<String>, label: impl Into<String>) -> Self {
-        self.actions.push(ToolbarAction::new(action, label));
-        self
+    fn erase(self) -> Toolbar {
+        Toolbar {
+            subtitle: self.subtitle,
+            back_title: self.back_title,
+            hidden: self.hidden,
+            actions: self.actions,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<M: Clone + Send + Sync + 'static> Toolbar<M> {
+    /// Adds a text-only action that sends `message`.
+    pub fn action(self, label: impl Into<String>, message: M) -> Self {
+        self.action_with_icon(label, Icon::new(), message)
     }
 
-    /// Adds an action with an icon.
-    pub fn action_with_icon(
-        mut self,
-        action: impl Into<String>,
-        label: impl Into<String>,
-        icon: Icon,
-    ) -> Self {
-        self.actions
-            .push(ToolbarAction::new(action, label).icon(icon));
+    /// Adds an action with an icon that sends `message`.
+    pub fn action_with_icon(mut self, label: impl Into<String>, icon: Icon, message: M) -> Self {
+        self.actions.push(ToolbarAction {
+            label: label.into(),
+            icon,
+            on_tap: Handler::new(move |()| message.clone()),
+        });
         self
     }
 }
 
 /// The visible navigation stack, ordered from the root to the active screen.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Navigation {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Navigation<M = ()> {
     /// The screens currently in the stack.
-    pub screens: Vec<Screen>,
+    pub screens: Vec<Screen<M>>,
 }
 
-impl Navigation {
+impl<M> Navigation<M> {
     /// Creates a navigation stack from its screens.
-    pub fn new(screens: Vec<Screen>) -> Self {
+    pub fn new(screens: Vec<Screen<M>>) -> Self {
         Self { screens }
     }
 
     /// The screens in the stack.
-    pub fn screens(&self) -> &[Screen] {
+    pub fn screens(&self) -> &[Screen<M>] {
         &self.screens
     }
 }
@@ -243,9 +275,16 @@ impl Navigation {
 mod tests {
     use super::*;
 
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum Msg {
+        Edit,
+        Search,
+        Tab(usize),
+    }
+
     #[test]
     fn screens_default_to_a_slide_transition() {
-        let screen = Screen::new("home", "Home");
+        let screen = Screen::<Msg>::new("home", "Home");
         assert_eq!(screen.transition, ScreenTransition::Slide);
         assert_eq!(ScreenTransition::Slide.code(), 0);
         assert_eq!(ScreenTransition::Fade.code(), 1);
@@ -259,8 +298,8 @@ mod tests {
                 .subtitle("12 new")
                 .back_title("Back")
                 .hidden(false)
-                .action("edit", "Edit")
-                .action_with_icon("search", "Search", Icon::new().sf("magnifyingglass")),
+                .action("Edit", Msg::Edit)
+                .action_with_icon("Search", Icon::new().sf("magnifyingglass"), Msg::Search),
         );
         let toolbar = screen.toolbar.expect("toolbar");
         assert_eq!(toolbar.subtitle.as_deref(), Some("12 new"));
@@ -268,6 +307,8 @@ mod tests {
         assert_eq!(toolbar.actions.len(), 2);
         assert_eq!(toolbar.actions[0].label, "Edit");
         assert_eq!(toolbar.actions[1].icon.ios_name(), Some("magnifyingglass"));
+        let message = toolbar.actions[1].on_tap.message(()).expect("handler");
+        assert_eq!(message.downcast_ref::<Msg>(), Some(&Msg::Search));
     }
 
     #[test]
@@ -278,18 +319,19 @@ mod tests {
                 BottomNavItem::new("Search", Icon::new().shared("search")),
             ])
             .selected(1)
-            .action("tab"),
+            .on_select(Msg::Tab),
         );
         let bar = screen.bottom_navigation.expect("bottom navigation");
         assert_eq!(bar.selected, 1);
-        assert_eq!(bar.action, "tab");
         assert_eq!(bar.items[0].icon.android_name(), Some("ic_home"));
         assert_eq!(bar.items[1].icon.ios_name(), Some("search"));
+        let message = bar.on_select.message(1).expect("handler");
+        assert_eq!(message.downcast_ref::<Msg>(), Some(&Msg::Tab(1)));
     }
 
     #[test]
     fn the_transition_can_be_chosen() {
-        let screen = Screen::new("fade", "Fade").transition(ScreenTransition::Fade);
+        let screen = Screen::<Msg>::new("fade", "Fade").transition(ScreenTransition::Fade);
         assert_eq!(screen.transition, ScreenTransition::Fade);
     }
 }

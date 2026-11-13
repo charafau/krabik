@@ -1,12 +1,14 @@
 //! The `check` widgets: properties and builder.
 
-use crate::element::{Element, ElementKind, style_builder, text_builder};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement, style_builder, text_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
+use crate::message::Handler;
 use crate::style::FontWeight;
 use crate::widgets::TextProps;
 use crate::widgets::Widget;
-use std::borrow::Cow;
 
 /// Platform-independent properties of a checkbox or radio button.
 #[derive(Clone, Debug, PartialEq)]
@@ -15,8 +17,8 @@ pub struct CheckProps {
     pub label: String,
     /// Whether the control is selected.
     pub checked: bool,
-    /// The action dispatched whenever the control is toggled.
-    pub action: Cow<'static, str>,
+    /// Reported with the new state when the control is toggled.
+    pub on_toggle: Handler<bool>,
     /// Font size of the label in logical points.
     pub size: f32,
     /// ARGB color of the label.
@@ -31,7 +33,7 @@ impl CheckProps {
         Self {
             label: label.into(),
             checked,
-            action: Cow::Borrowed(""),
+            on_toggle: Handler::none(),
             size: 16.0,
             color: 0xFF00_0000,
             weight: FontWeight::Normal,
@@ -40,19 +42,18 @@ impl CheckProps {
 }
 
 /// A native checkbox with a text label.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Checkbox(pub(crate) Element);
+pub struct Checkbox<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl Checkbox {
+impl<M> Checkbox<M> {
     /// Creates a checkbox with the given label and state.
     pub fn new(label: impl Into<String>, checked: bool) -> Self {
         let label = label.into();
-        let mut element = Element::leaf(ElementKind::Widget(Widget::Checkbox(CheckProps::new(
+        let mut element = RawElement::leaf(ElementKind::Widget(Widget::Checkbox(CheckProps::new(
             label.clone(),
             checked,
         ))));
         element.style.accessibility_label = Some(label);
-        Self(element)
+        Self(element, PhantomData)
     }
 
     /// Sets whether the checkbox is selected.
@@ -63,18 +64,21 @@ impl Checkbox {
         self
     }
 
-    /// Sets the action dispatched whenever the checkbox is toggled.
-    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+    /// Reports the new state when the control is toggled.
+    pub fn on_toggle(mut self, message: impl Fn(bool) -> M + Send + Sync + 'static) -> Self
+    where
+        M: 'static,
+    {
         if let ElementKind::Widget(Widget::Checkbox(props)) = &mut self.0.kind {
-            props.action = action.into();
+            props.on_toggle = Handler::new(message);
         }
         self
     }
 }
 
-impl From<Checkbox> for Element {
-    fn from(component: Checkbox) -> Self {
-        component.0
+impl<M> From<Checkbox<M>> for Element<M> {
+    fn from(component: Checkbox<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 
@@ -82,19 +86,17 @@ impl From<Checkbox> for Element {
 ///
 /// Radio buttons are independent controls; mutual exclusion is application
 /// state, usually a selected index rendered as one checked button.
-#[derive(Clone, Debug, PartialEq)]
-pub struct RadioButton(pub(crate) Element);
+pub struct RadioButton<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
-impl RadioButton {
+impl<M> RadioButton<M> {
     /// Creates a radio button with the given label and state.
     pub fn new(label: impl Into<String>, checked: bool) -> Self {
         let label = label.into();
-        let mut element = Element::leaf(ElementKind::Widget(Widget::RadioButton(CheckProps::new(
-            label.clone(),
-            checked,
-        ))));
+        let mut element = RawElement::leaf(ElementKind::Widget(Widget::RadioButton(
+            CheckProps::new(label.clone(), checked),
+        )));
         element.style.accessibility_label = Some(label);
-        Self(element)
+        Self(element, PhantomData)
     }
 
     /// Sets whether the radio button is selected.
@@ -105,18 +107,21 @@ impl RadioButton {
         self
     }
 
-    /// Sets the action dispatched whenever the radio button is selected.
-    pub fn action(mut self, action: impl Into<Cow<'static, str>>) -> Self {
+    /// Reports the new state when the control is toggled.
+    pub fn on_toggle(mut self, message: impl Fn(bool) -> M + Send + Sync + 'static) -> Self
+    where
+        M: 'static,
+    {
         if let ElementKind::Widget(Widget::RadioButton(props)) = &mut self.0.kind {
-            props.action = action.into();
+            props.on_toggle = Handler::new(message);
         }
         self
     }
 }
 
-impl From<RadioButton> for Element {
-    fn from(component: RadioButton) -> Self {
-        component.0
+impl<M> From<RadioButton<M>> for Element<M> {
+    fn from(component: RadioButton<M>) -> Self {
+        Element::from_raw(component.0)
     }
 }
 

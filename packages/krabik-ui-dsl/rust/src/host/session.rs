@@ -2,8 +2,9 @@
 
 use std::collections::HashMap;
 
-use crate::app::{App, Event};
+use crate::app::AnyApp;
 use crate::engine::tree::{self, NodeId};
+use crate::message::Message;
 use crate::navigation::Screen;
 use crate::presentation::Dialog;
 
@@ -15,7 +16,7 @@ pub(crate) const MAIN_HOST: u64 = 0;
 /// One application instance shared by every native host of an activity or
 /// scene.
 pub(crate) struct Session<P: Platform> {
-    app: Box<dyn App>,
+    app: Box<dyn AnyApp>,
     hosts: HashMap<u64, P::Host>,
     /// Hosts the controller was asked to create but has not attached yet.
     pending: HashMap<u64, HostKind>,
@@ -29,7 +30,7 @@ pub(crate) struct Session<P: Platform> {
 
 impl<P: Platform> Session<P> {
     /// Creates a session around the main host.
-    pub(crate) fn new(app: Box<dyn App>, main: P::Host) -> Self {
+    pub(crate) fn new(app: Box<dyn AnyApp>, main: P::Host) -> Self {
         let mut hosts = HashMap::new();
         hosts.insert(MAIN_HOST, main);
         Self {
@@ -115,11 +116,7 @@ impl<P: Platform> Session<P> {
         if self.controller.is_none() {
             return Ok(());
         }
-        let navigation = self
-            .app
-            .navigation()
-            .map(|navigation| navigation.screens)
-            .unwrap_or_default();
+        let navigation = self.app.navigation().unwrap_or_default();
         if navigation != self.navigation {
             self.sync_navigation(cx, &navigation)?;
             self.navigation = navigation;
@@ -240,74 +237,87 @@ impl<P: Platform> Session<P> {
             _ => {}
         }
 
-        let actions = actions_for::<P>(state, id);
-        let app = &mut self.app;
-        let handled = actions.is_some_and(|actions| actions.deliver(&event, |e| app.handle(e)));
-        if engine_changed || handled {
-            self.render_all(cx)?;
+        let message = actions_for::<P>(state, id).and_then(|actions| actions.message(&event));
+        match message {
+            Some(message) => self.update(cx, message),
+            None if engine_changed => self.render_all(cx),
+            None => Ok(()),
         }
-        Ok(())
+    }
+
+    /// Applies a message to the application and shows the result.
+    fn update(&mut self, cx: &mut P::Cx<'_>, message: Message) -> Result<(), P::Error> {
+        self.app.update(message);
+        self.render_all(cx)
     }
 
     /// The system back action. Returns whether the application consumed it.
     pub(crate) fn back(&mut self, cx: &mut P::Cx<'_>) -> Result<bool, P::Error> {
-        let handled = self.app.handle(Event::Back);
-        if handled {
-            self.render_all(cx)?;
+        match self.app.back() {
+            Some(message) => {
+                self.update(cx, message)?;
+                Ok(true)
+            }
+            None => Ok(false),
         }
-        Ok(handled)
     }
 
-    /// A toolbar item was tapped.
+    /// The toolbar item at `index` was tapped.
     pub(crate) fn toolbar_action(
         &mut self,
         cx: &mut P::Cx<'_>,
-        action: &str,
+        index: usize,
     ) -> Result<(), P::Error> {
-        if self.app.handle(Event::Click { action }) {
-            self.render_all(cx)?;
+        // Handlers are read from the application's current state, never from
+        // the copy last sent to the platform.
+        let message = self.app.navigation().and_then(|screens| {
+            let toolbar = screens.last()?.toolbar.as_ref()?;
+            toolbar.actions.get(index)?.on_tap.message(())
+        });
+        match message {
+            Some(message) => self.update(cx, message),
+            None => Ok(()),
         }
-        Ok(())
     }
 
-    /// The system alert closed, by a button (`action`) or by the platform
-    /// (the cancel action, possibly empty).
+    /// The system alert closed: by the button at `button`, or by the platform
+    /// itself (`None`), which counts as the cancel button.
     ///
     /// The platform has already closed the alert, so the session forgets it
     /// first: if the application still returns a dialog, it is shown again.
     pub(crate) fn dialog_closed(
         &mut self,
         cx: &mut P::Cx<'_>,
-        action: &str,
+        button: Option<usize>,
     ) -> Result<(), P::Error> {
         self.dialog = None;
-        if !action.is_empty() {
-            self.app.handle(Event::Click { action });
+        let message = self.app.dialog().and_then(|dialog| {
+            let button = match button {
+                Some(index) => dialog.buttons.get(index),
+                None => dialog.cancel_button(),
+            };
+            button?.on_tap.message(())
+        });
+        if let Some(message) = message {
+            self.app.update(message);
         }
         self.render_all(cx)
     }
 
-    /// The user picked a destination in the bottom navigation bar.
+    /// The user picked the destination at `index` in the bottom navigation bar.
     pub(crate) fn bottom_navigation_selected(
         &mut self,
         cx: &mut P::Cx<'_>,
         index: usize,
     ) -> Result<(), P::Error> {
-        let action = self
-            .navigation
-            .last()
-            .and_then(|screen| screen.bottom_navigation.as_ref())
-            .map(|bar| bar.action.clone())
-            .filter(|action| !action.is_empty());
-        if let Some(action) = action
-            && self.app.handle(Event::Selected {
-                action: &action,
-                index,
-            })
-        {
-            self.render_all(cx)?;
+        let message = self.app.navigation().and_then(|screens| {
+            let bar = screens.last()?.bottom_navigation.as_ref()?;
+            bar.on_select.message(index)
+        });
+        match message {
+            Some(message) => self.update(cx, message),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     /// The user dismissed the bottom sheet natively (swipe, back, scrim).
@@ -316,10 +326,12 @@ impl<P: Platform> Session<P> {
     /// first: if the application still returns a sheet, it is presented again.
     pub(crate) fn sheet_dismissed(&mut self, cx: &mut P::Cx<'_>) -> Result<(), P::Error> {
         self.forget_sheet();
-        if let Some(sheet) = self.app.sheet() {
-            self.app.handle(Event::Click {
-                action: &sheet.dismiss_action,
-            });
+        let message = self
+            .app
+            .sheet()
+            .and_then(|sheet| sheet.on_dismiss.message(()));
+        if let Some(message) = message {
+            self.app.update(message);
         }
         self.render_all(cx)
     }
@@ -370,7 +382,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use crate::element::Element;
+    use crate::app::{App, Component};
+    use crate::element::{Element, RawElement};
     use crate::engine::geometry::Size;
     use crate::engine::measure::ApproximateMeasure;
     use crate::engine::runtime::Runtime;
@@ -422,7 +435,7 @@ mod tests {
         fn row_of(&self, _id: NodeId) -> Option<(NodeId, usize)> {
             None
         }
-        fn render(&mut self, _cx: &mut (), element: &Element) -> Result<(), Infallible> {
+        fn render(&mut self, _cx: &mut (), element: &RawElement) -> Result<(), Infallible> {
             self.runtime.update(element, Size::new(320.0, 640.0));
             self.renders += 1;
             Ok(())
@@ -502,31 +515,36 @@ mod tests {
         }
     }
 
-    impl App for TestApp {
-        fn view(&self) -> Element {
+    #[derive(Clone, Debug, PartialEq)]
+    enum Msg {
+        Tap,
+        CloseDialog,
+        CloseSheet,
+        Back,
+    }
+
+    impl Component for TestApp {
+        type Msg = Msg;
+
+        fn view(&self) -> Element<Msg> {
             Column::new().into()
         }
 
-        fn handle(&mut self, event: Event<'_>) -> bool {
+        fn update(&mut self, msg: Msg) {
             let mut state = self.state();
-            match event {
-                Event::Click { action: "tap" } => state.clicks += 1,
-                Event::Click { action: "close" } => state.dialog = state.sticky_dialog,
-                Event::Click {
-                    action: "sheet:close",
-                } => state.sheet = false,
-                Event::Back => {
-                    if state.stack.len() <= 1 {
-                        return false;
-                    }
+            match msg {
+                Msg::Tap => state.clicks += 1,
+                Msg::CloseDialog => state.dialog = state.sticky_dialog,
+                Msg::CloseSheet => state.sheet = false,
+                Msg::Back => {
                     state.stack.pop();
                 }
-                _ => return false,
             }
-            true
         }
+    }
 
-        fn navigation(&self) -> Option<Navigation> {
+    impl App for TestApp {
+        fn navigation(&self) -> Option<Navigation<Msg>> {
             let state = self.state();
             Some(Navigation::new(
                 state
@@ -545,23 +563,29 @@ mod tests {
             ))
         }
 
-        fn screen(&self, _key: &str) -> Option<Element> {
+        fn screen(&self, _key: &str) -> Option<Element<Msg>> {
             Some(
                 Column::new()
                     .child(Text::new(format!("clicks {}", self.state().clicks)))
-                    .child(Button::new("Tap").action("tap"))
+                    .child(Button::new("Tap").on_click(Msg::Tap))
                     .into(),
             )
         }
 
-        fn dialog(&self) -> Option<Dialog> {
+        fn dialog(&self) -> Option<Dialog<Msg>> {
             self.state()
                 .dialog
-                .then(|| Dialog::new("Sure?").cancel("No", "close"))
+                .then(|| Dialog::new("Sure?").cancel("No", Msg::CloseDialog))
         }
 
-        fn sheet(&self) -> Option<BottomSheet> {
-            self.state().sheet.then(|| BottomSheet::new("sheet:close"))
+        fn sheet(&self) -> Option<BottomSheet<Msg>> {
+            self.state()
+                .sheet
+                .then(|| BottomSheet::new().on_dismiss(Msg::CloseSheet))
+        }
+
+        fn back(&self) -> Option<Msg> {
+            (self.state().stack.len() > 1).then_some(Msg::Back)
         }
     }
 
@@ -698,13 +722,13 @@ mod tests {
         assert!(take(&log).contains(&"dialog Sure?".to_string()));
 
         // The platform closed the alert; the app still wants it.
-        session.dialog_closed(&mut (), "close").unwrap();
+        session.dialog_closed(&mut (), None).unwrap();
         assert_eq!(take(&log), ["dialog Sure?"]);
 
         // The app lets go: nothing more to show, and nothing to dismiss
         // because the platform already closed it.
         app.state().sticky_dialog = false;
-        session.dialog_closed(&mut (), "close").unwrap();
+        session.dialog_closed(&mut (), None).unwrap();
         assert!(take(&log).is_empty());
     }
 

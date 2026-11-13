@@ -34,6 +34,7 @@ pub use text_field::*;
 
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
+use crate::message::Wrap;
 
 /// A leaf widget: one native view with no children of its own.
 ///
@@ -88,6 +89,26 @@ impl Widget {
             Self::Spinner(_) => 17,
             Self::DatePicker(_) => 18,
             Self::TabBar(_) => 19,
+        }
+    }
+
+    /// Re-wraps every message the widget can produce; see
+    /// [`Element::map`](crate::element::Element::map).
+    pub(crate) fn map_messages(&mut self, wrap: &Wrap) {
+        match self {
+            Self::Button(props) => props.on_click.map(wrap),
+            Self::TextField(props) => {
+                props.on_change.map(wrap);
+                props.on_submit.map(wrap);
+                props.on_focus.map(wrap);
+            }
+            Self::Switch(props) => props.on_toggle.map(wrap),
+            Self::Checkbox(props) | Self::RadioButton(props) => props.on_toggle.map(wrap),
+            Self::RadioGroup(props) => props.on_select.map(wrap),
+            Self::TabBar(props) => props.on_select.map(wrap),
+            Self::DatePicker(props) => props.on_change.map(wrap),
+            Self::Slider(props) => props.on_change.map(wrap),
+            Self::Text(_) | Self::Progress(_) | Self::Spinner(_) | Self::Image(_) => {}
         }
     }
 

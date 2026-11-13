@@ -13,6 +13,7 @@ pub mod engine;
 pub mod gallery;
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 mod host;
+mod message;
 pub mod navigation;
 pub mod presentation;
 pub mod style;
@@ -29,7 +30,7 @@ mod animation;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod frame_batch;
 
-pub use app::{App, create_app, set_app_factory};
+pub use app::{App, Component, set_app_factory};
 // The engine modules keep their short public paths, e.g. `krabik_ui_dsl::runtime`.
 pub use engine::{geometry, layout, measure, render, runtime, tree};
 pub use gallery::GalleryApp;

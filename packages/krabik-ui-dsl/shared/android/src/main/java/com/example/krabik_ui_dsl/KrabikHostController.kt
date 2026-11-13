@@ -41,7 +41,6 @@ class KrabikHostController(
      * button can never pop a screen without Rust knowing.
      */
     private val screens = ArrayList<KrabikScreenFragment>()
-    private var toolbarActions: List<String> = emptyList()
     private var dialog: Dialog? = null
     private var lastPopAnimated = false
     private val hideNavigation = Runnable {
@@ -61,13 +60,8 @@ class KrabikHostController(
             main.onBackPressed()
         }
         toolbar.setOnMenuItemClickListener { item ->
-            val action = toolbarActions.getOrNull(item.itemId - ACTION_ID_BASE)
-            if (action != null) {
-                main.onToolbarAction(action)
-                true
-            } else {
-                false
-            }
+            main.onToolbarAction(item.itemId - ACTION_ID_BASE)
+            true
         }
         setRootVisible(true)
         // Register last: this synchronously syncs the session, which may push
@@ -187,11 +181,9 @@ class KrabikHostController(
         subtitle: String,
         backTitle: String,
         hidden: Boolean,
-        actionIds: Array<String>,
         actionLabels: Array<String>,
         actionIcons: Array<String>,
     ) {
-        toolbarActions = actionIds.toList()
         toolbar.title = title
         toolbar.subtitle = subtitle.ifEmpty { null }
         if (screens.size > 1) {
@@ -223,7 +215,7 @@ class KrabikHostController(
                     contentDescription = actionLabels[index]
                     isClickable = true
                     setOnClickListener {
-                        main.onToolbarAction(toolbarActions[index])
+                        main.onToolbarAction(index)
                     }
                 }
                 row.addView(
@@ -262,16 +254,15 @@ class KrabikHostController(
 
     /**
      * Shows the system alert. [roles] holds one code per button: 0 default,
-     * 1 cancel, 2 destructive. An empty [dismissAction] means the alert can
-     * only be closed with a button.
+     * 1 cancel, 2 destructive. Buttons report their index; a dismissal by back
+     * or an outside tap, allowed only when [cancelable], reports -1.
      */
     fun showDialog(
         title: String,
         message: String,
         labels: Array<String>,
         roles: IntArray,
-        actions: Array<String>,
-        dismissAction: String,
+        cancelable: Boolean,
     ) {
         dismissDialog()
         val builder = MaterialAlertDialogBuilder(activity).setTitle(title)
@@ -285,10 +276,9 @@ class KrabikHostController(
         var positiveUsed = false
         var neutralUsed = false
         for (index in labels.indices) {
-            val action = actions[index]
             val listener = DialogInterface.OnClickListener { _, _ ->
                 dialog = null
-                main.onDialogAction(action)
+                main.onDialogAction(index)
             }
             val slot = when {
                 roles[index] == ROLE_CANCEL -> DialogInterface.BUTTON_NEGATIVE
@@ -312,10 +302,10 @@ class KrabikHostController(
             }
         }
 
-        builder.setCancelable(dismissAction.isNotEmpty())
+        builder.setCancelable(cancelable)
         builder.setOnCancelListener {
             dialog = null
-            main.onDialogAction(dismissAction)
+            main.onDialogAction(DISMISSED)
         }
         val alert: AlertDialog = builder.show()
         if (destructiveSlot != 0) {
@@ -363,5 +353,6 @@ class KrabikHostController(
         const val ROLE_CANCEL = 1
         const val ROLE_DESTRUCTIVE = 2
         const val ACTION_ID_BASE = 0x1000
+        const val DISMISSED = -1
     }
 }

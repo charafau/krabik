@@ -14,7 +14,6 @@ final class KrabikHostController: UIViewController {
     private let tabBar = UITabBar()
     private var tabLabels: [String] = []
     private var tabIcons: [String] = []
-    private var toolbarActions: [String] = []
     private weak var alert: UIAlertController?
     private weak var sheet: UIViewController?
     /// The sheet host waiting for its deferred presentation, if any.
@@ -125,11 +124,9 @@ final class KrabikHostController: UIViewController {
         subtitle: String,
         backTitle: String,
         hidden: Bool,
-        actionIds: [String],
         actionLabels: [String],
         actionIcons: [String]
     ) {
-        toolbarActions = actionIds
         guard let top = navigation.viewControllers.last else { return }
 
         if subtitle.isEmpty {
@@ -191,6 +188,7 @@ final class KrabikHostController: UIViewController {
     }
 
     @objc private func toolbarTapped(_ sender: Any) {
+        // Each item's tag is its index in the screen's toolbar actions.
         let index: Int
         if let item = sender as? UIBarButtonItem {
             index = item.tag
@@ -199,10 +197,7 @@ final class KrabikHostController: UIViewController {
         } else {
             return
         }
-        guard toolbarActions.indices.contains(index) else { return }
-        toolbarActions[index].withCString { action in
-            krabik_ios_on_toolbar_action(session, action)
-        }
+        krabik_ios_on_toolbar_action(session, UInt64(index))
     }
 
     private func toolbarImage(_ name: String) -> UIImage? {
@@ -247,13 +242,12 @@ final class KrabikHostController: UIViewController {
     // MARK: - Dialog
 
     /// Shows the system alert. `roles` holds one code per button: 0 default,
-    /// 1 cancel, 2 destructive.
+    /// 1 cancel, 2 destructive. A pressed button reports its index.
     @objc func krabikShowDialog(
         _ title: String,
         message: String,
         labels: [String],
-        roles: [NSNumber],
-        actions: [String]
+        roles: [NSNumber]
     ) {
         krabikDismissDialog()
         let alert = UIAlertController(
@@ -275,15 +269,14 @@ final class KrabikHostController: UIViewController {
             default:
                 style = .default
             }
-            let action = actions.indices.contains(index) ? actions[index] : ""
             alert.addAction(UIAlertAction(title: labels[index], style: style) { [weak self] _ in
-                self?.dialogClosed(action)
+                self?.dialogClosed(button: index)
             })
         }
         if labels.isEmpty {
             // An alert without buttons could never be closed.
             alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
-                self?.dialogClosed("")
+                self?.dialogClosed(button: -1)
             })
         }
         self.alert = alert
@@ -296,11 +289,9 @@ final class KrabikHostController: UIViewController {
         alert = nil
     }
 
-    private func dialogClosed(_ action: String) {
+    private func dialogClosed(button: Int) {
         alert = nil
-        action.withCString { action in
-            krabik_ios_on_dialog_action(session, action)
-        }
+        krabik_ios_on_dialog_action(session, Int64(button))
     }
 
     // MARK: - Sheet

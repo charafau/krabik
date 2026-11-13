@@ -1,6 +1,9 @@
 //! The `list` widget: properties and builder.
 
-use crate::element::{Element, ElementKind};
+use std::marker::PhantomData;
+
+use crate::element::{Element, ElementKind, RawElement};
+use crate::message::Wrap;
 use crate::style::{IntoPoints, Length};
 use std::fmt;
 use std::sync::Arc;
@@ -32,7 +35,7 @@ pub(crate) struct ListProps {
     /// Cross-fade duration for a holder rebind, in milliseconds.
     pub(crate) row_transition_ms: u32,
     pub(crate) keys: Arc<dyn Fn(usize) -> String + Send + Sync>,
-    pub(crate) rows: Arc<dyn Fn(usize) -> Element + Send + Sync>,
+    pub(crate) rows: Arc<dyn Fn(usize) -> RawElement + Send + Sync>,
 }
 
 impl fmt::Debug for ListProps {
@@ -61,11 +64,24 @@ impl PartialEq for ListProps {
     }
 }
 
+impl ListProps {
+    /// Re-wraps the messages of every row the list builds.
+    pub(crate) fn map_messages(&mut self, wrap: &Wrap) {
+        let rows = Arc::clone(&self.rows);
+        let wrap = Arc::clone(wrap);
+        self.rows = Arc::new(move |index| {
+            let mut row = rows(index);
+            row.map_messages(&wrap);
+            row
+        });
+    }
+}
+
 /// Derives the key of one list item.
 type KeyBuilder<T> = Box<dyn Fn(&T) -> String + Send + Sync>;
 
 /// Builds the element of one list item.
-type RowBuilder<T> = Box<dyn Fn(&T) -> Element + Send + Sync>;
+type RowBuilder<T> = Box<dyn Fn(&T) -> RawElement + Send + Sync>;
 
 /// A virtualized vertical list.
 ///
@@ -76,7 +92,8 @@ type RowBuilder<T> = Box<dyn Fn(&T) -> Element + Send + Sync>;
 ///
 /// Keys must be unique among the items; they keep a row's native view alive
 /// while it scrolls through the window.
-pub struct List<T> {
+pub struct List<T, M = ()> {
+    message: PhantomData<fn() -> M>,
     items: Arc<Vec<T>>,
     mode: ListMode,
     item_height: Option<f32>,
@@ -88,12 +105,13 @@ pub struct List<T> {
     row: Option<RowBuilder<T>>,
 }
 
-impl<T: Send + Sync + 'static> List<T> {
+impl<T: Send + Sync + 'static, M> List<T, M> {
     /// Creates a list over the given items.
     ///
     /// Pass an `Arc<Vec<_>>` to avoid copying the data on every rebuild.
     pub fn new(items: impl Into<Arc<Vec<T>>>) -> Self {
         Self {
+            message: PhantomData,
             items: items.into(),
             mode: ListMode::Windowed,
             item_height: None,
@@ -177,14 +195,14 @@ impl<T: Send + Sync + 'static> List<T> {
     }
 
     /// Builds the element of one item. Called only for visible items.
-    pub fn row(mut self, row: impl Fn(&T) -> Element + Send + Sync + 'static) -> Self {
-        self.row = Some(Box::new(row));
+    pub fn row(mut self, row: impl Fn(&T) -> Element<M> + Send + Sync + 'static) -> Self {
+        self.row = Some(Box::new(move |item| row(item).into_raw()));
         self
     }
 }
 
-impl<T: Send + Sync + 'static> From<List<T>> for Element {
-    fn from(list: List<T>) -> Self {
+impl<T: Send + Sync + 'static, M> From<List<T, M>> for Element<M> {
+    fn from(list: List<T, M>) -> Self {
         let key = list.key.expect("List::key must be set");
         let row = list.row.expect("List::row must be set");
         let items = list.items;
@@ -197,10 +215,10 @@ impl<T: Send + Sync + 'static> From<List<T>> for Element {
         let rows = {
             let items = Arc::clone(&items);
             Arc::new(move |index: usize| row(&items[index]))
-                as Arc<dyn Fn(usize) -> Element + Send + Sync>
+                as Arc<dyn Fn(usize) -> RawElement + Send + Sync>
         };
 
-        let mut element = Element::container(ElementKind::List(ListProps {
+        let mut element = RawElement::container(ElementKind::List(ListProps {
             item_count: items.len(),
             mode: list.mode,
             item_height: list.item_height,
@@ -215,6 +233,12 @@ impl<T: Send + Sync + 'static> From<List<T>> for Element {
         // leaves and spans the cross axis.
         element.style.width = Length::Percent(1.0);
         element.style.grow = 1.0;
-        element
+        Element::from_raw(element)
+    }
+}
+
+impl<T: Send + Sync + 'static> From<List<T, ()>> for RawElement {
+    fn from(list: List<T, ()>) -> Self {
+        Element::from(list).into_raw()
     }
 }
