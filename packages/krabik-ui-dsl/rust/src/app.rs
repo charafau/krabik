@@ -146,13 +146,17 @@ pub fn set_app_factory<A: App>(factory: impl Fn() -> A + Send + Sync + 'static) 
     let _ = APP_FACTORY.set(Box::new(move || Box::new(factory())));
 }
 
-/// Creates a new application instance.
+/// Creates a new instance of the registered application.
 ///
-/// Uses the registered factory if one exists, otherwise the built-in gallery.
+/// # Panics
+///
+/// Panics when no application was registered: the host must call the app's
+/// install function (which calls [`set_app_factory`]) before it creates the
+/// first root view.
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 pub(crate) fn create_app() -> Box<dyn AnyApp> {
-    match APP_FACTORY.get() {
-        Some(factory) => factory(),
-        None => Box::new(crate::gallery::GalleryApp::default()),
-    }
+    let factory = APP_FACTORY.get().expect(
+        "krabik: no application registered; call set_app_factory before creating a root view",
+    );
+    factory()
 }

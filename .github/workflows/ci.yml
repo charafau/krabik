@@ -32,15 +32,17 @@ jobs:
       # the UI example is a standalone project, outside the workspace
       - run: cargo fmt --manifest-path packages/krabik-ui-android/example/rust/Cargo.toml --check
       - run: cargo clippy --manifest-path packages/krabik-ui-android/example/rust/Cargo.toml --all-targets -- -D warnings
-      # the UI DSL is a generated project with its own workspace
+      # the UI DSL library is a standalone project, outside the workspace
       - run: cargo fmt --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --all --check
       - run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml
-      # the DSL example is a standalone project, outside the workspace
+      # each DSL app (the dev harness and the examples) is its own project
+      - run: cargo fmt --manifest-path packages/krabik-ui-dsl/harness/rust/Cargo.toml --check
+      - run: cargo clippy --manifest-path packages/krabik-ui-dsl/harness/rust/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path packages/krabik-ui-dsl/harness/rust/Cargo.toml
       - run: cargo fmt --manifest-path packages/krabik-ui-dsl/example/rust/Cargo.toml --check
       - run: cargo clippy --manifest-path packages/krabik-ui-dsl/example/rust/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path packages/krabik-ui-dsl/example/rust/Cargo.toml
-      # the todo examples are standalone projects too
       - run: cargo fmt --manifest-path packages/krabik-ui-dsl/example-todo/rust/Cargo.toml --check
       - run: cargo clippy --manifest-path packages/krabik-ui-dsl/example-todo/rust/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path packages/krabik-ui-dsl/example-todo/rust/Cargo.toml
@@ -73,12 +75,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
-      # the DSL crate and the example crate are separate workspaces, so point
-      # the cache at both
+      # the DSL library and each app crate are separate workspaces, so point
+      # the cache at all of them
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             packages/krabik-ui-dsl/rust
+            packages/krabik-ui-dsl/harness/rust
             packages/krabik-ui-dsl/example/rust
             packages/krabik-ui-dsl/example-todo/rust
             packages/krabik-ui-dsl/example-todo-minimal/rust
@@ -92,8 +95,8 @@ jobs:
           packages: platforms;android-37.0 build-tools;37.0.0 ndk;27.2.12479018
       - uses: gradle/actions/setup-gradle@v6
       # arm64 is the production ABI; building it also compiles the Kotlin and JNI code
-      - name: Assemble debug APK
-        working-directory: packages/krabik-ui-dsl/android
+      - name: Assemble the dev harness debug APK
+        working-directory: packages/krabik-ui-dsl/harness/android
         run: ./gradlew :app:assembleDebug --no-daemon -PkrabikAbis=arm64-v8a
       # the example shell is a separate Gradle project; building it also proves
       # the example cdylib exports the JNI install entry point the app loads
@@ -119,14 +122,15 @@ jobs:
         with:
           workspaces: |
             packages/krabik-ui-dsl/rust
+            packages/krabik-ui-dsl/harness/rust
             packages/krabik-ui-dsl/example/rust
             packages/krabik-ui-dsl/example-todo/rust
             packages/krabik-ui-dsl/example-todo-minimal/rust
       # lints the iOS renderer, which the `check` job never compiles because
       # it runs on Linux and macOS hosts, not the iOS target
       - run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --target aarch64-apple-ios-sim -- -D warnings
-      - name: Build the static library
-        working-directory: packages/krabik-ui-dsl/rust
+      - name: Build the dev harness static library
+        working-directory: packages/krabik-ui-dsl/harness/rust
         run: cargo build --target aarch64-apple-ios-sim
       - name: Build the example static library
         working-directory: packages/krabik-ui-dsl/example/rust

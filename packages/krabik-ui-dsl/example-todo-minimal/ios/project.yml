@@ -1,3 +1,6 @@
+# The Xcode project is generated from this file: run `xcodegen generate` here
+# after changing it. The generated project is committed so the app builds
+# without XcodeGen.
 name: KrabikUiDslTodoMinimal
 options:
   bundleIdPrefix: com.example
@@ -13,6 +16,9 @@ settings:
     CODE_SIGNING_ALLOWED: NO
     INFOPLIST_KEY_UILaunchScreen_Generation: YES
     INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+    # The Rust build phase runs cargo, which reads and writes outside the
+    # script's declared inputs.
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
 
 targets:
   KrabikUiDslTodoMinimal:
@@ -20,11 +26,25 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+      # The Swift host shared by every app.
+      - path: ../../shared/ios
+    preBuildScripts:
+      # Builds ../rust so the app never links a stale library.
+      - name: Build Rust library
+        basedOnDependencyAnalysis: false
+        script: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cd "$SRCROOT/../rust"
+          if [ "$CONFIGURATION" = "Release" ]; then
+            cargo build --target "$RUST_TARGET" --release
+          else
+            cargo build --target "$RUST_TARGET"
+          fi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.krabik-ui-dsl-todo-minimal
         PRODUCT_NAME: KrabikUiDslTodoMinimal
-        SWIFT_OBJC_BRIDGING_HEADER: Sources/KrabikIOS.h
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridging.h
         LIBRARY_SEARCH_PATHS:
           - $(SRCROOT)/../rust/target/$(RUST_TARGET)/$(CONFIGURATION:lower)
         OTHER_LDFLAGS:

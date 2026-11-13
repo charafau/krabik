@@ -166,7 +166,7 @@ impl ShowcaseApp {
     /// Registers the showcase as the global application factory.
     ///
     /// The host shell calls this once at startup, before creating the root
-    /// view. Without it the platform views fall back to the built-in gallery.
+    /// view; the framework has no application until one is registered.
     pub fn install() {
         set_app_factory(Self::new);
     }

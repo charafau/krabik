@@ -5,8 +5,8 @@ import dev.krabik.ui.*
  * Installs the todo showcase app.
  *
  * [MainActivity] loads `krabik_ui_dsl_todo` first, then calls [install] before
- * any [RustRootView] is created; without it the renderer falls back to the
- * built-in gallery.
+ * any [RustRootView] is created: the framework has no application until one
+ * is registered.
  */
 object TodoBridge {
     /** Registers the todo app factory with the DSL runtime. */
