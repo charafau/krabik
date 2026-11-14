@@ -207,7 +207,7 @@ for native chrome around it:
 
 ```rust,ignore
 pub trait App: Component + Send + 'static {
-    fn navigation(&self) -> Option<Navigation> { None }
+    fn navigation(&self) -> Option<Navigation<Self::Msg>> { None }
     fn screen(&self, _key: &str) -> Option<Scaffold<Self::Msg>> { None }
     fn dialog(&self) -> Option<Dialog<Self::Msg>> { None }
     fn sheet(&self) -> Option<BottomSheet<Self::Msg>> { None }

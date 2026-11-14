@@ -155,9 +155,12 @@ impl Controller<Ios> for IosController {
         Ok(())
     }
 
-    fn set_back_enabled(&self, _: &mut MainThreadMarker, _enabled: bool) -> Result<(), Infallible> {
-        // iOS has no system back action; the navigation bar's back button
-        // asks the session directly.
+    fn set_back_enabled(&self, _: &mut MainThreadMarker, enabled: bool) -> Result<(), Infallible> {
+        // The navigation bar's back button asks the session directly. The
+        // swipe-back gesture is UIKit's own, so it is only armed while the
+        // application handles back.
+        // SAFETY: see `controller_push`.
+        let _: () = unsafe { objc2::msg_send![&*self.0, krabikSetBackEnabled: enabled] };
         Ok(())
     }
 

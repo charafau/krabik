@@ -616,12 +616,6 @@ source, not all reproduced on a device.
 
 ### Behaviour
 
-- **Route keys must be unique in a stack.** A screen's host is found by its key, so the same key
-  twice makes one pop drop both. Documented on `Route`; not enforced.
-- **Nothing pops unless the app implements `App::back`.** The app bar's back arrow goes through
-  the same path as the system back action. iOS swipe-back is disabled.
-- **Chrome needs navigation.** Without `navigation()`, there is no app bar, floating button,
-  drawer or snackbar; a single-screen app needs a one-route stack to get them.
 - **Style on an undecorated container can be dropped.** A plain `Column`, `Row` or `Spacer` has
   no native view, so `enabled`, `accessibility_label` and animations set only on it reach
   nothing, and `enabled(false)` is not inherited by children.

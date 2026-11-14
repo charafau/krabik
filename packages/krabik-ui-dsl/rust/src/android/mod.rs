@@ -135,7 +135,7 @@ where
                         env.exception_describe();
                         env.exception_clear();
                     }
-                    eprintln!("{operation} failed: {error}");
+                    crate::log::error(&format!("{operation} failed: {error}"));
                     Ok(T::default())
                 }
             }

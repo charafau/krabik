@@ -12,12 +12,12 @@ use std::sync::Arc;
 use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
+use krabik_ui_dsl::scaffold::{AppBar, Scaffold};
 use krabik_ui_dsl::ui::{
     Align, Button, Checkbox, Color, Column, EdgeInsets, Element, List, Row, Spacer, Text, TextField,
 };
 use krabik_ui_dsl::view;
 
-const COLOR_TEXT: Color = Color::adaptive(0xFF20_2125, 0xFFE8_EAED);
 const COLOR_MUTED: Color = Color::adaptive(0xFF66_6666, 0xFFA0_A4A8);
 const COLOR_SURFACE: Color = Color::adaptive(0xFFF4_F4F4, 0xFF2A_2B2E);
 const COLOR_DONE: Color = Color::adaptive(0xFFE6_F4EA, 0xFF1E_3A2A);
@@ -192,7 +192,6 @@ impl Component for MinimalTodoApp {
                 height_percent: 1.0,
                 align_items: Align::Start,
             ) {
-                Text("Todo", size: 30, color: COLOR_TEXT, bold)
                 caption(&self.summary())
                 Row(width_percent: 1.0, spacing: 8, align_items: Align::Center) {
                     TextField(
@@ -224,7 +223,17 @@ impl Component for MinimalTodoApp {
     }
 }
 
-impl App for MinimalTodoApp {}
+impl App for MinimalTodoApp {
+    /// One screen with a native app bar. Without a navigation stack the
+    /// chrome is described here and the body is the component's view.
+    fn scaffold(&self) -> Option<Scaffold<Msg>> {
+        Some(
+            Scaffold::new()
+                .app_bar(AppBar::new("Todo"))
+                .body(self.view()),
+        )
+    }
+}
 
 fn todo_row(row: &TodoRow) -> Element<Msg> {
     let id = row.id;

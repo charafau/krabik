@@ -14,6 +14,10 @@ final class KrabikHostController: UIViewController {
     private var navigation: UINavigationController!
     private let tabBar = UITabBar()
     private var tabLabels: [String] = []
+    /// How many pushed screens Rust believes are on the stack.
+    private var expectedScreens = 0
+    /// Whether Rust handles the back action right now.
+    private var backEnabled = false
     private var tabIcons: [String] = []
     private weak var alert: UIAlertController?
     private weak var sheet: UIViewController?
@@ -61,7 +65,12 @@ final class KrabikHostController: UIViewController {
 
         navigation = UINavigationController(rootViewController: hostController(mainHost))
         navigation.setNavigationBarHidden(true, animated: false)
-        navigation.interactivePopGestureRecognizer?.isEnabled = false
+        // The swipe-back gesture is the one place UIKit changes the stack
+        // by itself. It is allowed only while Rust says back is available,
+        // and Rust is told when the gesture completes; see
+        // `navigationController(_:didShow:animated:)`.
+        navigation.delegate = self
+        navigation.interactivePopGestureRecognizer?.delegate = self
 
         addChild(navigation)
         navigation.view.frame = view.bounds
@@ -98,6 +107,7 @@ final class KrabikHostController: UIViewController {
         // Rust owns the stack, so the system back button (which pops on its
         // own) is replaced by one that asks Rust. The first screen has none.
         vc.navigationItem.hidesBackButton = true
+        expectedScreens += 1
         if navigation.viewControllers.count > 1 {
             let back = UIBarButtonItem(
                 image: UIImage(systemName: "chevron.backward"),
@@ -127,6 +137,9 @@ final class KrabikHostController: UIViewController {
         let controllers = navigation.viewControllers
         guard count > 0, controllers.count > 1 else { return }
         let target = controllers[max(0, controllers.count - 1 - count)]
+        // Counted before the pop, so `didShow` can tell this pop from one
+        // the user made.
+        expectedScreens = max(0, expectedScreens - count)
         switch transition {
         case 1:
             addFadeTransition()
@@ -203,10 +216,8 @@ final class KrabikHostController: UIViewController {
             }
         }
         top.navigationItem.rightBarButtonItems = items
-        navigation.setNavigationBarHidden(
-            hidden || navigation.viewControllers.count <= 1,
-            animated: false
-        )
+        // An app without a navigation stack shows its bar on the root.
+        navigation.setNavigationBarHidden(hidden, animated: false)
     }
 
     @objc private func toolbarTapped(_ sender: Any) {
@@ -349,7 +360,9 @@ final class KrabikHostController: UIViewController {
     /// button in that place.
     private func updateMenuButton() {
         let controllers = navigation.viewControllers
-        guard controllers.count == 2, let root = controllers.last else { return }
+        // The root screen is the main host when the app has no navigation
+        // stack, and the first pushed screen when it has one.
+        guard controllers.count <= 2, let root = controllers.last else { return }
         if drawerPresent {
             let menu = UIBarButtonItem(
                 image: UIImage(systemName: "line.3.horizontal"),
@@ -370,7 +383,7 @@ final class KrabikHostController: UIViewController {
 
     @objc private func edgePanned(_ gesture: UIScreenEdgePanGestureRecognizer) {
         // On a pushed screen the leading edge belongs to "back".
-        if gesture.state == .began, navigation.viewControllers.count == 2 {
+        if gesture.state == .began, navigation.viewControllers.count <= 2 {
             openDrawerForUser()
         }
     }
@@ -596,6 +609,38 @@ final class KrabikHostController: UIViewController {
 
     @objc private func backTapped() {
         _ = krabik_ios_on_back(session)
+    }
+
+    /// Whether Rust currently handles back. Arms the swipe-back gesture.
+    @objc func krabikSetBackEnabled(_ enabled: Bool) {
+        backEnabled = enabled
+    }
+}
+
+extension KrabikHostController: UINavigationControllerDelegate, UIGestureRecognizerDelegate {
+    /// The swipe-back gesture may start on a pushed screen while the
+    /// application handles back. The first screen of the stack sits on the
+    /// hidden main host and is never swiped away.
+    func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        guard gesture === navigation.interactivePopGestureRecognizer else { return true }
+        return backEnabled && navigation.viewControllers.count > 2
+    }
+
+    /// Fewer screens than Rust asked for means the user completed the
+    /// swipe-back gesture. A cancelled gesture leaves the count alone.
+    func navigationController(
+        _ navigationController: UINavigationController,
+        didShow viewController: UIViewController,
+        animated: Bool
+    ) {
+        let shown = navigation.viewControllers.count - 1
+        guard shown < expectedScreens else { return }
+        expectedScreens = shown
+        // Never from inside a call Rust made into this controller.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.session != 0 else { return }
+            krabik_ios_on_native_pop(self.session)
+        }
     }
 }
 

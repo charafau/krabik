@@ -153,7 +153,8 @@ override func viewDidLoad() {
 
     navigation = UINavigationController(rootViewController: hostController(mainHost))
     navigation.setNavigationBarHidden(true, animated: false)
-    navigation.interactivePopGestureRecognizer?.isEnabled = false
+    navigation.delegate = self
+    navigation.interactivePopGestureRecognizer?.delegate = self
     // ... add as child; install the tab bar, FAB and drawer
 
     krabik_ios_set_controller(session, Unmanaged.passUnretained(self).toOpaque())
@@ -205,9 +206,43 @@ is `krabik_ios_on_back(session)`. Rust runs `App::back()`, the app updates its s
 session then calls `krabikPop`. This is the same reason the Android shell does not use the
 fragment back stack.
 
-For the same reason the interactive pop gesture (swipe from the left edge) is disabled. That is a
-real loss of native feel: there is no swipe-back on iOS. Supporting it would mean letting UIKit
-start the pop and reconciling with Rust afterwards.
+**The swipe-back gesture is the exception.** Swiping from the left edge is UIKit's own gesture:
+it removes the view controller before any code of ours runs. It is too much a part of iOS to
+leave out, so it is allowed under two conditions and reconciled afterwards.
+
+```swift
+// shared/ios/KrabikHostController.swift
+func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+    guard gesture === navigation.interactivePopGestureRecognizer else { return true }
+    return backEnabled && navigation.viewControllers.count > 2
+}
+
+func navigationController(_ navigationController: UINavigationController,
+                          didShow viewController: UIViewController, animated: Bool) {
+    let shown = navigation.viewControllers.count - 1
+    guard shown < expectedScreens else { return }
+    expectedScreens = shown
+    DispatchQueue.main.async { [weak self] in
+        guard let self, self.session != 0 else { return }
+        krabik_ios_on_native_pop(self.session)
+    }
+}
+```
+
+- The gesture may begin only while Rust says the application handles back (`krabikSetBackEnabled`,
+  sent from `Controller::set_back_enabled`) and only on a screen above the first one. The first
+  screen sits on the hidden main host and must not be swiped away.
+- The controller counts the screens Rust asked for (`expectedScreens`, changed in `krabikPush` and
+  `krabikPop`). When a transition ends with fewer screens than that, the user completed the
+  gesture, and Rust is told with `krabik_ios_on_native_pop`. An abandoned gesture ends with the
+  same count and reports nothing. The call is deferred to the next main-loop turn so it can never
+  run inside a call Rust made into the controller.
+
+In Rust, `Session::native_pop` applies the rule used for a dismissed dialog (chapter 8 of the
+internals): record what the platform now shows, send the application its back message, render,
+and if the application still wants the screen, show it again, this time without animation.
+`testSwipeBackKeepsTheStackInStep` in the example app covers a completed gesture, an abandoned
+one and the first screen.
 
 Transitions: code 0 is the system slide, code 1 adds a `CATransition` fade to the navigation
 controller's layer and pushes without animation, code 2 pushes without animation.
@@ -462,7 +497,6 @@ folders are `Resources/` (bundled assets, loaded by `load_asset` in `rust/src/io
 ## Rough edges in this directory
 
 - File name `RustRootView.swift`, class name `RustHostView`.
-- No swipe-back gesture.
 - `AppBar`'s back title has no effect; the back button's accessibility label is fixed.
 - The value `krabik_ios_on_back` returns is discarded.
 - The sheet's height is fixed at presentation.

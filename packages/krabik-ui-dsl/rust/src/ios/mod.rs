@@ -161,7 +161,7 @@ pub(crate) fn guard(label: &str, body: impl FnOnce()) {
             Some(exception) => format!("{exception:?}"),
             None => "nil exception".to_string(),
         };
-        eprintln!("krabik ios: {label} handler raised an exception: {message}");
+        crate::log::error(&format!("{label} handler raised an exception: {message}"));
     }
 }
 

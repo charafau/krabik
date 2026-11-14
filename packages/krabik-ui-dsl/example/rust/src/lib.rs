@@ -290,14 +290,17 @@ impl Component for ShowcaseApp {
 }
 
 impl App for ShowcaseApp {
-    fn navigation(&self) -> Option<Navigation> {
-        Some(Navigation::new(self.stack.iter().map(|key| {
+    fn navigation(&self) -> Option<Navigation<Self::Msg>> {
+        let routes = self.stack.iter().map(|key| {
             Route::new(*key).transition(match *key {
                 "transition-fade" => ScreenTransition::Fade,
                 "transition-none" => ScreenTransition::None,
                 _ => ScreenTransition::Slide,
             })
-        })))
+        });
+        // Back leaves the top screen; on the catalog the platform leaves
+        // the app.
+        Some(Navigation::new(routes).on_back(Msg::Back))
     }
 
     fn screen(&self, key: &str) -> Option<Scaffold<Msg>> {
@@ -330,10 +333,10 @@ impl App for ShowcaseApp {
         self.sheet_open.then(pages::sheet)
     }
 
-    /// Back is ours while something can be closed; on the catalog with
-    /// nothing open, the platform leaves the app.
+    /// Back first closes whatever is open on top of the screen, also on the
+    /// catalog. Leaving a screen is `Navigation::on_back`.
     fn back(&self) -> Option<Msg> {
-        (self.dialog_open || self.sheet_open || self.stack.len() > 1).then_some(Msg::Back)
+        (self.dialog_open || self.sheet_open).then_some(Msg::Back)
     }
 }
 
@@ -386,7 +389,10 @@ mod tests {
         assert_eq!(app.stack, vec!["home", "radio-group"]);
         assert!(app.screen("radio-group").is_some());
         app.update(Msg::Open("radio-group"));
-        app.update(app.back().expect("back is handled"));
+        // Leaving a screen is the stack's own back message.
+        assert!(app.navigation().unwrap().on_back.is_set());
+        assert_eq!(app.back(), None);
+        app.update(Msg::Back);
         assert_eq!(app.stack, vec!["home"]);
         app.update(Msg::Open("checklist"));
         assert!(app.screen("checklist").is_some());

@@ -64,7 +64,17 @@ pub trait App: Component + Send + 'static {
     /// The application owns this state; the runtime mirrors it with native
     /// navigation controllers. With navigation, [`Component::view`] is not
     /// shown: the first screen is the root.
-    fn navigation(&self) -> Option<Navigation> {
+    fn navigation(&self) -> Option<Navigation<Self::Msg>> {
+        None
+    }
+
+    /// The native chrome around [`Component::view`] for an app without a
+    /// navigation stack: an app bar, a floating action button, a drawer, a
+    /// snackbar. The scaffold's body is shown in place of `view`.
+    ///
+    /// Not used when [`App::navigation`] returns a stack; each screen then
+    /// brings its own scaffold.
+    fn scaffold(&self) -> Option<Scaffold<Self::Msg>> {
         None
     }
 
@@ -89,6 +99,10 @@ pub trait App: Component + Send + 'static {
 
     /// The message to send for the system back action, or `None` to let the
     /// platform handle it (which leaves the app from its root screen).
+    ///
+    /// An app with a navigation stack usually sets
+    /// [`Navigation::on_back`] instead; this method is for other rules, such
+    /// as closing an in-page panel first. When it returns `Some`, it wins.
     fn back(&self) -> Option<Self::Msg> {
         None
     }
@@ -100,6 +114,9 @@ pub(crate) trait AnyApp: Send {
     fn update(&mut self, message: Message);
     fn navigation(&self) -> Option<Vec<Route>>;
     fn screen(&self, key: &str) -> Option<(RawElement, Chrome)>;
+    /// The content and chrome of an app without navigation that has a
+    /// scaffold.
+    fn scaffold(&self) -> Option<(RawElement, Chrome)>;
     fn dialog(&self) -> Option<Dialog>;
     fn sheet(&self) -> Option<BottomSheet>;
     fn back(&self) -> Option<Message>;
@@ -118,7 +135,11 @@ impl<A: App> AnyApp for A {
     }
 
     fn navigation(&self) -> Option<Vec<Route>> {
-        App::navigation(self).map(|navigation| navigation.routes)
+        App::navigation(self).map(|navigation| unique_routes(navigation.routes))
+    }
+
+    fn scaffold(&self) -> Option<(RawElement, Chrome)> {
+        App::scaffold(self).map(Scaffold::erase)
     }
 
     fn screen(&self, key: &str) -> Option<(RawElement, Chrome)> {
@@ -134,8 +155,38 @@ impl<A: App> AnyApp for A {
     }
 
     fn back(&self) -> Option<Message> {
-        App::back(self).map(|message| Box::new(message) as Message)
+        if let Some(message) = App::back(self) {
+            return Some(Box::new(message));
+        }
+        let navigation = App::navigation(self)?;
+        if navigation.routes.len() > 1 {
+            navigation.on_back.message(())
+        } else {
+            None
+        }
     }
+}
+
+/// Keeps the first route of every key.
+///
+/// A screen's native host is found by its key, so a key that appears twice
+/// would make one pop drop both screens. That is a mistake in the
+/// application: debug builds stop there, release builds report it and show
+/// the stack without the repeated route.
+fn unique_routes(mut routes: Vec<Route>) -> Vec<Route> {
+    let mut seen = std::collections::HashSet::new();
+    let before = routes.len();
+    routes.retain(|route| seen.insert(route.key.clone()));
+    if routes.len() != before {
+        debug_assert!(
+            false,
+            "a navigation stack contains the same route key twice; keys must be unique"
+        );
+        crate::log::error(
+            "a navigation stack contains the same route key twice; ignoring the repeat",
+        );
+    }
+    routes
 }
 
 type AppFactory = Box<dyn Fn() -> Box<dyn AnyApp> + Send + Sync>;

@@ -202,7 +202,7 @@ impl Measure for AndroidMeasure {
             .vm
             .attach_current_thread(|env| self.measure_with(env, text, constraints))
             .unwrap_or_else(|error| {
-                eprintln!("text measurement failed: {error}");
+                crate::log::error(&format!("text measurement failed: {error}"));
                 Size::ZERO
             });
 
@@ -218,7 +218,7 @@ impl Measure for AndroidMeasure {
             return size;
         }
         let size = self.measure_switch().unwrap_or_else(|error| {
-            eprintln!("switch measurement failed: {error}");
+            crate::log::error(&format!("switch measurement failed: {error}"));
             Size::new(DEFAULT_SWITCH_WIDTH, DEFAULT_SWITCH_HEIGHT)
         });
         *self.switch_size.lock().expect("switch size cache") = Some(size);
@@ -239,7 +239,7 @@ impl Measure for AndroidMeasure {
             return cached;
         }
         let size = self.measure_image(path).unwrap_or_else(|error| {
-            eprintln!("image measurement failed: {error}");
+            crate::log::error(&format!("image measurement failed: {error}"));
             None
         });
         self.image_sizes

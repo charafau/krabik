@@ -296,6 +296,22 @@ pub unsafe extern "C" fn krabik_ios_on_back(handle: u64) -> bool {
     handled
 }
 
+/// The user completed the swipe-back gesture; UIKit already removed the top
+/// screen.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_native_pop(handle: u64) {
+    let Some(mut mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    guard("native pop", || {
+        with_session(handle, |session| infallible(session.native_pop(&mut mtm)));
+    });
+}
+
 /// The user acted on the floating action button, the drawer or the snackbar.
 ///
 /// `kind` and `index` are decoded by `ChromeEvent::from_code`.

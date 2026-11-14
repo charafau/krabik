@@ -160,19 +160,48 @@ impl<M> BottomNavigation<M> {
 }
 
 /// The visible navigation stack, ordered from the root to the active screen.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Navigation {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Navigation<M = ()> {
     /// The routes currently in the stack.
     pub routes: Vec<Route>,
+    /// Sent for the back action while more than one screen is on the stack.
+    pub on_back: Handler<()>,
+    marker: PhantomData<fn() -> M>,
 }
 
-impl Navigation {
+impl<M> Default for Navigation<M> {
+    fn default() -> Self {
+        Self {
+            routes: Vec::new(),
+            on_back: Handler::none(),
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<M> Navigation<M> {
     /// Creates a navigation stack from its routes. Plain keys work too:
     /// `Navigation::new(["home", "detail"])`.
     pub fn new(routes: impl IntoIterator<Item = impl Into<Route>>) -> Self {
         Self {
             routes: routes.into_iter().map(Into::into).collect(),
+            ..Self::default()
         }
+    }
+
+    /// Sends `message` for the back action: the system back button or
+    /// gesture, and the back arrow in the app bar. The application answers
+    /// by removing the top route.
+    ///
+    /// It applies while more than one route is on the stack; on the root
+    /// screen the platform leaves the app. An application that needs another
+    /// rule implements [`App::back`](crate::app::App::back), which wins.
+    pub fn on_back(mut self, message: M) -> Self
+    where
+        M: Clone + Send + Sync + 'static,
+    {
+        self.on_back = Handler::new(move |()| message.clone());
+        self
     }
 
     /// The routes in the stack.
@@ -208,12 +237,12 @@ mod tests {
     #[test]
     fn a_stack_can_be_written_as_plain_keys() {
         let stack = vec!["home".to_owned(), "detail".to_owned()];
-        let navigation = Navigation::new(&stack);
+        let navigation: Navigation = Navigation::new(&stack);
         assert_eq!(
             navigation.routes(),
             [Route::new("home"), Route::new("detail")]
         );
-        assert_eq!(Navigation::new(["home"]).routes().len(), 1);
+        assert_eq!(Navigation::<()>::new(["home"]).routes().len(), 1);
     }
 
     #[test]

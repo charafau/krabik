@@ -20,6 +20,7 @@ pub mod engine;
 // so its tests run on the host.
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 mod host;
+mod log;
 mod message;
 pub mod navigation;
 pub mod presentation;

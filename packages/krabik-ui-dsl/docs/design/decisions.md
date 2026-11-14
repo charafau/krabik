@@ -110,10 +110,11 @@ did. They never decide.
 **Why.** If the native side could pop a screen by itself, Rust would have to be told afterwards
 and the two could disagree in between. So on Android the fragment back stack is not used at all
 (screens are fragments added and removed by hand), and on iOS the navigation bar's own back
-button is replaced by one that asks Rust.
+button is replaced by one that asks Rust. The iOS swipe-back gesture cannot be replaced, so it is
+armed only while the application handles back and falls under the rule below.
 
 **The one place the platform acts first.** A user can swipe a sheet away, tap outside an alert,
-let a snackbar time out or drag a drawer shut. The platform has already done it by the time Rust
+let a snackbar time out, drag a drawer shut or, on iOS, swipe a screen back. The platform has already done it by the time Rust
 hears. The rule for all of them is the same: record what the platform now shows, send the
 application its message, render, and if the application still says the thing should be visible,
 show it again.

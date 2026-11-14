@@ -39,6 +39,10 @@ pub(crate) struct Session<P: Platform> {
     navigation_synced: bool,
     /// The appearance every host resolves its colours for.
     scheme: ColorScheme,
+    /// The platform changed the screen stack by itself. The next sync sends
+    /// the chrome even if it is equal, and shows a screen the application
+    /// kept without animating it back in.
+    native_pop: bool,
 }
 
 impl<P: Platform> Session<P> {
@@ -59,6 +63,7 @@ impl<P: Platform> Session<P> {
             back_enabled: false,
             navigation_synced: false,
             scheme: ColorScheme::Light,
+            native_pop: false,
         }
     }
 
@@ -130,7 +135,10 @@ impl<P: Platform> Session<P> {
             let element = match host.kind() {
                 // A navigation app shows its root as the first screen.
                 HostKind::Main if has_navigation => None,
-                HostKind::Main => Some(self.app.view()),
+                HostKind::Main => Some(match self.app.scaffold() {
+                    Some((body, _)) => body,
+                    None => self.app.view(),
+                }),
                 HostKind::Screen(key) => self.app.screen(key).map(|(body, _)| body),
                 HostKind::Sheet => self.app.sheet().map(|sheet| sheet.into_content()),
             };
@@ -149,12 +157,13 @@ impl<P: Platform> Session<P> {
             return Ok(());
         }
         let navigation = self.app.navigation().unwrap_or_default();
+        let native_pop = std::mem::take(&mut self.native_pop);
         let navigated = navigation != self.navigation;
         if navigated {
-            self.sync_navigation(cx, &navigation)?;
+            self.sync_navigation(cx, &navigation, native_pop)?;
             self.navigation = navigation;
         }
-        self.sync_chrome(cx, navigated)?;
+        self.sync_chrome(cx, navigated || native_pop)?;
         let dialog = self.app.dialog();
         if dialog != self.dialog {
             self.sync_dialog(cx, dialog.as_ref())?;
@@ -175,13 +184,14 @@ impl<P: Platform> Session<P> {
     }
 
     /// The chrome of the screen on top of the stack, read from the
-    /// application's current state. Empty without navigation.
+    /// application's current state. Without navigation it is the chrome of
+    /// the application's own scaffold, if it has one.
     fn top_chrome(&self) -> Chrome {
-        self.app
-            .navigation()
-            .and_then(|routes| routes.last().and_then(|route| self.app.screen(&route.key)))
-            .map(|(_, chrome)| chrome)
-            .unwrap_or_default()
+        let screen = match self.app.navigation() {
+            Some(routes) => routes.last().and_then(|route| self.app.screen(&route.key)),
+            None => self.app.scaffold(),
+        };
+        screen.map(|(_, chrome)| chrome).unwrap_or_default()
     }
 
     /// Mirrors the top screen's chrome and snackbar.
@@ -208,7 +218,12 @@ impl<P: Platform> Session<P> {
         Ok(())
     }
 
-    fn sync_navigation(&mut self, cx: &mut P::Cx<'_>, screens: &[Route]) -> Result<(), P::Error> {
+    fn sync_navigation(
+        &mut self,
+        cx: &mut P::Cx<'_>,
+        screens: &[Route],
+        quiet: bool,
+    ) -> Result<(), P::Error> {
         let Some(controller) = self.controller.as_ref() else {
             return Ok(());
         };
@@ -233,7 +248,7 @@ impl<P: Platform> Session<P> {
         // The first stack the controller receives is where the application
         // already is, for example after the activity was recreated. It is
         // shown, not replayed as a series of animated pushes.
-        let restoring = !std::mem::replace(&mut self.navigation_synced, true);
+        let restoring = !std::mem::replace(&mut self.navigation_synced, true) || quiet;
         for screen in &screens[common..] {
             let host = self.next_host;
             self.next_host += 1;
@@ -357,6 +372,26 @@ impl<P: Platform> Session<P> {
             }
             None => Ok(false),
         }
+    }
+
+    /// The platform removed the top screen by itself: the user completed
+    /// the system's back gesture.
+    ///
+    /// The session records the stack the platform now shows and sends the
+    /// back message. An application that keeps the screen gets it back, the
+    /// way a dialog it keeps is shown again.
+    #[cfg_attr(not(any(test, target_os = "ios")), allow(dead_code))]
+    pub(crate) fn native_pop(&mut self, cx: &mut P::Cx<'_>) -> Result<(), P::Error> {
+        if let Some(route) = self.navigation.pop() {
+            let kind = HostKind::Screen(route.key);
+            self.hosts.retain(|_, host| *host.kind() != kind);
+            self.pending.retain(|_, pending| *pending != kind);
+        }
+        self.native_pop = true;
+        if let Some(message) = self.app.back() {
+            self.app.update(message);
+        }
+        self.render_all(cx)
     }
 
     /// The toolbar item at `index` was tapped.
@@ -719,6 +754,10 @@ mod tests {
         locked: bool,
         /// The selected bottom navigation destination, when there is a bar.
         tab: Option<usize>,
+        /// Leaves the back action to `Navigation::on_back`.
+        on_back: bool,
+        /// Keeps the top screen when asked to go back.
+        stay: bool,
     }
 
     /// An application whose state the test can also change from outside,
@@ -768,7 +807,9 @@ mod tests {
                 Msg::CloseDialog => state.dialog = state.sticky_dialog,
                 Msg::CloseSheet => state.sheet = false,
                 Msg::Back => {
-                    state.stack.pop();
+                    if !state.stay {
+                        state.stack.pop();
+                    }
                 }
                 Msg::Fab => state.clicks += 10,
                 Msg::Go(index) => {
@@ -797,8 +838,14 @@ mod tests {
     }
 
     impl App for TestApp {
-        fn navigation(&self) -> Option<Navigation> {
-            Some(Navigation::new(&self.state().stack))
+        fn navigation(&self) -> Option<Navigation<Msg>> {
+            let state = self.state();
+            let navigation = Navigation::new(&state.stack);
+            Some(if state.on_back {
+                navigation.on_back(Msg::Back)
+            } else {
+                navigation
+            })
         }
 
         fn screen(&self, key: &str) -> Option<Scaffold<Msg>> {
@@ -856,7 +903,8 @@ mod tests {
         }
 
         fn back(&self) -> Option<Msg> {
-            (self.state().stack.len() > 1).then_some(Msg::Back)
+            let state = self.state();
+            (!state.on_back && state.stack.len() > 1).then_some(Msg::Back)
         }
     }
 
@@ -1296,5 +1344,124 @@ mod tests {
         session.bottom_navigation_selected(&mut (), 1).unwrap();
         assert_eq!(app.state().tab, Some(1));
         assert!(take(&log).is_empty());
+    }
+
+    #[test]
+    fn navigation_can_name_the_back_message() {
+        let (mut session, app, log) = on_home(State {
+            on_back: true,
+            ..State::default()
+        });
+        // On the root screen the platform keeps the back action.
+        assert!(!session.back(&mut ()).unwrap());
+
+        app.state().stack.push("detail");
+        session.render_all(&mut ()).unwrap();
+        attach_pending(&mut session);
+        assert!(take(&log).contains(&"back true".to_string()));
+
+        assert!(session.back(&mut ()).unwrap());
+        assert_eq!(app.state().stack, ["home"]);
+        assert!(take(&log).contains(&"pop 1 Slide".to_string()));
+    }
+
+    #[test]
+    fn a_screen_the_platform_popped_is_not_popped_again() {
+        let (mut session, app, log) = on_home(State::default());
+        app.state().stack.push("detail");
+        session.render_all(&mut ()).unwrap();
+        attach_pending(&mut session);
+        take(&log);
+
+        // The user completed the system's back gesture: the screen is gone
+        // already. The application follows, so only the chrome of the screen
+        // that is now on top is sent.
+        session.native_pop(&mut ()).unwrap();
+        assert_eq!(app.state().stack, ["home"]);
+        assert_eq!(take(&log), ["chrome HOME", "back false"]);
+        assert!(
+            !session
+                .hosts
+                .values()
+                .any(|host| host.kind == HostKind::Screen("detail".into()))
+        );
+    }
+
+    #[test]
+    fn a_screen_the_application_keeps_is_shown_again() {
+        let (mut session, app, log) = on_home(State {
+            stay: true,
+            ..State::default()
+        });
+        app.state().stack.push("detail");
+        session.render_all(&mut ()).unwrap();
+        attach_pending(&mut session);
+        take(&log);
+
+        session.native_pop(&mut ()).unwrap();
+        assert_eq!(app.state().stack, ["home", "detail"]);
+        // Put back at once, not slid in a second time.
+        assert_eq!(
+            take(&log),
+            ["push 3 detail instantly", "root false", "chrome DETAIL"]
+        );
+    }
+
+    /// An application with one screen and native chrome around it.
+    struct Single;
+
+    impl Component for Single {
+        type Msg = Msg;
+
+        fn view(&self) -> Element<Msg> {
+            Text::new("unused").into()
+        }
+
+        fn update(&mut self, _msg: Msg) {}
+    }
+
+    impl App for Single {
+        fn scaffold(&self) -> Option<Scaffold<Msg>> {
+            Some(
+                Scaffold::new()
+                    .app_bar(AppBar::new("Notes"))
+                    .body(Text::new("body"))
+                    .floating_action_button(Fab::new("Add").on_click(Msg::Fab)),
+            )
+        }
+    }
+
+    #[test]
+    fn an_application_without_navigation_can_have_chrome() {
+        let log = Log::default();
+        let mut session = Session::<Fake>::new(Box::new(Single), FakeHost::new(HostKind::Main));
+        session.set_controller(FakeController(log.clone()));
+        session.render_all(&mut ()).unwrap();
+
+        assert_eq!(take(&log), ["chrome Notes fab:Add"]);
+        // The scaffold's body is what the main host shows.
+        let texts: Vec<String> = tree::preorder(session.hosts[&MAIN_HOST].runtime.tree())
+            .into_iter()
+            .filter_map(|node| match &node.kind {
+                NodeKind::Widget(Widget::Text(props)) => Some(props.content.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["body"]);
+    }
+
+    #[test]
+    #[cfg_attr(debug_assertions, should_panic(expected = "same route key twice"))]
+    fn a_repeated_route_key_is_refused() {
+        let (mut session, _app, log) = session(State {
+            stack: vec!["home", "detail", "home"],
+            ..State::default()
+        });
+        session.render_all(&mut ()).unwrap();
+        // Release builds show the stack without the repeat.
+        assert_eq!(
+            take(&log)[..2],
+            ["push 1 home instantly", "push 2 detail instantly"]
+        );
     }
 }
