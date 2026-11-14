@@ -3,8 +3,9 @@
 use crate::element::RawElement;
 use crate::engine::runtime::Runtime;
 use crate::engine::tree::NodeId;
-use crate::navigation::{Screen, ScreenTransition};
+use crate::navigation::{Route, ScreenTransition};
 use crate::presentation::Dialog;
+use crate::scaffold::{Chrome, Snackbar};
 
 use super::Actions;
 
@@ -56,7 +57,7 @@ pub(crate) trait Host<P: Platform> {
 /// carries it out.
 pub(crate) trait Controller<P: Platform> {
     /// Pushes a screen whose content is rendered by host `host`.
-    fn push(&self, cx: &mut P::Cx<'_>, host: u64, screen: &Screen) -> Result<(), P::Error>;
+    fn push(&self, cx: &mut P::Cx<'_>, host: u64, route: &Route) -> Result<(), P::Error>;
     /// Pops `count` screens in one step with the top screen's transition.
     fn pop(
         &self,
@@ -66,8 +67,14 @@ pub(crate) trait Controller<P: Platform> {
     ) -> Result<(), P::Error>;
     /// Shows the main root (no navigation) or the screen stack.
     fn set_root_visible(&self, cx: &mut P::Cx<'_>, visible: bool) -> Result<(), P::Error>;
-    /// Applies the top screen's toolbar and bottom navigation; `None` hides both.
-    fn set_chrome(&self, cx: &mut P::Cx<'_>, screen: Option<&Screen>) -> Result<(), P::Error>;
+    /// Applies the top screen's app bar, bottom navigation, floating action
+    /// button and drawer. An empty chrome hides all of them. The snackbar is
+    /// not part of this call.
+    fn set_chrome(&self, cx: &mut P::Cx<'_>, chrome: &Chrome) -> Result<(), P::Error>;
+    /// Shows a snackbar, replacing any that is up.
+    fn show_snackbar(&self, cx: &mut P::Cx<'_>, snackbar: &Snackbar) -> Result<(), P::Error>;
+    /// Removes the snackbar without reporting back.
+    fn dismiss_snackbar(&self, cx: &mut P::Cx<'_>) -> Result<(), P::Error>;
     /// Tells the platform whether the application currently handles the
     /// system back action. When it does not, the platform's own behaviour
     /// (leaving the app, with its predictive animation) applies.
@@ -80,4 +87,37 @@ pub(crate) trait Controller<P: Platform> {
     fn present_sheet(&self, cx: &mut P::Cx<'_>, host: u64) -> Result<(), P::Error>;
     /// Dismisses the bottom sheet without reporting back.
     fn dismiss_sheet(&self, cx: &mut P::Cx<'_>) -> Result<(), P::Error>;
+}
+
+/// Something the user did to the native chrome of the top screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChromeEvent {
+    /// The floating action button was pressed.
+    Fab,
+    /// A drawer destination was picked.
+    DrawerSelected(usize),
+    /// The user opened the drawer.
+    DrawerOpened,
+    /// The user closed the drawer.
+    DrawerClosed,
+    /// The snackbar's action was pressed, which also removes it.
+    SnackbarAction,
+    /// The snackbar timed out or was swiped away.
+    SnackbarDismissed,
+}
+
+impl ChromeEvent {
+    /// Decodes the event from the two numbers the platforms report.
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    pub(crate) fn from_code(kind: i64, index: i64) -> Option<Self> {
+        Some(match kind {
+            0 => Self::Fab,
+            1 => Self::DrawerSelected(usize::try_from(index).ok()?),
+            2 => Self::DrawerOpened,
+            3 => Self::DrawerClosed,
+            4 => Self::SnackbarAction,
+            5 => Self::SnackbarDismissed,
+            _ => return None,
+        })
+    }
 }

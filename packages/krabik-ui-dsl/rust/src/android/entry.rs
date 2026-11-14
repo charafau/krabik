@@ -6,6 +6,7 @@ use crate::android::host::AndroidState;
 use crate::android::run;
 use crate::app::AnyApp;
 use crate::geometry::Size;
+use crate::host::ChromeEvent;
 use crate::host::{HostKind, NodeEvent, Session};
 use crate::style::ColorScheme;
 use crate::tree::NodeId;
@@ -584,6 +585,25 @@ pub extern "system" fn native_unbind_row<'caller>(
             }
             Ok(())
         })
+    });
+}
+
+/// The user acted on the floating action button, the drawer or the snackbar.
+///
+/// `kind` and `index` are decoded by `ChromeEvent::from_code`.
+#[unsafe(export_name = native_name!("nativeOnChromeEvent"))]
+pub extern "system" fn native_on_chrome_event<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    kind: jint,
+    index: jint,
+) {
+    run(&mut unenv, "nativeOnChromeEvent", |env| {
+        let Some(event) = ChromeEvent::from_code(kind.into(), index.into()) else {
+            return Ok(());
+        };
+        on_event(handle, |session| session.core.chrome_event(env, event))
     });
 }
 

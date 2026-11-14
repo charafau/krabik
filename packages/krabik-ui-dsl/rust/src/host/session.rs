@@ -5,11 +5,12 @@ use std::collections::HashMap;
 use crate::app::AnyApp;
 use crate::engine::tree::{self, NodeId};
 use crate::message::Message;
-use crate::navigation::{Screen, ScreenTransition};
+use crate::navigation::{Route, ScreenTransition};
 use crate::presentation::Dialog;
+use crate::scaffold::{Chrome, Snackbar};
 use crate::style::ColorScheme;
 
-use super::{Actions, Controller, Host, HostKind, NodeEvent, Platform};
+use super::{Actions, ChromeEvent, Controller, Host, HostKind, NodeEvent, Platform};
 
 /// The identifier of the main host, which exists for the whole session.
 pub(crate) const MAIN_HOST: u64 = 0;
@@ -24,7 +25,12 @@ pub(crate) struct Session<P: Platform> {
     next_host: u64,
     controller: Option<P::Controller>,
     /// The navigation stack last mirrored to the controller.
-    navigation: Vec<Screen>,
+    navigation: Vec<Route>,
+    /// The top screen's chrome as the controller last received it, without
+    /// the snackbar.
+    chrome: Chrome,
+    /// The snackbar the controller is showing.
+    snackbar: Option<Snackbar>,
     /// The alert the controller is showing.
     dialog: Option<Dialog>,
     /// Whether the controller was last told that back is handled here.
@@ -47,6 +53,8 @@ impl<P: Platform> Session<P> {
             next_host: MAIN_HOST + 1,
             controller: None,
             navigation: Vec::new(),
+            chrome: Chrome::default(),
+            snackbar: None,
             dialog: None,
             back_enabled: false,
             navigation_synced: false,
@@ -123,7 +131,7 @@ impl<P: Platform> Session<P> {
                 // A navigation app shows its root as the first screen.
                 HostKind::Main if has_navigation => None,
                 HostKind::Main => Some(self.app.view()),
-                HostKind::Screen(key) => self.app.screen(key),
+                HostKind::Screen(key) => self.app.screen(key).map(|(body, _)| body),
                 HostKind::Sheet => self.app.sheet().map(|sheet| sheet.into_content()),
             };
             if let Some(element) = element {
@@ -141,10 +149,12 @@ impl<P: Platform> Session<P> {
             return Ok(());
         }
         let navigation = self.app.navigation().unwrap_or_default();
-        if navigation != self.navigation {
+        let navigated = navigation != self.navigation;
+        if navigated {
             self.sync_navigation(cx, &navigation)?;
             self.navigation = navigation;
         }
+        self.sync_chrome(cx, navigated)?;
         let dialog = self.app.dialog();
         if dialog != self.dialog {
             self.sync_dialog(cx, dialog.as_ref())?;
@@ -164,7 +174,41 @@ impl<P: Platform> Session<P> {
         Ok(())
     }
 
-    fn sync_navigation(&mut self, cx: &mut P::Cx<'_>, screens: &[Screen]) -> Result<(), P::Error> {
+    /// The chrome of the screen on top of the stack, read from the
+    /// application's current state. Empty without navigation.
+    fn top_chrome(&self) -> Chrome {
+        self.app
+            .navigation()
+            .and_then(|routes| routes.last().and_then(|route| self.app.screen(&route.key)))
+            .map(|(_, chrome)| chrome)
+            .unwrap_or_default()
+    }
+
+    /// Mirrors the top screen's chrome and snackbar.
+    ///
+    /// The chrome is resent after every navigation change, even when it is
+    /// equal, so the native bars never keep a previous screen's state.
+    fn sync_chrome(&mut self, cx: &mut P::Cx<'_>, navigated: bool) -> Result<(), P::Error> {
+        let Some(controller) = self.controller.as_ref() else {
+            return Ok(());
+        };
+        let mut chrome = self.top_chrome();
+        let snackbar = chrome.snackbar.take();
+        if navigated || chrome != self.chrome {
+            controller.set_chrome(cx, &chrome)?;
+            self.chrome = chrome;
+        }
+        if snackbar != self.snackbar {
+            match &snackbar {
+                Some(snackbar) => controller.show_snackbar(cx, snackbar)?,
+                None => controller.dismiss_snackbar(cx)?,
+            }
+            self.snackbar = snackbar;
+        }
+        Ok(())
+    }
+
+    fn sync_navigation(&mut self, cx: &mut P::Cx<'_>, screens: &[Route]) -> Result<(), P::Error> {
         let Some(controller) = self.controller.as_ref() else {
             return Ok(());
         };
@@ -203,10 +247,7 @@ impl<P: Platform> Session<P> {
                 controller.push(cx, host, screen)?;
             }
         }
-        controller.set_root_visible(cx, screens.is_empty())?;
-        // Sent on every navigation change, so the native chrome never keeps a
-        // previous screen's toolbar or bottom navigation.
-        controller.set_chrome(cx, screens.last())
+        controller.set_root_visible(cx, screens.is_empty())
     }
 
     fn sync_dialog(&mut self, cx: &mut P::Cx<'_>, dialog: Option<&Dialog>) -> Result<(), P::Error> {
@@ -311,10 +352,10 @@ impl<P: Platform> Session<P> {
     ) -> Result<(), P::Error> {
         // Handlers are read from the application's current state, never from
         // the copy last sent to the platform.
-        let message = self.app.navigation().and_then(|screens| {
-            let toolbar = screens.last()?.toolbar.as_ref()?;
-            toolbar.actions.get(index)?.on_tap.message(())
-        });
+        let message = self
+            .top_chrome()
+            .app_bar
+            .and_then(|bar| bar.actions.get(index)?.on_tap.message(()));
         match message {
             Some(message) => self.update(cx, message),
             None => Ok(()),
@@ -345,16 +386,69 @@ impl<P: Platform> Session<P> {
         self.render_all(cx)
     }
 
+    /// The user acted on the floating action button, the drawer or the
+    /// snackbar of the top screen.
+    pub(crate) fn chrome_event(
+        &mut self,
+        cx: &mut P::Cx<'_>,
+        event: ChromeEvent,
+    ) -> Result<(), P::Error> {
+        // Handlers are read from the application's current state.
+        let chrome = self.top_chrome();
+        let message = match event {
+            ChromeEvent::Fab => chrome
+                .floating_action_button
+                .and_then(|fab| fab.on_click.message(())),
+            ChromeEvent::DrawerSelected(index) => chrome
+                .drawer
+                .and_then(|drawer| drawer.on_select.message(index)),
+            ChromeEvent::DrawerOpened | ChromeEvent::DrawerClosed => {
+                // The platform changed the drawer by itself. Remember what it
+                // shows now, so the sync below corrects it if the application
+                // still says otherwise.
+                let open = event == ChromeEvent::DrawerOpened;
+                if let Some(shown) = &mut self.chrome.drawer {
+                    shown.open = open;
+                }
+                chrome.drawer.and_then(|drawer| {
+                    let handler = if open {
+                        drawer.on_open
+                    } else {
+                        drawer.on_close
+                    };
+                    handler.message(())
+                })
+            }
+            ChromeEvent::SnackbarAction | ChromeEvent::SnackbarDismissed => {
+                // The platform removed the snackbar; if the application keeps
+                // returning it, the sync below shows it again.
+                self.snackbar = None;
+                chrome.snackbar.and_then(|snackbar| {
+                    let handler = if event == ChromeEvent::SnackbarAction {
+                        snackbar.on_action
+                    } else {
+                        snackbar.on_dismiss
+                    };
+                    handler.message(())
+                })
+            }
+        };
+        if let Some(message) = message {
+            self.app.update(message);
+        }
+        self.render_all(cx)
+    }
+
     /// The user picked the destination at `index` in the bottom navigation bar.
     pub(crate) fn bottom_navigation_selected(
         &mut self,
         cx: &mut P::Cx<'_>,
         index: usize,
     ) -> Result<(), P::Error> {
-        let message = self.app.navigation().and_then(|screens| {
-            let bar = screens.last()?.bottom_navigation.as_ref()?;
-            bar.on_select.message(index)
-        });
+        let message = self
+            .top_chrome()
+            .bottom_navigation
+            .and_then(|bar| bar.on_select.message(index));
         match message {
             Some(message) => self.update(cx, message),
             None => Ok(()),
@@ -428,8 +522,9 @@ mod tests {
     use crate::engine::geometry::Size;
     use crate::engine::measure::ApproximateMeasure;
     use crate::engine::runtime::Runtime;
-    use crate::navigation::{Navigation, ScreenTransition, Toolbar};
+    use crate::navigation::Navigation;
     use crate::presentation::BottomSheet;
+    use crate::scaffold::{AppBar, Drawer, DrawerItem, Fab, Scaffold};
     use crate::ui::{Button, Column, Text};
 
     /// Records what the session asks the platform to do.
@@ -486,7 +581,7 @@ mod tests {
     struct FakeController(Log);
 
     impl Controller<Fake> for FakeController {
-        fn push(&self, _cx: &mut (), host: u64, screen: &Screen) -> Result<(), Infallible> {
+        fn push(&self, _cx: &mut (), host: u64, screen: &Route) -> Result<(), Infallible> {
             let how = match screen.transition {
                 ScreenTransition::None => " instantly",
                 ScreenTransition::Slide | ScreenTransition::Fade => "",
@@ -511,9 +606,35 @@ mod tests {
             self.0.borrow_mut().push(format!("root {visible}"));
             Ok(())
         }
-        fn set_chrome(&self, _cx: &mut (), screen: Option<&Screen>) -> Result<(), Infallible> {
-            let title = screen.map_or("-", |screen| screen.title.as_str());
-            self.0.borrow_mut().push(format!("chrome {title}"));
+        fn set_chrome(&self, _cx: &mut (), chrome: &Chrome) -> Result<(), Infallible> {
+            let mut line = format!(
+                "chrome {}",
+                chrome
+                    .app_bar
+                    .as_ref()
+                    .map_or("-", |bar| bar.title.as_str())
+            );
+            if let Some(fab) = &chrome.floating_action_button {
+                line += &format!(" fab:{}", fab.label);
+            }
+            if let Some(drawer) = &chrome.drawer {
+                line += if drawer.open {
+                    " drawer:open"
+                } else {
+                    " drawer:closed"
+                };
+            }
+            self.0.borrow_mut().push(line);
+            Ok(())
+        }
+        fn show_snackbar(&self, _cx: &mut (), snackbar: &Snackbar) -> Result<(), Infallible> {
+            self.0
+                .borrow_mut()
+                .push(format!("snackbar {}", snackbar.message));
+            Ok(())
+        }
+        fn dismiss_snackbar(&self, _cx: &mut ()) -> Result<(), Infallible> {
+            self.0.borrow_mut().push("dismiss snackbar".into());
             Ok(())
         }
         fn set_back_enabled(&self, _cx: &mut (), enabled: bool) -> Result<(), Infallible> {
@@ -547,6 +668,13 @@ mod tests {
         sheet: bool,
         clicks: usize,
         subtitle: Option<&'static str>,
+        fab: bool,
+        /// Whether the top screen has a drawer, and whether it is open.
+        drawer: Option<bool>,
+        snackbar: bool,
+        /// Keeps the snackbar up after the platform reports it gone.
+        sticky_snackbar: bool,
+        picked: Option<usize>,
     }
 
     /// An application whose state the test can also change from outside,
@@ -570,6 +698,12 @@ mod tests {
         CloseDialog,
         CloseSheet,
         Back,
+        Fab,
+        Go(usize),
+        DrawerOpened,
+        DrawerClosed,
+        Undo,
+        SnackbarGone,
     }
 
     impl Component for TestApp {
@@ -590,36 +724,57 @@ mod tests {
                 Msg::Back => {
                     state.stack.pop();
                 }
+                Msg::Fab => state.clicks += 10,
+                Msg::Go(index) => {
+                    state.picked = Some(index);
+                    state.drawer = Some(false);
+                }
+                Msg::DrawerOpened => state.drawer = Some(true),
+                Msg::DrawerClosed => state.drawer = Some(false),
+                Msg::Undo => {
+                    state.clicks = 0;
+                    state.snackbar = false;
+                }
+                Msg::SnackbarGone => state.snackbar = state.sticky_snackbar,
             }
         }
     }
 
     impl App for TestApp {
-        fn navigation(&self) -> Option<Navigation<Msg>> {
-            let state = self.state();
-            Some(Navigation::new(
-                state
-                    .stack
-                    .iter()
-                    .map(|key| {
-                        let screen = Screen::new(*key, key.to_uppercase());
-                        match (state.subtitle, state.stack.last() == Some(key)) {
-                            (Some(subtitle), true) => {
-                                screen.toolbar(Toolbar::new().subtitle(subtitle))
-                            }
-                            _ => screen,
-                        }
-                    })
-                    .collect(),
-            ))
+        fn navigation(&self) -> Option<Navigation> {
+            Some(Navigation::new(&self.state().stack))
         }
 
-        fn screen(&self, _key: &str) -> Option<Element<Msg>> {
+        fn screen(&self, key: &str) -> Option<Scaffold<Msg>> {
+            let state = self.state();
+            let top = state.stack.last() == Some(&key);
+            let mut app_bar = AppBar::new(key.to_uppercase());
+            if let (Some(subtitle), true) = (state.subtitle, top) {
+                app_bar = app_bar.subtitle(subtitle);
+            }
             Some(
-                Column::new()
-                    .child(Text::new(format!("clicks {}", self.state().clicks)))
-                    .child(Button::new("Tap").on_click(Msg::Tap))
-                    .into(),
+                Scaffold::new()
+                    .app_bar(app_bar)
+                    .body(
+                        Column::new()
+                            .child(Text::new(format!("clicks {}", state.clicks)))
+                            .child(Button::new("Tap").on_click(Msg::Tap)),
+                    )
+                    .floating_action_button(
+                        (state.fab && top).then(|| Fab::new("Add").on_click(Msg::Fab)),
+                    )
+                    .drawer(state.drawer.filter(|_| top).map(|open| {
+                        Drawer::new([DrawerItem::new("Inbox"), DrawerItem::new("Archive")])
+                            .open(open)
+                            .on_select(Msg::Go)
+                            .on_open(Msg::DrawerOpened)
+                            .on_close(Msg::DrawerClosed)
+                    }))
+                    .snackbar((state.snackbar && top).then(|| {
+                        Snackbar::new("Deleted")
+                            .action("Undo", Msg::Undo)
+                            .on_dismiss(Msg::SnackbarGone)
+                    })),
             )
         }
 
@@ -767,7 +922,7 @@ mod tests {
 
         app.state().subtitle = Some("3 new");
         session.render_all(&mut ()).unwrap();
-        assert_eq!(take(&log), ["root false", "chrome HOME"]);
+        assert_eq!(take(&log), ["chrome HOME"]);
     }
 
     #[test]
@@ -861,5 +1016,141 @@ mod tests {
         app.state().sheet = true;
         session.render_all(&mut ()).unwrap();
         assert!(take(&log).iter().any(|call| call.starts_with("sheet ")));
+    }
+
+    /// A session one screen deep with the controller's first messages read.
+    fn on_home(state: State) -> (Session<Fake>, TestApp, Log) {
+        let (mut session, app, log) = session(State {
+            stack: vec!["home"],
+            ..state
+        });
+        session.render_all(&mut ()).unwrap();
+        attach_pending(&mut session);
+        take(&log);
+        (session, app, log)
+    }
+
+    #[test]
+    fn the_floating_action_button_follows_state_and_reports_a_press() {
+        let (mut session, app, log) = on_home(State::default());
+
+        app.state().fab = true;
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(take(&log), ["chrome HOME fab:Add"]);
+
+        session.chrome_event(&mut (), ChromeEvent::Fab).unwrap();
+        assert_eq!(app.state().clicks, 10);
+        // The button itself did not change, so nothing is resent.
+        assert!(take(&log).is_empty());
+
+        app.state().fab = false;
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(take(&log), ["chrome HOME"]);
+    }
+
+    #[test]
+    fn the_drawer_is_opened_by_state_and_follows_the_user() {
+        let (mut session, app, log) = on_home(State {
+            drawer: Some(false),
+            ..State::default()
+        });
+
+        // The application opens it.
+        app.state().drawer = Some(true);
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(take(&log), ["chrome HOME drawer:open"]);
+
+        // The user swipes it shut: the application hears about it and agrees,
+        // so the platform is not told what it already shows.
+        session
+            .chrome_event(&mut (), ChromeEvent::DrawerClosed)
+            .unwrap();
+        assert_eq!(app.state().drawer, Some(false));
+        assert!(take(&log).is_empty());
+
+        // The user opens it and picks a destination, which closes it.
+        session
+            .chrome_event(&mut (), ChromeEvent::DrawerOpened)
+            .unwrap();
+        assert_eq!(app.state().drawer, Some(true));
+        session
+            .chrome_event(&mut (), ChromeEvent::DrawerSelected(1))
+            .unwrap();
+        assert_eq!(app.state().picked, Some(1));
+        assert_eq!(take(&log), ["chrome HOME drawer:closed"]);
+    }
+
+    #[test]
+    fn a_snackbar_is_shown_once_and_can_be_dismissed_either_way() {
+        let (mut session, app, log) = on_home(State {
+            clicks: 3,
+            ..State::default()
+        });
+
+        app.state().snackbar = true;
+        session.render_all(&mut ()).unwrap();
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(take(&log), ["snackbar Deleted"]);
+
+        // It times out: the application drops it and nothing more is sent.
+        session
+            .chrome_event(&mut (), ChromeEvent::SnackbarDismissed)
+            .unwrap();
+        assert!(!app.state().snackbar);
+        assert!(take(&log).is_empty());
+
+        // Shown again, its action reaches the application.
+        app.state().snackbar = true;
+        session.render_all(&mut ()).unwrap();
+        session
+            .chrome_event(&mut (), ChromeEvent::SnackbarAction)
+            .unwrap();
+        assert_eq!(app.state().clicks, 0);
+        assert_eq!(take(&log), ["snackbar Deleted"]);
+
+        // The application can also take it down itself.
+        app.state().snackbar = true;
+        session.render_all(&mut ()).unwrap();
+        app.state().snackbar = false;
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(take(&log), ["snackbar Deleted", "dismiss snackbar"]);
+    }
+
+    #[test]
+    fn a_snackbar_the_application_keeps_is_shown_again() {
+        let (mut session, app, log) = on_home(State {
+            snackbar: true,
+            sticky_snackbar: true,
+            ..State::default()
+        });
+
+        // The platform took it down, but the application still returns it.
+        session
+            .chrome_event(&mut (), ChromeEvent::SnackbarDismissed)
+            .unwrap();
+        assert!(app.state().snackbar);
+        assert_eq!(take(&log), ["snackbar Deleted"]);
+    }
+
+    #[test]
+    fn chrome_belongs_to_the_top_screen() {
+        let (mut session, app, log) = on_home(State {
+            fab: true,
+            ..State::default()
+        });
+
+        // A pushed screen brings its own chrome...
+        app.state().stack.push("detail");
+        session.render_all(&mut ()).unwrap();
+        attach_pending(&mut session);
+        assert_eq!(
+            take(&log)[..3],
+            ["push 2 detail", "root false", "chrome DETAIL fab:Add"]
+        );
+
+        // ...and leaving it restores the previous screen's.
+        app.state().stack.pop();
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(take(&log)[2], "chrome HOME fab:Add");
     }
 }

@@ -55,6 +55,44 @@ final class ShowcaseUITests: XCTestCase {
         return (Double(pixel[0]) + Double(pixel[1]) + Double(pixel[2])) / (3 * 255)
     }
 
+    /// The native chrome a Scaffold adds around a screen's content.
+    func testScaffoldFloatingButtonSnackbarAndDrawer() throws {
+        open("Scaffold")
+        XCTAssertTrue(app.staticTexts["Items: 0"].waitForExistence(timeout: 5))
+
+        // The floating action button adds an item and raises a snackbar,
+        // whose action takes the item back.
+        app.buttons["Add"].tap()
+        XCTAssertTrue(app.staticTexts["Items: 1"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Added item 1"].waitForExistence(timeout: 5))
+        app.buttons["Undo"].tap()
+        XCTAssertTrue(app.staticTexts["Items: 0"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Added item 1"].exists)
+
+        // The drawer opens from state and a destination closes it again.
+        tapButton("Open drawer")
+        let archive = app.staticTexts["Archive"]
+        XCTAssertTrue(archive.waitForExistence(timeout: 5))
+        archive.tap()
+        XCTAssertTrue(app.staticTexts["Section: Archive"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Close menu"].waitForExistence(timeout: 1))
+
+        // Tapping outside the panel closes it, and Rust hears about it: the
+        // drawer can be opened again.
+        tapButton("Open drawer")
+        XCTAssertTrue(app.buttons["Close menu"].waitForExistence(timeout: 5))
+        app.buttons["Close menu"].tap()
+        XCTAssertFalse(app.staticTexts["Settings"].waitForExistence(timeout: 1))
+        tapButton("Open drawer")
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+        app.staticTexts["Inbox"].tap()
+        XCTAssertTrue(app.staticTexts["Section: Inbox"].waitForExistence(timeout: 5))
+
+        // Leaving the screen takes its chrome with it.
+        backToCatalog()
+        XCTAssertFalse(app.buttons["Add"].exists)
+    }
+
     func testNewWidgets() throws {
         open("Radio group")
         XCTAssertTrue(app.staticTexts["Selected: Medium"].waitForExistence(timeout: 5))
@@ -84,7 +122,7 @@ final class ShowcaseUITests: XCTestCase {
         )
         app.segmentedControls.firstMatch.buttons["Settings"].tap()
         XCTAssertTrue(
-            app.staticTexts["Settings: tapping a tab reports Event::Selected."]
+            app.staticTexts["Settings: tapping a tab sends the selected index."]
                 .waitForExistence(timeout: 5)
         )
         backToCatalog()

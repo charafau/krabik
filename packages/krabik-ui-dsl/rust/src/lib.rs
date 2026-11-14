@@ -23,6 +23,7 @@ mod host;
 mod message;
 pub mod navigation;
 pub mod presentation;
+pub mod scaffold;
 pub mod style;
 pub mod ui;
 pub mod widgets;

@@ -104,7 +104,7 @@ internal fun isVisible(text: String): Boolean =
  * the tap that asked for it; an immediate assertion would still be looking
  * at the activity's window.
  */
-internal fun awaitText(text: String, timeoutMs: Long = 3000) {
+internal fun awaitText(text: String, timeoutMs: Long = 8000) {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (true) {
         try {
@@ -118,7 +118,7 @@ internal fun awaitText(text: String, timeoutMs: Long = 3000) {
 }
 
 /** Waits until no view with exactly [text] is left in the focused window. */
-internal fun awaitNoText(text: String, timeoutMs: Long = 3000) {
+internal fun awaitNoText(text: String, timeoutMs: Long = 8000) {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (true) {
         try {

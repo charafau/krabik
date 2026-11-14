@@ -12,18 +12,25 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toolbar
 import androidx.appcompat.app.AlertDialog
+import androidx.core.view.GravityCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.FragmentActivity
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+import com.google.android.material.navigation.NavigationView
+import com.google.android.material.snackbar.Snackbar
 
 /**
  * Owns the native chrome of one session: the screen stack, the toolbar, the
- * bottom navigation bar, the system alert and the bottom sheet.
+ * bottom navigation bar, the floating action button, the navigation drawer,
+ * the snackbar, the system alert and the bottom sheet.
  *
  * Rust is the source of truth. After an application state change it calls
- * [push] / [pop], [setToolbar], [setBottomNavigation], [showDialog] /
- * [dismissDialog] and [presentSheet] / [dismissSheet]. Nothing here changes
+ * [push] / [pop], [setToolbar], [setBottomNavigation], [setFab], [setDrawer],
+ * [showSnackbar] / [dismissSnackbar], [showDialog] / [dismissDialog] and
+ * [presentSheet] / [dismissSheet]. Nothing here changes
  * what is shown on its own; user input is reported to Rust, which decides.
  */
 class KrabikHostController(
@@ -34,6 +41,11 @@ class KrabikHostController(
     private val mainContainer: FrameLayout,
     private val navContainer: FrameLayout,
     private val main: RustRootView,
+    /** The floating action button, above the bottom corner of the content. */
+    private val fab: ExtendedFloatingActionButton,
+    /** Wraps the whole screen so [drawer] can slide over it. */
+    private val drawerLayout: DrawerLayout,
+    private val drawer: NavigationView,
     /** Arms or disarms the activity's back callback; see [setBackEnabled]. */
     private val onBackEnabled: (Boolean) -> Unit,
 ) {
@@ -44,6 +56,12 @@ class KrabikHostController(
      */
     private val screens = ArrayList<KrabikScreenFragment>()
     private var dialog: Dialog? = null
+    private var snackbar: Snackbar? = null
+
+    /** Whether the top screen has a drawer, and whether Rust wants it open. */
+    private var drawerPresent = false
+    private var drawerOpen = false
+    private var backTitle = "Back"
     private var lastPopAnimated = false
     private val hideNavigation = Runnable {
         navContainer.visibility = View.GONE
@@ -58,8 +76,39 @@ class KrabikHostController(
         navContainer.isClickable = true
         toolbar.visibility = View.GONE
         bottomNavigation.visibility = View.GONE
+        // The navigation icon is the back arrow on a pushed screen and the
+        // menu button on a root screen that has a drawer.
         toolbar.setNavigationOnClickListener {
-            main.onBackPressed()
+            if (screens.size > 1) {
+                main.onBackPressed()
+            } else if (drawerPresent) {
+                drawerLayout.openDrawer(GravityCompat.START)
+            }
+        }
+        fab.visibility = View.GONE
+        fab.setOnClickListener { main.onChromeEvent(EVENT_FAB) }
+        drawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
+        drawerLayout.addDrawerListener(object : DrawerLayout.SimpleDrawerListener() {
+            // Only a change the user made is reported; one Rust asked for is
+            // already known there.
+            override fun onDrawerOpened(drawerView: View) {
+                if (!drawerOpen) {
+                    drawerOpen = true
+                    main.onChromeEvent(EVENT_DRAWER_OPENED)
+                }
+            }
+
+            override fun onDrawerClosed(drawerView: View) {
+                if (drawerOpen) {
+                    drawerOpen = false
+                    main.onChromeEvent(EVENT_DRAWER_CLOSED)
+                }
+            }
+        })
+        drawer.setNavigationItemSelectedListener { item ->
+            // Rust decides what the choice does, including closing the drawer.
+            main.onChromeEvent(EVENT_DRAWER_SELECTED, item.itemId)
+            false
         }
         toolbar.setOnMenuItemClickListener { item ->
             main.onToolbarAction(item.itemId - ACTION_ID_BASE)
@@ -80,7 +129,7 @@ class KrabikHostController(
      * transition ends. Its view stays alive, so a later [pop] reveals it
      * exactly as the user left it.
      */
-    fun push(hostId: Long, title: String, transition: Int) {
+    fun push(hostId: Long, transition: Int) {
         navContainer.removeCallbacks(hideNavigation)
         val fragment = KrabikScreenFragment.newInstance(session, hostId)
         val previous = screens.lastOrNull()
@@ -197,12 +246,8 @@ class KrabikHostController(
     ) {
         toolbar.title = title
         toolbar.subtitle = subtitle.ifEmpty { null }
-        if (screens.size > 1) {
-            toolbar.setNavigationIcon(R.drawable.krabik_ic_arrow_back)
-            toolbar.setNavigationContentDescription(backTitle.ifEmpty { "Back" })
-        } else {
-            toolbar.navigationIcon = null
-        }
+        this.backTitle = backTitle.ifEmpty { "Back" }
+        updateNavigationIcon()
         toolbar.menu.clear()
         for (index in actionLabels.indices) {
             val item = toolbar.menu.add(0, ACTION_ID_BASE + index, index, actionLabels[index])
@@ -260,6 +305,123 @@ class KrabikHostController(
         bottomNavigation.configure(labels.toList(), icons.toList(), selected)
         bottomNavigation.visibility = if (labels.isEmpty()) View.GONE else View.VISIBLE
         bottomNavigation.rootView.requestApplyInsets()
+    }
+
+    private fun updateNavigationIcon() {
+        when {
+            screens.size > 1 -> {
+                toolbar.setNavigationIcon(R.drawable.krabik_ic_arrow_back)
+                toolbar.navigationContentDescription = backTitle
+            }
+            drawerPresent -> {
+                toolbar.setNavigationIcon(R.drawable.krabik_ic_menu)
+                toolbar.navigationContentDescription = "Menu"
+            }
+            else -> toolbar.navigationIcon = null
+        }
+    }
+
+    // endregion
+
+    // region Floating action button, drawer and snackbar
+
+    /** Applies the top screen's floating action button; hidden when not [visible]. */
+    fun setFab(label: String, icon: String, visible: Boolean) {
+        fab.text = label
+        fab.contentDescription = label
+        val resource = if (icon.isNotEmpty()) {
+            activity.resources.getIdentifier(icon, "drawable", activity.packageName)
+        } else {
+            0
+        }
+        if (resource != 0) fab.setIconResource(resource) else fab.icon = null
+        fab.visibility = if (visible) View.VISIBLE else View.GONE
+    }
+
+    /**
+     * Applies the top screen's navigation drawer.
+     *
+     * Without one ([present] false) the drawer is locked shut. [selected] is
+     * the highlighted item, or -1 for none.
+     */
+    fun setDrawer(
+        labels: Array<String>,
+        icons: Array<String>,
+        selected: Int,
+        present: Boolean,
+        open: Boolean,
+    ) {
+        drawer.menu.clear()
+        for (index in labels.indices) {
+            val item = drawer.menu.add(0, index, index, labels[index])
+            item.isCheckable = true
+            item.isChecked = index == selected
+            val icon = icons.getOrNull(index).orEmpty()
+            val resource = if (icon.isNotEmpty()) {
+                activity.resources.getIdentifier(icon, "drawable", activity.packageName)
+            } else {
+                0
+            }
+            if (resource != 0) item.setIcon(resource)
+        }
+        drawerPresent = present
+        drawerOpen = present && open
+        drawerLayout.setDrawerLockMode(
+            if (present) DrawerLayout.LOCK_MODE_UNLOCKED else DrawerLayout.LOCK_MODE_LOCKED_CLOSED,
+        )
+        if (drawerOpen) {
+            drawerLayout.openDrawer(GravityCompat.START)
+        } else {
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+        updateNavigationIcon()
+    }
+
+    /** Closes the drawer for the system back action. Returns whether it was open. */
+    fun closeDrawerForBack(): Boolean {
+        if (!drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            return false
+        }
+        // The listener reports the close, so Rust hears about it as usual.
+        drawerLayout.closeDrawer(GravityCompat.START)
+        return true
+    }
+
+    /**
+     * Shows a snackbar above the floating action button or the bottom bar.
+     * An empty [action] means no action button.
+     */
+    fun showSnackbar(message: String, action: String) {
+        dismissSnackbar()
+        val bar = Snackbar.make(fab.parent as View, message, Snackbar.LENGTH_LONG)
+        when {
+            fab.visibility == View.VISIBLE -> bar.anchorView = fab
+            bottomNavigation.visibility == View.VISIBLE -> bar.anchorView = bottomNavigation
+        }
+        if (action.isNotEmpty()) {
+            bar.setAction(action) { main.onChromeEvent(EVENT_SNACKBAR_ACTION) }
+        }
+        bar.addCallback(object : Snackbar.Callback() {
+            override fun onDismissed(transientBottomBar: Snackbar, event: Int) {
+                if (snackbar !== transientBottomBar) {
+                    // Replaced or taken down by Rust; nothing to report.
+                    return
+                }
+                snackbar = null
+                if (event == DISMISS_EVENT_TIMEOUT || event == DISMISS_EVENT_SWIPE) {
+                    main.onChromeEvent(EVENT_SNACKBAR_DISMISSED)
+                }
+            }
+        })
+        snackbar = bar
+        bar.show()
+    }
+
+    /** Removes the snackbar, if any, without reporting it. */
+    fun dismissSnackbar() {
+        val bar = snackbar ?: return
+        snackbar = null
+        bar.dismiss()
     }
 
     // endregion
@@ -360,6 +522,14 @@ class KrabikHostController(
         (value * activity.resources.displayMetrics.density).toInt()
 
     private companion object {
+        // What `RustRootView.onChromeEvent` reports; Rust decodes the same
+        // numbers in `ChromeEvent::from_code`.
+        const val EVENT_FAB = 0
+        const val EVENT_DRAWER_SELECTED = 1
+        const val EVENT_DRAWER_OPENED = 2
+        const val EVENT_DRAWER_CLOSED = 3
+        const val EVENT_SNACKBAR_ACTION = 4
+        const val EVENT_SNACKBAR_DISMISSED = 5
         const val SHEET_TAG = "krabik-sheet"
         const val TRANSITION_MS = 280L
         const val TRANSITION_SLIDE = 0

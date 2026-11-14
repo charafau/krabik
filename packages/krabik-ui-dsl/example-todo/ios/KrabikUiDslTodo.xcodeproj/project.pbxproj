@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		31E11950D56D2DBEAF64D82A /* KrabikUiDslTodoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15017F18E423BBD9056855B /* KrabikUiDslTodoApp.swift */; };
+		3B2EA6AC360D0E14934F4817 /* KrabikChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99231D9C375F0EF386EFC246 /* KrabikChrome.swift */; };
 		5CE8E0033CAEC36956F8A9DB /* TodoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B0BE32F9908125C57BFDD1C /* TodoUITests.swift */; };
 		9A39C665F6A056066DB79C62 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23D38AF058055F0D56A3364E /* ContentView.swift */; };
 		BA4CF24A2385F80C150AD431 /* KrabikHostController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 135B7260233D4C1CDCAAE02C /* KrabikHostController.swift */; };
@@ -28,13 +29,14 @@
 		135B7260233D4C1CDCAAE02C /* KrabikHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikHostController.swift; sourceTree = "<group>"; };
 		23D38AF058055F0D56A3364E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		7B0BE32F9908125C57BFDD1C /* TodoUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoUITests.swift; sourceTree = "<group>"; };
+		99231D9C375F0EF386EFC246 /* KrabikChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikChrome.swift; sourceTree = "<group>"; };
 		A15017F18E423BBD9056855B /* KrabikUiDslTodoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikUiDslTodoApp.swift; sourceTree = "<group>"; };
 		B1C1971182B1111B6ED96A29 /* RustRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustRootView.swift; sourceTree = "<group>"; };
 		C7A8A56DB12451C96D786798 /* KrabikIOS.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = KrabikIOS.h; sourceTree = "<group>"; };
 		C7B7F5462AA6EB9DFA4C43EE /* KrabikUiDslTodoUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = KrabikUiDslTodoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CFF21142C60E2B95CC7C2C19 /* KrabikUiDslTodo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KrabikUiDslTodo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F99C9EAAA57B19CE81BCC56A /* Bridging.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Bridging.h; sourceTree = "<group>"; };
-		"TEMP_2ABE5E84-2D30-4406-B31F-E6139209469E" /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
+		"TEMP_3FF2D1C0-3F31-4B43-8C4F-D57D6F433630" /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -87,6 +89,7 @@
 			isa = PBXGroup;
 			children = (
 				23D38AF058055F0D56A3364E /* ContentView.swift */,
+				99231D9C375F0EF386EFC246 /* KrabikChrome.swift */,
 				135B7260233D4C1CDCAAE02C /* KrabikHostController.swift */,
 				C7A8A56DB12451C96D786798 /* KrabikIOS.h */,
 				B1C1971182B1111B6ED96A29 /* RustRootView.swift */,
@@ -102,10 +105,10 @@
 			path = shared;
 			sourceTree = "<group>";
 		};
-		"TEMP_BB05D4C3-281B-4BBC-B0A3-37E8EB6D7802" /* ios */ = {
+		"TEMP_EBEF02D6-1AE2-44E6-A2D8-7E5418B5B771" /* ios */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_2ABE5E84-2D30-4406-B31F-E6139209469E" /* Signing.xcconfig */,
+				"TEMP_3FF2D1C0-3F31-4B43-8C4F-D57D6F433630" /* Signing.xcconfig */,
 			);
 			path = ios;
 			sourceTree = "<group>";
@@ -223,6 +226,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9A39C665F6A056066DB79C62 /* ContentView.swift in Sources */,
+				3B2EA6AC360D0E14934F4817 /* KrabikChrome.swift in Sources */,
 				BA4CF24A2385F80C150AD431 /* KrabikHostController.swift in Sources */,
 				31E11950D56D2DBEAF64D82A /* KrabikUiDslTodoApp.swift in Sources */,
 				CFDDD69D72E396908220D76E /* RustRootView.swift in Sources */,
@@ -242,7 +246,7 @@
 /* Begin XCBuildConfiguration section */
 		691CB5B39E37286E1ADB715D /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_2ABE5E84-2D30-4406-B31F-E6139209469E" /* Signing.xcconfig */;
+			baseConfigurationReference = "TEMP_3FF2D1C0-3F31-4B43-8C4F-D57D6F433630" /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -391,7 +395,7 @@
 		};
 		F87952C4BA2CB7FE7D250FE1 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_2ABE5E84-2D30-4406-B31F-E6139209469E" /* Signing.xcconfig */;
+			baseConfigurationReference = "TEMP_3FF2D1C0-3F31-4B43-8C4F-D57D6F433630" /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;

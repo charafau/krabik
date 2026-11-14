@@ -412,6 +412,16 @@ class RustRootView(
         }
     }
 
+    /**
+     * Reports what the user did to the floating action button, the drawer or
+     * the snackbar. The codes are listed in [KrabikHostController].
+     */
+    fun onChromeEvent(kind: Int, index: Int = 0) {
+        if (handle != 0L) {
+            nativeOnChromeEvent(handle, kind, index)
+        }
+    }
+
     /** Reports a tap on the toolbar item at [index]. */
     fun onToolbarAction(index: Int) {
         if (handle != 0L) {
@@ -551,6 +561,8 @@ class RustRootView(
     private external fun nativeOnBottomNavigationSelected(handle: Long, index: Int)
 
     private external fun nativeOnToolbarAction(handle: Long, index: Int)
+
+    private external fun nativeOnChromeEvent(handle: Long, kind: Int, index: Int)
 
     private external fun nativeOnDialogAction(handle: Long, button: Int)
 

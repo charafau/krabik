@@ -2,7 +2,8 @@ import QuartzCore
 import UIKit
 
 /// Owns the native chrome of one session: the navigation stack and bar, the
-/// tab bar, the system alert and the sheet.
+/// tab bar, the floating action button, the drawer, the snackbar, the system
+/// alert and the sheet.
 ///
 /// Rust is the source of truth. After an application state change it calls
 /// the `krabik…` methods below. Nothing here changes what is shown on its own;
@@ -18,6 +19,15 @@ final class KrabikHostController: UIViewController {
     private weak var sheet: UIViewController?
     /// The sheet host waiting for its deferred presentation, if any.
     private var pendingSheet: Int64?
+
+    /// The floating action button, a filled capsule above the bottom corner.
+    private let fab = UIButton(configuration: .filled())
+    private var fabAboveTabBar: NSLayoutConstraint!
+    private var fabAboveSafeArea: NSLayoutConstraint!
+    private var snackbar: KrabikSnackbarView?
+    private var snackbarTimer: Timer?
+    private let drawer = KrabikDrawerView()
+    private var drawerPresent = false
 
     deinit {
         // Releases the Rust session and every native view it created.
@@ -75,14 +85,16 @@ final class KrabikHostController: UIViewController {
             ),
         ])
 
+        installFloatingActionButton()
+        installDrawer()
+
         krabik_ios_set_controller(session, Unmanaged.passUnretained(self).toOpaque())
     }
 
-    @objc func krabikPush(_ host: Int64, title: String, transition: Int) {
+    @objc func krabikPush(_ host: Int64, transition: Int) {
         let hostView = RustHostView(frame: .zero)
         hostView.bind(session: session, host: UInt64(host))
         let vc = hostController(hostView)
-        vc.title = title
         // Rust owns the stack, so the system back button (which pops on its
         // own) is replaced by one that asks Rust. The first screen has none.
         vc.navigationItem.hidesBackButton = true
@@ -247,7 +259,213 @@ final class KrabikHostController: UIViewController {
         tabBar.isHidden = labels.isEmpty
         // Keeps every screen's content above the bar.
         navigation.additionalSafeAreaInsets.bottom = labels.isEmpty ? 0 : Self.tabBarHeight
+        placeFloatingActionButton()
     }
+
+    // MARK: - Floating action button
+
+    private func installFloatingActionButton() {
+        fab.configuration?.cornerStyle = .capsule
+        fab.configuration?.imagePadding = 8
+        fab.configuration?.contentInsets = NSDirectionalEdgeInsets(
+            top: 14, leading: 20, bottom: 14, trailing: 20
+        )
+        fab.layer.shadowColor = UIColor.black.cgColor
+        fab.layer.shadowOpacity = 0.25
+        fab.layer.shadowRadius = 6
+        fab.layer.shadowOffset = CGSize(width: 0, height: 3)
+        fab.isHidden = true
+        fab.addTarget(self, action: #selector(fabTapped), for: .touchUpInside)
+        fab.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(fab)
+        fabAboveTabBar = fab.bottomAnchor.constraint(equalTo: tabBar.topAnchor, constant: -16)
+        fabAboveSafeArea = fab.bottomAnchor.constraint(
+            equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16
+        )
+        NSLayoutConstraint.activate([
+            fab.trailingAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16
+            ),
+            fabAboveSafeArea,
+        ])
+    }
+
+    /// Keeps the button above the tab bar while one is showing.
+    private func placeFloatingActionButton() {
+        fabAboveSafeArea.isActive = tabBar.isHidden
+        fabAboveTabBar.isActive = !tabBar.isHidden
+    }
+
+    /// Applies the top screen's floating action button; hidden when not `visible`.
+    @objc func krabikSetFab(_ label: String, icon: String, visible: Bool) {
+        fab.configuration?.title = label
+        fab.configuration?.image = icon.isEmpty ? nil : toolbarImage(icon)
+        fab.accessibilityLabel = label
+        fab.isHidden = !visible
+    }
+
+    @objc private func fabTapped() {
+        krabik_ios_on_chrome_event(session, Self.eventFab, 0)
+    }
+
+    // MARK: - Drawer
+
+    private func installDrawer() {
+        drawer.frame = view.bounds
+        drawer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        drawer.onSelect = { [weak self] index in
+            guard let self else { return }
+            // Rust decides what the choice does, including closing the drawer.
+            krabik_ios_on_chrome_event(self.session, Self.eventDrawerSelected, Int64(index))
+        }
+        drawer.onClose = { [weak self] in
+            guard let self else { return }
+            krabik_ios_on_chrome_event(self.session, Self.eventDrawerClosed, 0)
+        }
+        view.addSubview(drawer)
+
+        let edge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(edgePanned(_:)))
+        edge.edges = .left
+        view.addGestureRecognizer(edge)
+    }
+
+    /// Applies the top screen's drawer. Without one (`present` false) there
+    /// is no menu button and the edge swipe does nothing. `selected` is the
+    /// highlighted item, or -1 for none.
+    @objc func krabikSetDrawer(
+        _ labels: [String],
+        icons: [String],
+        selected: Int,
+        present: Bool,
+        open: Bool
+    ) {
+        drawerPresent = present
+        drawer.configure(labels: labels, icons: icons, selected: selected)
+        drawer.setOpen(present && open, animated: true)
+        updateMenuButton()
+    }
+
+    /// The first screen has no back button; with a drawer it gets a menu
+    /// button in that place.
+    private func updateMenuButton() {
+        let controllers = navigation.viewControllers
+        guard controllers.count == 2, let root = controllers.last else { return }
+        if drawerPresent {
+            let menu = UIBarButtonItem(
+                image: UIImage(systemName: "line.3.horizontal"),
+                style: .plain,
+                target: self,
+                action: #selector(menuTapped)
+            )
+            menu.accessibilityLabel = "Menu"
+            root.navigationItem.leftBarButtonItem = menu
+        } else {
+            root.navigationItem.leftBarButtonItem = nil
+        }
+    }
+
+    @objc private func menuTapped() {
+        openDrawerForUser()
+    }
+
+    @objc private func edgePanned(_ gesture: UIScreenEdgePanGestureRecognizer) {
+        // On a pushed screen the leading edge belongs to "back".
+        if gesture.state == .began, navigation.viewControllers.count == 2 {
+            openDrawerForUser()
+        }
+    }
+
+    private func openDrawerForUser() {
+        guard drawerPresent, !drawer.isOpen else { return }
+        drawer.setOpen(true, animated: true)
+        krabik_ios_on_chrome_event(session, Self.eventDrawerOpened, 0)
+    }
+
+    // MARK: - Snackbar
+
+    /// Shows a snackbar above the floating action button or the tab bar. An
+    /// empty `action` means no action button.
+    @objc func krabikShowSnackbar(_ message: String, action: String) {
+        krabikDismissSnackbar()
+        let bar = KrabikSnackbarView(message: message, action: action)
+        bar.onAction = { [weak self] in
+            guard let self else { return }
+            self.removeSnackbar(animated: true)
+            krabik_ios_on_chrome_event(self.session, Self.eventSnackbarAction, 0)
+        }
+        let swipe = UISwipeGestureRecognizer(target: self, action: #selector(snackbarSwiped))
+        swipe.direction = .down
+        bar.addGestureRecognizer(swipe)
+
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(bar, belowSubview: drawer)
+        let above: NSLayoutYAxisAnchor
+        if !fab.isHidden {
+            above = fab.topAnchor
+        } else if !tabBar.isHidden {
+            above = tabBar.topAnchor
+        } else {
+            above = view.safeAreaLayoutGuide.bottomAnchor
+        }
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16
+            ),
+            bar.trailingAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16
+            ),
+            bar.bottomAnchor.constraint(equalTo: above, constant: -12),
+        ])
+        bar.alpha = 0
+        UIView.animate(withDuration: 0.2) { bar.alpha = 1 }
+        snackbar = bar
+        UIAccessibility.post(notification: .announcement, argument: message)
+
+        // The same few seconds a Material snackbar stays up.
+        snackbarTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in
+            self?.snackbarLeftByItself()
+        }
+    }
+
+    /// Removes the snackbar, if any, without reporting it.
+    @objc func krabikDismissSnackbar() {
+        removeSnackbar(animated: false)
+    }
+
+    @objc private func snackbarSwiped() {
+        snackbarLeftByItself()
+    }
+
+    private func snackbarLeftByItself() {
+        guard snackbar != nil else { return }
+        removeSnackbar(animated: true)
+        krabik_ios_on_chrome_event(session, Self.eventSnackbarDismissed, 0)
+    }
+
+    private func removeSnackbar(animated: Bool) {
+        snackbarTimer?.invalidate()
+        snackbarTimer = nil
+        guard let bar = snackbar else { return }
+        snackbar = nil
+        if animated {
+            UIView.animate(
+                withDuration: 0.2,
+                animations: { bar.alpha = 0 },
+                completion: { _ in bar.removeFromSuperview() }
+            )
+        } else {
+            bar.removeFromSuperview()
+        }
+    }
+
+    // What `krabik_ios_on_chrome_event` reports; Rust decodes the same
+    // numbers in `ChromeEvent::from_code`.
+    private static let eventFab: Int64 = 0
+    private static let eventDrawerSelected: Int64 = 1
+    private static let eventDrawerOpened: Int64 = 2
+    private static let eventDrawerClosed: Int64 = 3
+    private static let eventSnackbarAction: Int64 = 4
+    private static let eventSnackbarDismissed: Int64 = 5
 
     // MARK: - Dialog
 

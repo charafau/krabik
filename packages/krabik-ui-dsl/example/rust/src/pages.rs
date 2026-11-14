@@ -3,6 +3,7 @@
 use krabik_ui_dsl::app::Component;
 use krabik_ui_dsl::navigation::{BottomNavItem, BottomNavigation};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
+use krabik_ui_dsl::scaffold::{Drawer, DrawerItem, Fab, Scaffold, Snackbar};
 use krabik_ui_dsl::ui::{
     Align, AnimationCurve, Button, Checkbox, Color, Column, DatePicker, DatePickerMode, DateValue,
     EdgeInsets, Element, Gradient, Icon, Image, ImageScale, ImageSource, Justify, List, Pager,
@@ -79,6 +80,7 @@ pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
         "transition-fade" => "transition-fade",
         "transition-none" => "transition-none",
         "bottom-sheet" => "bottom-sheet",
+        "scaffold" => "scaffold",
         "pager" => "pager",
         "tabs-view" => "tabs-view",
         "bottom-navigation" => "bottom-navigation",
@@ -119,6 +121,7 @@ pub(crate) fn title(key: &str) -> &'static str {
         "transition-fade" => "Fade",
         "transition-none" => "Instant",
         "bottom-sheet" => "Bottom sheet",
+        "scaffold" => "Scaffold",
         "pager" => "View pager",
         "tabs-view" => "Tabs view",
         "bottom-navigation" => "Bottom navigation",
@@ -159,6 +162,7 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element<Msg>> {
         "transition-fade" => transition_demo_page("transition-fade"),
         "transition-none" => transition_demo_page("transition-none"),
         "bottom-sheet" => bottom_sheet_page(),
+        "scaffold" => scaffold_page(app),
         "pager" => pager_page(app),
         "tabs-view" => tabs_view_page(app),
         "bottom-navigation" => bottom_navigation_page(app),
@@ -254,6 +258,7 @@ pub(crate) fn home() -> Element<Msg> {
                 ("Checklist", "page:checklist"),
                 ("Dialog", "dialog:open"),
                 ("Bottom sheet", "page:bottom-sheet"),
+                ("Scaffold", "page:scaffold"),
             ],
         ),
     ];
@@ -525,7 +530,7 @@ fn tabs_page(app: &ShowcaseApp) -> Element<Msg> {
     let content = match app.tab {
         0 => "Overview: the first tab is selected by default.",
         1 => "Details: the app owns the selected index.",
-        _ => "Settings: tapping a tab reports Event::Selected.",
+        _ => "Settings: tapping a tab sends the selected index.",
     };
     page(
         "Tabs",
@@ -811,6 +816,53 @@ fn bottom_sheet_page() -> Element<Msg> {
     )
 }
 
+/// The sections the Scaffold page's drawer switches between.
+pub(crate) const DRAWER_SECTIONS: [&str; 3] = ["Inbox", "Archive", "Settings"];
+
+fn scaffold_page(app: &ShowcaseApp) -> Element<Msg> {
+    page(
+        "Scaffold",
+        "A screen's native chrome: app bar, floating action button, snackbar and drawer.",
+        body![
+            Text::new(format!("Section: {}", DRAWER_SECTIONS[app.drawer_section]))
+                .size(18)
+                .color(COLOR_TEXT),
+            Text::new(format!("Items: {}", app.scaffold_items))
+                .size(18)
+                .color(COLOR_TEXT),
+            caption("The Add button floats over the content and adds an item."),
+            caption("Each addition shows a snackbar; Undo takes the item back."),
+            Button::new("Open drawer")
+                .on_click(Msg::Drawer(true))
+                .width_percent(1.0),
+            caption("The drawer also opens with a swipe from the leading edge on Android."),
+        ],
+    )
+}
+
+/// The floating action button, drawer and snackbar of the Scaffold page.
+pub(crate) fn scaffold_chrome(app: &ShowcaseApp, scaffold: Scaffold<Msg>) -> Scaffold<Msg> {
+    scaffold
+        .floating_action_button(
+            Fab::new("Add")
+                .icon(Icon::new().drawable("ic_add").sf("plus"))
+                .on_click(Msg::FabAdd),
+        )
+        .drawer(
+            Drawer::new(DRAWER_SECTIONS.map(DrawerItem::new))
+                .selected(app.drawer_section)
+                .open(app.drawer_open)
+                .on_select(Msg::DrawerGo)
+                .on_open(Msg::Drawer(true))
+                .on_close(Msg::Drawer(false)),
+        )
+        .snackbar(app.scaffold_snackbar.then(|| {
+            Snackbar::new(format!("Added item {}", app.scaffold_items))
+                .action("Undo", Msg::FabUndo)
+                .on_dismiss(Msg::SnackbarGone)
+        }))
+}
+
 fn pager_page(app: &ShowcaseApp) -> Element<Msg> {
     let selected = app.pager_page.min(2);
     let card = |title: &'static str, body: &'static str, color: Color| -> Element<Msg> {
@@ -837,7 +889,7 @@ fn pager_page(app: &ShowcaseApp) -> Element<Msg> {
                 .child(card("One", "The first page.", Color::fixed(0xFF15_65C0)))
                 .child(card("Two", "The second page.", Color::fixed(0xFF00_897B)))
                 .child(card("Three", "The third page.", Color::fixed(0xFF6A_1B9A))),
-            caption("Swiping reports the settled page through Event::Selected."),
+            caption("Swiping reports the settled page through on_select."),
         ],
     )
 }
@@ -882,7 +934,7 @@ fn tabs_view_page(app: &ShowcaseApp) -> Element<Msg> {
                     "Settings page content.",
                     Color::fixed(0xFF6A_1B9A),
                 )),
-            caption("Tapping a tab and swiping the pager both dispatch Event::Selected."),
+            caption("Tapping a tab and swiping the pager both report through on_select."),
         ],
     )
 }
@@ -895,7 +947,7 @@ fn bottom_navigation_page(app: &ShowcaseApp) -> Element<Msg> {
     };
     page(
         "Bottom navigation",
-        "The native bar is configured by the Screen, like the toolbar; the page only draws the content above it.",
+        "The native bar is configured on the Scaffold, like the app bar; the page only draws the content above it.",
         body![Text::new(content).size(20).color(COLOR_ACCENT)],
     )
 }
@@ -920,7 +972,7 @@ pub(crate) fn bottom_navigation(app: &ShowcaseApp) -> BottomNavigation<Msg> {
 fn toolbar_page(app: &ShowcaseApp) -> Element<Msg> {
     page(
         "Toolbar",
-        "The native toolbar is configured by the Screen, not by page content.",
+        "The native app bar is configured on the Scaffold, not by page content.",
         body![
             Text::new(format!("Toolbar taps: {}", app.toolbar_taps))
                 .size(18)

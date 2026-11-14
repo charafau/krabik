@@ -1,6 +1,7 @@
 //! C entry points called by the Swift host. They decode arguments and hand over to the session.
 
 use crate::geometry::Size;
+use crate::host::ChromeEvent;
 use crate::host::HostKind;
 use crate::ios::controller::{IosController, IosSession};
 use crate::ios::host::IosState;
@@ -293,4 +294,26 @@ pub unsafe extern "C" fn krabik_ios_on_back(handle: u64) -> bool {
             with_session(handle, |session| infallible(session.back(&mut mtm))).unwrap_or(false);
     });
     handled
+}
+
+/// The user acted on the floating action button, the drawer or the snackbar.
+///
+/// `kind` and `index` are decoded by `ChromeEvent::from_code`.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_on_chrome_event(handle: u64, kind: i64, index: i64) {
+    let Some(mut mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let Some(event) = ChromeEvent::from_code(kind, index) else {
+        return;
+    };
+    guard("chrome event", || {
+        with_session(handle, |session| {
+            infallible(session.chrome_event(&mut mtm, event));
+        });
+    });
 }
