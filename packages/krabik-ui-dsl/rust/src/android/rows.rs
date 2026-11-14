@@ -84,9 +84,25 @@ impl AndroidState {
 
         let root = tree::row_root(list, index);
         let width = width_px.max(1) as f32 / self.density;
-        let (tree, layout) =
-            self.runtime
-                .layout_subtree(&element, root, Size::new(width, 100_000.0));
+        let tree = self.runtime.build_subtree(&element, root);
+
+        // A render rebinds every attached row. Most of them did not change:
+        // keep the widgets and frames, and only take over the new handlers.
+        if let Some(state) = self.row_states.get_mut(&(list, holder))
+            && state.index == index
+            && state.width_px == width_px
+            && state.tree == tree
+        {
+            let height = state.height_px;
+            state.tree = tree;
+            self.clear_row_actions(list, index);
+            let state = &self.row_states[&(list, holder)];
+            let actions = row_actions(&state.tree);
+            self.store_row_actions(list, index, actions);
+            return Ok(height);
+        }
+
+        let layout = self.runtime.layout_tree(&tree, Size::new(width, 100_000.0));
 
         let previous = self.row_states.remove(&(list, holder));
         let had_previous = previous.is_some();
@@ -157,17 +173,20 @@ impl AndroidState {
             .get(&root)
             .map_or(0.0, |frame| frame.height)
             .max(0.0);
+        let height_px = (height * self.density).round().max(1.0) as jint;
         self.row_states.insert(
             (list, holder),
             RowState {
                 index,
+                width_px,
+                height_px,
                 tree,
                 layout,
                 views,
             },
         );
 
-        Ok((height * self.density).round().max(1.0) as jint)
+        Ok(height_px)
     }
 
     /// Releases the widgets and actions of the row a holder currently shows.
@@ -198,15 +217,22 @@ impl AndroidState {
     }
 
     pub(crate) fn record_row_actions(&mut self, list: NodeId, index: usize, tree: &UiNode) {
-        let mut ids = Vec::new();
-        for node in tree::preorder(tree) {
-            if let Some(actions) = Actions::of(node) {
-                self.row_actions.insert(node.id, actions);
-                ids.push(node.id);
-            }
-        }
+        self.store_row_actions(list, index, row_actions(tree));
+    }
+
+    fn store_row_actions(&mut self, list: NodeId, index: usize, actions: Vec<(NodeId, Actions)>) {
+        let ids = actions.iter().map(|(id, _)| *id).collect();
+        self.row_actions.extend(actions);
         self.row_action_ids.insert((list, index), ids);
     }
+}
+
+/// The handlers of every widget in a row.
+fn row_actions(tree: &UiNode) -> Vec<(NodeId, Actions)> {
+    tree::preorder(tree)
+        .into_iter()
+        .filter_map(|node| Actions::of(node).map(|actions| (node.id, actions)))
+        .collect()
 }
 
 pub(crate) fn create_recycler<'local>(

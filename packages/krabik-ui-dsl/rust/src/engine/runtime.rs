@@ -97,28 +97,38 @@ impl Runtime {
         let suppress_animation = self.viewport != viewport;
         self.viewport = viewport;
 
-        // Variable-height lists converge in a couple of passes: the first one
-        // measures the rows it materialized, the next uses those heights to
-        // recompute the prefix sums and the window. Cap the loop so a row whose
-        // height oscillates with the window cannot spin forever.
-        let mut iteration = 0;
-        let (mut next, info, layout) = loop {
-            let (next, info) = tree::build_with_focus(
-                element,
-                &self.scroll_offsets,
-                viewport,
-                &mut self.measurements,
-                &self.focused_rows,
-                self.focused,
-            );
-            for id in &info.reset_scroll {
-                self.scroll_offsets.remove(id);
-            }
-            let layout = layout::compute(&next, viewport, self.measurer.as_ref());
-            let changed = self.record_heights(&info, &layout);
-            iteration += 1;
-            if !changed || iteration >= 3 {
-                break (next, info, layout);
+        // Most messages change little or nothing on a given host. When the
+        // rebuilt tree equals the current one, the frames are still valid, so
+        // the layout pass (and the native text measurement behind it) is
+        // skipped. The new tree still replaces the old one: it carries the
+        // handlers of this render.
+        let (mut first, first_info) = self.build(element, viewport);
+        tree::stamp_recycler_revision(&mut first, self.revision);
+        let unchanged =
+            !suppress_animation && first_info.reset_scroll.is_empty() && first == self.tree;
+
+        let (mut next, info, layout) = if unchanged {
+            (first, first_info, None)
+        } else {
+            // Variable-height lists converge in a couple of passes: the first
+            // one measures the rows it materialized, the next uses those
+            // heights to recompute the prefix sums and the window. Cap the
+            // loop so a row whose height oscillates with the window cannot
+            // spin forever.
+            let mut iteration = 0;
+            let mut built = (first, first_info);
+            loop {
+                let (next, info) = built;
+                for id in &info.reset_scroll {
+                    self.scroll_offsets.remove(id);
+                }
+                let layout = layout::compute(&next, viewport, self.measurer.as_ref());
+                let changed = self.record_heights(&info, &layout);
+                iteration += 1;
+                if !changed || iteration >= 3 {
+                    break (next, info, Some(layout));
+                }
+                built = self.build(element, viewport);
             }
         };
 
@@ -158,25 +168,40 @@ impl Runtime {
         };
 
         let mut ops = render::diff(&self.tree, &next);
-        let mut layout_ops = render::diff_layout(&self.tree, &next, &self.layout, &layout);
-        if suppress_animation {
-            for op in &mut layout_ops {
-                if let render::Op::Layout { animation, .. } = op {
-                    *animation = None;
+        if let Some(layout) = layout {
+            let mut layout_ops = render::diff_layout(&self.tree, &next, &self.layout, &layout);
+            if suppress_animation {
+                for op in &mut layout_ops {
+                    if let render::Op::Layout { animation, .. } = op {
+                        *animation = None;
+                    }
                 }
             }
+            ops.extend(layout_ops);
+            self.layout = layout;
         }
-        ops.extend(layout_ops);
 
-        let size = layout
+        let size = self
+            .layout
             .frames
             .get(&ROOT_ID)
             .map_or(viewport, |root| Size::new(root.width, root.height));
 
         self.tree = next;
-        self.layout = layout;
 
         Update { size, ops }
+    }
+
+    /// Builds the tree for `element` with the current scroll and focus state.
+    fn build(&mut self, element: &RawElement, viewport: Size) -> (UiNode, BuildInfo) {
+        tree::build_with_focus(
+            element,
+            &self.scroll_offsets,
+            viewport,
+            &mut self.measurements,
+            &self.focused_rows,
+            self.focused,
+        )
     }
 
     /// Stores the heights the last layout produced for variable-height rows.
@@ -358,17 +383,16 @@ impl Runtime {
         self.row_sources.get(&id).map(|props| props.item_count)
     }
 
-    /// Builds and lays out one recycled row with its own root id.
+    /// Builds one recycled row with its own root id.
     #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
-    pub(crate) fn layout_subtree(
-        &self,
-        element: &RawElement,
-        root: NodeId,
-        viewport: Size,
-    ) -> (UiNode, LayoutResult) {
-        let (tree, _) = tree::build_at(element, root);
-        let layout = layout::compute(&tree, viewport, self.measurer.as_ref());
-        (tree, layout)
+    pub(crate) fn build_subtree(&self, element: &RawElement, root: NodeId) -> UiNode {
+        tree::build_at(element, root).0
+    }
+
+    /// Lays out a row built by [`Runtime::build_subtree`].
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    pub(crate) fn layout_tree(&self, tree: &UiNode, viewport: Size) -> LayoutResult {
+        layout::compute(tree, viewport, self.measurer.as_ref())
     }
 
     /// The scroll offset recorded for a node, if any.
@@ -926,5 +950,71 @@ mod tests {
         for (item, previous) in before.iter().enumerate().take(count + 1).skip(index + 1) {
             assert_eq!(measurement.prefix[item], previous + 10.0);
         }
+    }
+
+    /// Counts text measurements, which stand for the cost of a layout pass.
+    struct CountingMeasure(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl Measure for CountingMeasure {
+        fn measure(&self, text: &TextProps, constraints: Constraints) -> Size {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            ApproximateMeasure.measure(text, constraints)
+        }
+    }
+
+    #[test]
+    fn an_unchanged_render_skips_layout_and_emits_nothing() {
+        let measured = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut runtime = Runtime::new(Box::new(CountingMeasure(measured.clone())));
+        assert!(
+            !runtime
+                .update(&screen("Hello").into_raw(), viewport())
+                .is_empty()
+        );
+        let frames = runtime.frames().clone();
+        let after_first = measured.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(after_first > 0);
+
+        let update = runtime.update(&screen("Hello").into_raw(), viewport());
+
+        assert!(update.is_empty(), "{:?}", update.ops);
+        assert_eq!(update.size, viewport());
+        assert_eq!(runtime.frames(), &frames);
+        assert_eq!(
+            measured.load(std::sync::atomic::Ordering::Relaxed),
+            after_first
+        );
+
+        // A real change still lays out, and so does a new viewport.
+        assert!(
+            !runtime
+                .update(&screen("Hello, world").into_raw(), viewport())
+                .is_empty()
+        );
+        let before_resize = measured.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(before_resize > after_first);
+        runtime.update(&screen("Hello, world").into_raw(), Size::new(200.0, 600.0));
+        assert!(measured.load(std::sync::atomic::Ordering::Relaxed) > before_resize);
+    }
+
+    #[test]
+    fn an_unchanged_render_still_takes_over_the_new_handlers() {
+        fn counter(step: i32) -> Element<i32> {
+            Column::new()
+                .child(Button::new("Add").on_click(step))
+                .into()
+        }
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&counter(1).into_raw(), viewport());
+        let button = runtime.tree().children[0].children[0].id;
+
+        let update = runtime.update(&counter(5).into_raw(), viewport());
+
+        assert!(update.is_empty());
+        let message = actions(&runtime, button)
+            .click
+            .message(())
+            .expect("handler");
+        assert_eq!(message.downcast_ref::<i32>(), Some(&5));
     }
 }
