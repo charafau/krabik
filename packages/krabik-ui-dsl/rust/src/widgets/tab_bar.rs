@@ -2,7 +2,7 @@
 
 use std::marker::PhantomData;
 
-use crate::element::{Element, ElementKind, RawElement, style_builder};
+use crate::element::{Element, ElementKind, RawElement, style_builder, text_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
@@ -141,6 +141,7 @@ impl<M> From<Tabs<M>> for Element<M> {
 }
 
 style_builder!(TabBar);
+text_builder!(TabBar);
 
 /// The height of a native tab bar.
 const TAB_BAR_HEIGHT: f32 = 48.0;

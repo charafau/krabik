@@ -281,6 +281,9 @@ impl IosState {
                     let snapshot =
                         animation.map(|_| style_snapshot(&handle.view, handle.gradient.as_ref()));
                     update_content(&mut handle.content, &node, self.handle, self.host, mtm);
+                    // The layout operation that follows a padding change
+                    // insets the content with this value.
+                    handle.padding = node.style.padding;
                     apply_style(&handle.view, &node, &mut handle.gradient);
                     apply_accessibility(&handle.view, &node, mtm);
                     if let (Some(animation), Some(snapshot)) = (animation, snapshot) {

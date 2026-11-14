@@ -174,6 +174,10 @@ impl<T: Send + Sync + 'static, M> List<T, M> {
 
     /// Declares a revision of the item sequence.
     ///
+    /// Only a list without [`item_height`](Self::item_height) uses it: a
+    /// fixed-height list needs no measurements to cache, and a recycled list
+    /// is rebound by the runtime on every render.
+    ///
     /// Change the value whenever the items, their order, or the strings their
     /// keys derive from change. The runtime caches row heights and prefix sums
     /// per revision, so an unchanged revision makes a rebuild cost only the

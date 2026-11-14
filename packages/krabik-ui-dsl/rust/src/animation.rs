@@ -1,6 +1,6 @@
-//! Pure curve evaluation shared by the platform renderers.
+//! Pure curve evaluation for the iOS frame animator.
 //!
-//! UIKit and Android expose their timing curves as native objects that cannot
+//! UIKit exposes its timing curves as native objects that cannot
 //! be sampled from Rust. The display-link frame animator needs a value for
 //! every tick, so the curves are evaluated here instead.
 

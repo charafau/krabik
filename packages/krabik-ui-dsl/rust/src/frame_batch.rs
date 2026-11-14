@@ -2,10 +2,11 @@
 //!
 //! Renderers that apply a frame with one call per node pay a JNI (or FFI)
 //! crossing per node. Batching trades that for a registry keyed by node id and
-//! two primitive arrays, which cross the boundary in constant time.
+//! three primitive arrays, which cross the boundary in constant time.
 //!
-//! The packed layout is one id per node and four integers per node in
-//! `x, y, width, height` order.
+//! The packed layout is one id per node, four integers per node in
+//! `x, y, width, height` order, and six integers per node describing its
+//! animation.
 
 use crate::geometry::Rect;
 use crate::tree::NodeId;
@@ -106,7 +107,7 @@ mod tests {
     }
 
     #[test]
-    fn animations_are_packed_two_integers_per_node() {
+    fn animations_are_packed_six_integers_per_node() {
         let mut batch = FrameBatch::new();
         batch.push(
             NodeId(1),

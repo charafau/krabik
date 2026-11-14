@@ -75,6 +75,10 @@ macro_rules! widgets {
                 }
             }
         }
+
+        /// Every tag in the table, for the test that keeps them distinct.
+        #[cfg(test)]
+        const WIDGET_TAGS: &[(&str, u64)] = &[$((stringify!($variant), $tag),)+];
     };
 }
 
@@ -168,3 +172,27 @@ pub(crate) struct TextStyleMut<'a> {
 /// The width assumed for a control that fills its container when the
 /// container gives no bound.
 pub(crate) const CONTROL_WIDTH: f32 = 200.0;
+
+#[cfg(test)]
+mod tests {
+    use super::WIDGET_TAGS;
+
+    /// Tags used by the containers in `ElementKind::tag`.
+    const CONTAINER_TAGS: [u64; 7] = [1, 2, 3, 8, 9, 11, 20];
+
+    /// A tag is part of a node's identity. Two kinds sharing one would get
+    /// the same id at the same position, and the diff would update one
+    /// widget's native view with the other's properties.
+    #[test]
+    fn every_widget_tag_is_unique() {
+        for (index, (name, tag)) in WIDGET_TAGS.iter().enumerate() {
+            assert!(
+                !CONTAINER_TAGS.contains(tag),
+                "{name} uses tag {tag}, which belongs to a container"
+            );
+            for (other, other_tag) in &WIDGET_TAGS[index + 1..] {
+                assert_ne!(tag, other_tag, "{name} and {other} share tag {tag}");
+            }
+        }
+    }
+}

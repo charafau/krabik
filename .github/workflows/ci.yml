@@ -95,6 +95,9 @@ jobs:
           # the platform is versioned 37.0, which is what compileSdk = 37 uses
           packages: platforms;android-37.0 build-tools;37.0.0 ndk;27.2.12479018
       - uses: gradle/actions/setup-gradle@v6
+      # lints the Android renderer, which the `check` job never compiles
+      # because it only builds for the host
+      - run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --target aarch64-linux-android -- -D warnings
       # arm64 is the production ABI; building it also compiles the Kotlin and JNI code
       - name: Assemble the dev harness debug APK
         working-directory: packages/krabik-ui-dsl/harness/android
