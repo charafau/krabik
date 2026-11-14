@@ -35,7 +35,7 @@ pub(crate) fn update_radio_group(
             JValue::Object(&labels),
             JValue::Int(props.selected.map_or(-1, |index| index as jint)),
             JValue::Float(props.size),
-            JValue::Int(props.color as jint),
+            JValue::Int(props.color.argb() as jint),
             JValue::Float(props.spacing),
             JValue::Bool(matches!(props.weight, FontWeight::Bold)),
         ],

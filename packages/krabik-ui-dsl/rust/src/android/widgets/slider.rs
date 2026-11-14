@@ -26,7 +26,7 @@ pub(crate) fn update_slider(
             JValue::Float(props.min),
             JValue::Float(max),
             JValue::Float(props.step.unwrap_or(0.0)),
-            JValue::Int(props.color as jint),
+            JValue::Int(props.color.argb() as jint),
         ],
     )?;
     let value = snap_slider_value(props.value, props.min, max, props.step);

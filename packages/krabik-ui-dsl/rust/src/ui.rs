@@ -112,7 +112,7 @@ mod tests {
         let ElementKind::Widget(Widget::Spinner(props)) = &element.kind else {
             panic!("expected spinner");
         };
-        assert_eq!(props.color, 0xFF00_897B);
+        assert_eq!(props.color, Color::fixed(0xFF00_897B));
     }
 
     #[test]
@@ -255,10 +255,19 @@ mod tests {
 
     #[test]
     fn disabled_decoration_is_dimmed_without_changing_rgb() {
-        assert_eq!(dim_color(0xFF21_96F3, true), 0xFF21_96F3);
-        assert_eq!(dim_color(0xFF21_96F3, false), 0x6621_96F3);
+        assert_eq!(
+            dim_color(Color::fixed(0xFF21_96F3), true),
+            Color::fixed(0xFF21_96F3)
+        );
+        assert_eq!(
+            dim_color(Color::fixed(0xFF21_96F3), false),
+            Color::fixed(0x6621_96F3)
+        );
         // A translucent color keeps its own alpha as the base.
-        assert_eq!(dim_color(0x8021_96F3, false), 0x3321_96F3);
+        assert_eq!(
+            dim_color(Color::fixed(0x8021_96F3), false),
+            Color::fixed(0x3321_96F3)
+        );
     }
 
     #[test]
@@ -418,5 +427,20 @@ mod tests {
             .into();
 
         assert_eq!(from_macro.into_raw(), by_hand.into_raw());
+    }
+
+    #[test]
+    fn colors_follow_the_color_scheme() {
+        const CARD: Color = Color::adaptive(0xFFF4_F4F4, 0xFF1E_1E1E);
+        assert_eq!(CARD.resolve(ColorScheme::Light).argb(), 0xFFF4_F4F4);
+        assert_eq!(CARD.resolve(ColorScheme::Dark).argb(), 0xFF1E_1E1E);
+        // A plain number is the same in both appearances.
+        let fixed: Color = 0xFF21_96F3.into();
+        assert_eq!(fixed.resolve(ColorScheme::Dark).argb(), 0xFF21_96F3);
+        // Dimming keeps both values.
+        assert_eq!(
+            dim_color(Color::adaptive(0xFF00_0000, 0xFFFF_FFFF), false),
+            Color::adaptive(0x6600_0000, 0x66FF_FFFF)
+        );
     }
 }

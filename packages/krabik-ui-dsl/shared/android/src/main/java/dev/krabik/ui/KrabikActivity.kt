@@ -12,6 +12,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 
 /**
  * Hosts the Rust session full screen, edge to edge.
@@ -29,6 +31,7 @@ abstract class KrabikActivity : FragmentActivity() {
 
     private lateinit var root: RustRootView
     private lateinit var controller: KrabikHostController
+    private lateinit var retained: RetainedApp
 
     /** Loads the native renderer, e.g. with `System.loadLibrary`. */
     protected open fun loadNativeLibrary() {}
@@ -50,12 +53,15 @@ abstract class KrabikActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // The Rust session does not survive the activity, so fragments saved
         // by a previous instance would point at a session that no longer
-        // exists. Start clean instead of restoring them.
+        // exists. Start clean instead of restoring them; the application
+        // itself is carried over below and rebuilds its screens.
         super.onCreate(null)
 
         loadNativeLibrary()
         installApp()
-        root = RustRootView(this)
+        retained = ViewModelProvider(this)[RetainedApp::class.java]
+        root = RustRootView(this, retainedApp = retained.id)
+        retained.id = 0L
 
         val toolbar = Toolbar(this)
         val bottomNavigation = KrabikBottomNavigation(this) { index ->
@@ -184,7 +190,28 @@ abstract class KrabikActivity : FragmentActivity() {
     }
 
     override fun onDestroy() {
-        root.destroy()
+        // A configuration change the manifest does not handle, such as a
+        // switch between light and dark, recreates the activity so every
+        // native view picks up the new resources. The application's state
+        // must not be lost with it.
+        retained.id = root.destroy(retain = isChangingConfigurations)
         super.onDestroy()
+    }
+}
+
+/**
+ * Holds the Rust application while its activity is being recreated.
+ *
+ * A `ViewModel` outlives a configuration change and is cleared when the
+ * activity is really finished.
+ */
+internal class RetainedApp : ViewModel() {
+    var id = 0L
+
+    override fun onCleared() {
+        if (id != 0L) {
+            RustRootView.nativeDropRetainedApp(id)
+            id = 0L
+        }
     }
 }

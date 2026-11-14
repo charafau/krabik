@@ -22,6 +22,7 @@ import androidx.test.espresso.matcher.ViewMatchers.isSelected
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.hamcrest.Matchers.anyOf
 import org.hamcrest.Matchers.not
 import org.junit.Assert.assertTrue
@@ -139,6 +140,53 @@ class ShowcaseTest {
             openPage("Styling")
             onView(withText("Disabled action")).check(matches(not(isEnabled())))
             tapBack()
+        }
+    }
+
+    /**
+     * A switch between light and dark recreates the activity, so the native
+     * chrome picks up the new theme. The application and its screens must
+     * come back as they were, repainted for the new appearance.
+     */
+    @Test
+    fun switchingToDarkKeepsTheScreenAndItsState() {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        fun night(mode: String) {
+            automation.executeShellCommand("cmd uimode night $mode").close()
+            Thread.sleep(2500)
+        }
+        fun screenBackground(scenario: ActivityScenario<MainActivity>): Int {
+            var color = 0
+            scenario.onActivity { activity ->
+                val screen = activity.supportFragmentManager.fragments
+                    .last { it.view != null && it is KrabikScreenFragment }
+                color = (screen.requireView().background as ColorDrawable).color
+            }
+            return color
+        }
+
+        night("no")
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                openPage("Radio group")
+                onView(withText("Large")).perform(click())
+                onView(withText("Selected: Large")).check(matches(isDisplayed()))
+                assertTrue(Color.luminance(screenBackground(scenario)) > 0.5f)
+
+                night("yes")
+
+                // Still on the page, with the choice made before the switch.
+                onView(withText("Selected: Large")).check(matches(isDisplayed()))
+                assertTrue(
+                    "the screen must be repainted dark",
+                    Color.luminance(screenBackground(scenario)) < 0.5f,
+                )
+                // The stack came back too: back returns to the catalog.
+                tapBack()
+                onView(withText("Krabik UI DSL")).check(matches(isDisplayed()))
+            }
+        } finally {
+            night("no")
         }
     }
 

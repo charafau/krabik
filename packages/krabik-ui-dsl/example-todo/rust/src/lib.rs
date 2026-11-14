@@ -13,15 +13,15 @@ use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
 use krabik_ui_dsl::ui::{
-    Align, Button, Checkbox, Column, EdgeInsets, Element, List, ProgressIndicator, RadioButton,
-    Row, Slider, Spacer, Switch, Text, TextField,
+    Align, Button, Checkbox, Color, Column, EdgeInsets, Element, List, ProgressIndicator,
+    RadioButton, Row, Slider, Spacer, Switch, Text, TextField,
 };
 
-const COLOR_TEXT: u32 = 0xFF20_2125;
-const COLOR_MUTED: u32 = 0xFF66_6666;
-const COLOR_SURFACE: u32 = 0xFFF4_F4F4;
-const COLOR_DONE: u32 = 0xFFE6_F4EA;
-const COLOR_ACCENT: u32 = 0xFF00_897B;
+const COLOR_TEXT: Color = Color::adaptive(0xFF20_2125, 0xFFE8_EAED);
+const COLOR_MUTED: Color = Color::adaptive(0xFF66_6666, 0xFFA0_A4A8);
+const COLOR_SURFACE: Color = Color::adaptive(0xFFF4_F4F4, 0xFF2A_2B2E);
+const COLOR_DONE: Color = Color::adaptive(0xFFE6_F4EA, 0xFF1E_3A2A);
+const COLOR_ACCENT: Color = Color::adaptive(0xFF00_897B, 0xFF4D_B6AC);
 
 /// Every recycled row has the same height, so the list can stay virtualized.
 const ROW_HEIGHT: f32 = 60.0;

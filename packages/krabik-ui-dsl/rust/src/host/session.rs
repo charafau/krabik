@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use crate::app::AnyApp;
 use crate::engine::tree::{self, NodeId};
 use crate::message::Message;
-use crate::navigation::Screen;
+use crate::navigation::{Screen, ScreenTransition};
 use crate::presentation::Dialog;
+use crate::style::ColorScheme;
 
 use super::{Actions, Controller, Host, HostKind, NodeEvent, Platform};
 
@@ -28,6 +29,10 @@ pub(crate) struct Session<P: Platform> {
     dialog: Option<Dialog>,
     /// Whether the controller was last told that back is handled here.
     back_enabled: bool,
+    /// Whether the controller has been given a navigation stack yet.
+    navigation_synced: bool,
+    /// The appearance every host resolves its colours for.
+    scheme: ColorScheme,
 }
 
 impl<P: Platform> Session<P> {
@@ -44,7 +49,22 @@ impl<P: Platform> Session<P> {
             navigation: Vec::new(),
             dialog: None,
             back_enabled: false,
+            navigation_synced: false,
+            scheme: ColorScheme::Light,
         }
+    }
+
+    /// Ends the session and hands the application back, so another session
+    /// can continue with its state.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub(crate) fn into_app(self) -> Box<dyn AnyApp> {
+        self.app
+    }
+
+    /// Records whether the device shows its light or dark appearance. The
+    /// next render repaints whatever depends on it.
+    pub(crate) fn set_color_scheme(&mut self, scheme: ColorScheme) {
+        self.scheme = scheme;
     }
 
     /// Registers the native controller. Until then only the main host renders.
@@ -107,6 +127,7 @@ impl<P: Platform> Session<P> {
                 HostKind::Sheet => self.app.sheet().map(|sheet| sheet.into_content()),
             };
             if let Some(element) = element {
+                host.runtime_mut().set_color_scheme(self.scheme);
                 host.render(cx, &element)?;
             }
         }
@@ -165,12 +186,22 @@ impl<P: Platform> Session<P> {
                 self.pending.retain(|_, pending| *pending != kind);
             }
         }
+        // The first stack the controller receives is where the application
+        // already is, for example after the activity was recreated. It is
+        // shown, not replayed as a series of animated pushes.
+        let restoring = !std::mem::replace(&mut self.navigation_synced, true);
         for screen in &screens[common..] {
             let host = self.next_host;
             self.next_host += 1;
             self.pending
                 .insert(host, HostKind::Screen(screen.key.clone()));
-            controller.push(cx, host, screen)?;
+            if restoring {
+                let mut screen = screen.clone();
+                screen.transition = ScreenTransition::None;
+                controller.push(cx, host, &screen)?;
+            } else {
+                controller.push(cx, host, screen)?;
+            }
         }
         controller.set_root_visible(cx, screens.is_empty())?;
         // Sent on every navigation change, so the native chrome never keeps a
@@ -456,9 +487,13 @@ mod tests {
 
     impl Controller<Fake> for FakeController {
         fn push(&self, _cx: &mut (), host: u64, screen: &Screen) -> Result<(), Infallible> {
+            let how = match screen.transition {
+                ScreenTransition::None => " instantly",
+                ScreenTransition::Slide | ScreenTransition::Fade => "",
+            };
             self.0
                 .borrow_mut()
-                .push(format!("push {host} {}", screen.key));
+                .push(format!("push {host} {}{how}", screen.key));
             Ok(())
         }
         fn pop(
@@ -541,7 +576,9 @@ mod tests {
         type Msg = Msg;
 
         fn view(&self) -> Element<Msg> {
-            Column::new().into()
+            Column::new()
+                .background(crate::style::Color::BACKGROUND)
+                .into()
         }
 
         fn update(&mut self, msg: Msg) {
@@ -635,11 +672,65 @@ mod tests {
             ..State::default()
         });
         session.render_all(&mut ()).unwrap();
-        assert_eq!(take(&log), ["push 1 home", "root false", "chrome HOME"]);
+        // The stack the application starts with is shown, not animated in.
+        assert_eq!(
+            take(&log),
+            ["push 1 home instantly", "root false", "chrome HOME"]
+        );
 
         // Nothing changed, so a second render sends nothing.
         attach_pending(&mut session);
         assert!(take(&log).is_empty());
+    }
+
+    #[test]
+    fn a_restored_stack_is_shown_at_once_and_later_pushes_animate() {
+        // An activity recreated with the same application starts three
+        // screens deep.
+        let (mut session, app, log) = session(State {
+            stack: vec!["home", "a", "b"],
+            ..State::default()
+        });
+        session.render_all(&mut ()).unwrap();
+        attach_pending(&mut session);
+        assert_eq!(
+            take(&log)[..3],
+            [
+                "push 1 home instantly",
+                "push 2 a instantly",
+                "push 3 b instantly"
+            ]
+        );
+
+        app.state().stack.push("c");
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(take(&log)[0], "push 4 c");
+    }
+
+    #[test]
+    fn the_color_scheme_reaches_every_host() {
+        use crate::style::{Color, ColorScheme};
+        use crate::tree::NodeKind;
+        use crate::widgets::Widget;
+        let (mut session, _app, _log) = session(State {
+            stack: vec!["home"],
+            ..State::default()
+        });
+        session.set_color_scheme(ColorScheme::Dark);
+        session.render_all(&mut ()).unwrap();
+        attach_pending(&mut session);
+
+        let screen = session
+            .hosts
+            .values()
+            .find(|host| matches!(host.kind, HostKind::Screen(_)))
+            .expect("screen host");
+        let NodeKind::Widget(Widget::Text(text)) =
+            &screen.runtime.tree().children[0].children[0].kind
+        else {
+            panic!("expected the text");
+        };
+        assert_eq!(text.color.argb(), Color::TEXT.dark);
     }
 
     #[test]

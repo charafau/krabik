@@ -7,6 +7,7 @@ use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
 use crate::message::Wrap;
+use crate::style::Color;
 use crate::style::FontWeight;
 use crate::widgets::CONTROL_WIDTH;
 use crate::widgets::Column;
@@ -26,8 +27,8 @@ pub struct TabBarProps {
     pub on_select: Handler<usize>,
     /// Font size of the labels in logical points.
     pub size: f32,
-    /// ARGB color of the labels.
-    pub color: u32,
+    /// Color of the labels.
+    pub color: Color,
     /// Font weight of the labels.
     pub weight: FontWeight,
 }
@@ -40,7 +41,7 @@ impl TabBarProps {
             selected: 0,
             on_select: Handler::none(),
             size: 14.0,
-            color: 0xFF00_0000,
+            color: Color::TEXT,
             weight: FontWeight::Normal,
         }
     }
@@ -155,6 +156,10 @@ impl WidgetProps for TabBarProps {
             color: &mut self.color,
             weight: &mut self.weight,
         })
+    }
+
+    fn resolve_colors(&mut self, scheme: crate::style::ColorScheme) {
+        self.color = self.color.resolve(scheme);
     }
 }
 

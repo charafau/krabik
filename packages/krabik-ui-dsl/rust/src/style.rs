@@ -1,5 +1,89 @@
 //! Layout and decoration values shared by every widget.
 
+/// Whether the device is showing its light or its dark appearance.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ColorScheme {
+    /// Dark content on a light background.
+    #[default]
+    Light,
+    /// Light content on a dark background.
+    Dark,
+}
+
+/// A colour, with a value for the light appearance and one for the dark.
+///
+/// A plain ARGB number such as `0xFF21_96F3` converts into a colour that is
+/// the same in both appearances, so `.background(0xFF21_96F3)` keeps working.
+/// Use [`Color::adaptive`] or one of the named colours to follow the device:
+///
+/// ```
+/// use krabik_ui_dsl::ui::Color;
+///
+/// const CARD: Color = Color::adaptive(0xFFF4_F4F4, 0xFF1E_1E1E);
+/// let title = Color::TEXT;
+/// # let _ = (CARD, title);
+/// ```
+///
+/// The engine picks the value for the current appearance when it builds the
+/// tree, so switching between light and dark is an ordinary update.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Color {
+    /// The ARGB value in the light appearance.
+    pub light: u32,
+    /// The ARGB value in the dark appearance.
+    pub dark: u32,
+}
+
+impl Color {
+    /// The default colour of text.
+    pub const TEXT: Self = Self::adaptive(0xFF00_0000, 0xFFE6_E1E5);
+    /// Text that should stand back: captions, hints, secondary labels.
+    pub const SECONDARY_TEXT: Self = Self::adaptive(0xFF66_6666, 0xFFA8_A8A8);
+    /// The page background.
+    pub const BACKGROUND: Self = Self::adaptive(0xFFFF_FFFF, 0xFF12_1212);
+    /// A card or field that sits on the page background.
+    pub const SURFACE: Self = Self::adaptive(0xFFF4_F4F4, 0xFF1E_1E1E);
+    /// Borders and dividers.
+    pub const OUTLINE: Self = Self::adaptive(0xFFD0_D0D0, 0xFF3A_3A3A);
+    /// The default accent of sliders, progress indicators and spinners.
+    pub const ACCENT: Self = Self::adaptive(0xFF21_96F3, 0xFF64_B5F6);
+
+    /// The same ARGB value in both appearances.
+    pub const fn fixed(argb: u32) -> Self {
+        Self {
+            light: argb,
+            dark: argb,
+        }
+    }
+
+    /// One ARGB value for the light appearance and one for the dark.
+    pub const fn adaptive(light: u32, dark: u32) -> Self {
+        Self { light, dark }
+    }
+
+    /// The colour with the value for `scheme` in both appearances.
+    pub const fn resolve(self, scheme: ColorScheme) -> Self {
+        match scheme {
+            ColorScheme::Light => Self::fixed(self.light),
+            ColorScheme::Dark => Self::fixed(self.dark),
+        }
+    }
+
+    /// The ARGB value of a colour the engine has resolved.
+    ///
+    /// The renderers read colours from the tree, where both values are
+    /// already the one for the current appearance.
+    pub const fn argb(self) -> u32 {
+        self.light
+    }
+}
+
+impl From<u32> for Color {
+    fn from(argb: u32) -> Self {
+        Self::fixed(argb)
+    }
+}
+
 /// A length in logical points (dp on Android, points on iOS).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Length {
@@ -149,19 +233,19 @@ pub enum TextAlign {
 pub struct Border {
     /// The stroke width in logical points.
     pub width: f32,
-    /// The ARGB stroke color.
-    pub color: u32,
+    /// The stroke color.
+    pub color: Color,
 }
 
 impl Border {
     /// Creates a border with the given width and color.
-    pub const fn new(width: f32, color: u32) -> Self {
-        Self { width, color }
+    pub fn new(width: f32, color: impl Into<Color>) -> Self {
+        Self {
+            width,
+            color: color.into(),
+        }
     }
 }
-
-/// The default accent color of sliders and progress indicators.
-pub const CONTROL_ACCENT: u32 = 0xFF21_96F3;
 
 /// The alpha multiplier applied to DSL-drawn decoration while a node is
 /// disabled.
@@ -170,17 +254,20 @@ pub const CONTROL_ACCENT: u32 = 0xFF21_96F3;
 /// borders and shadows that the DSL paints.
 pub const DISABLED_ALPHA: f32 = 0.4;
 
-/// Dims an ARGB color when its node is disabled, preserving the RGB channels.
+/// Dims a color when its node is disabled, preserving the RGB channels.
 ///
 /// The explicit opacity of a node is applied separately, so a disabled node
 /// keeps its own alpha and is dimmed on top of it.
-pub fn dim_color(argb: u32, enabled: bool) -> u32 {
+pub fn dim_color(color: Color, enabled: bool) -> Color {
     if enabled {
-        return argb;
+        return color;
     }
-    let alpha = (argb >> 24) & 0xFF;
-    let alpha = (alpha as f32 * DISABLED_ALPHA).round() as u32;
-    (argb & 0x00FF_FFFF) | (alpha << 24)
+    let dim = |argb: u32| {
+        let alpha = (argb >> 24) & 0xFF;
+        let alpha = (alpha as f32 * DISABLED_ALPHA).round() as u32;
+        (argb & 0x00FF_FFFF) | (alpha << 24)
+    };
+    Color::adaptive(dim(color.light), dim(color.dark))
 }
 
 /// Per-corner radii of a node's rounded corners.
@@ -226,29 +313,29 @@ pub enum GradientDirection {
 /// A two-color linear background gradient.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Gradient {
-    /// ARGB color at the start edge.
-    pub start: u32,
-    /// ARGB color at the end edge.
-    pub end: u32,
+    /// The color at the start edge.
+    pub start: Color,
+    /// The color at the end edge.
+    pub end: Color,
     /// The axis the gradient runs along.
     pub direction: GradientDirection,
 }
 
 impl Gradient {
     /// Creates a vertical gradient between two colors.
-    pub const fn vertical(start: u32, end: u32) -> Self {
+    pub fn vertical(start: impl Into<Color>, end: impl Into<Color>) -> Self {
         Self {
-            start,
-            end,
+            start: start.into(),
+            end: end.into(),
             direction: GradientDirection::Vertical,
         }
     }
 
     /// Creates a horizontal gradient between two colors.
-    pub const fn horizontal(start: u32, end: u32) -> Self {
+    pub fn horizontal(start: impl Into<Color>, end: impl Into<Color>) -> Self {
         Self {
-            start,
-            end,
+            start: start.into(),
+            end: end.into(),
             direction: GradientDirection::Horizontal,
         }
     }
@@ -455,8 +542,8 @@ pub struct Style {
     pub align_items: Align,
     /// Main-axis distribution of the node's children.
     pub justify_content: Justify,
-    /// ARGB background color, if any.
-    pub background: Option<u32>,
+    /// Background color, if any.
+    pub background: Option<Color>,
     /// Background gradient, if any. Takes precedence over `background`.
     pub gradient: Option<Gradient>,
     /// Radius of the node's rounded corners in logical points.
@@ -505,5 +592,21 @@ impl Style {
     pub fn corner_radii(&self) -> CornerRadii {
         self.corner_radii
             .unwrap_or_else(|| CornerRadii::all(self.corner_radius))
+    }
+}
+
+impl Style {
+    /// Picks the value for `scheme` in every colour of the style.
+    pub(crate) fn resolve_colors(&mut self, scheme: ColorScheme) {
+        if let Some(background) = &mut self.background {
+            *background = background.resolve(scheme);
+        }
+        if let Some(gradient) = &mut self.gradient {
+            gradient.start = gradient.start.resolve(scheme);
+            gradient.end = gradient.end.resolve(scheme);
+        }
+        if let Some(border) = &mut self.border {
+            border.color = border.color.resolve(scheme);
+        }
     }
 }

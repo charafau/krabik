@@ -10,6 +10,7 @@ use crate::geometry::{Rect, Size};
 use crate::layout::{self, LayoutResult};
 use crate::measure::Measure;
 use crate::render::{self, Op, Renderer};
+use crate::style::ColorScheme;
 use crate::tree::{self, BuildInfo, ListExtent, ListMeasurements, NodeId, ROOT_ID, UiNode};
 use crate::ui::{ListProps, RawElement};
 
@@ -69,6 +70,8 @@ pub struct Runtime {
     /// Incremented on every rebuild; stamped into recycled lists so their
     /// adapters rebind the visible rows after an app state change.
     revision: u64,
+    /// The appearance colours are resolved for.
+    scheme: ColorScheme,
 }
 
 impl Runtime {
@@ -87,7 +90,14 @@ impl Runtime {
             row_sources: HashMap::new(),
             viewport: Size::ZERO,
             revision: 0,
+            scheme: ColorScheme::Light,
         }
+    }
+
+    /// Chooses the appearance colours are resolved for. The next update
+    /// carries the colours that changed.
+    pub fn set_color_scheme(&mut self, scheme: ColorScheme) {
+        self.scheme = scheme;
     }
 
     /// Rebuilds the tree from `element` and returns the batch to apply.
@@ -194,14 +204,16 @@ impl Runtime {
 
     /// Builds the tree for `element` with the current scroll and focus state.
     fn build(&mut self, element: &RawElement, viewport: Size) -> (UiNode, BuildInfo) {
-        tree::build_with_focus(
+        let (mut tree, info) = tree::build_with_focus(
             element,
             &self.scroll_offsets,
             viewport,
             &mut self.measurements,
             &self.focused_rows,
             self.focused,
-        )
+        );
+        tree::resolve_colors(&mut tree, self.scheme);
+        (tree, info)
     }
 
     /// Stores the heights the last layout produced for variable-height rows.
@@ -386,7 +398,9 @@ impl Runtime {
     /// Builds one recycled row with its own root id.
     #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
     pub(crate) fn build_subtree(&self, element: &RawElement, root: NodeId) -> UiNode {
-        tree::build_at(element, root).0
+        let mut tree = tree::build_at(element, root).0;
+        tree::resolve_colors(&mut tree, self.scheme);
+        tree
     }
 
     /// Lays out a row built by [`Runtime::build_subtree`].
@@ -1016,5 +1030,41 @@ mod tests {
             .message(())
             .expect("handler");
         assert_eq!(message.downcast_ref::<i32>(), Some(&5));
+    }
+
+    #[test]
+    fn a_new_color_scheme_updates_only_the_nodes_whose_colors_change() {
+        use crate::style::Color;
+        fn page() -> Element {
+            Column::new()
+                .background(Color::adaptive(0xFFFF_FFFF, 0xFF00_0000))
+                .child(Text::new("Adaptive"))
+                .child(Text::new("Fixed").color(0xFF11_2233))
+                .into()
+        }
+        let text_color = |runtime: &Runtime, index: usize| match &runtime.tree().children[0]
+            .children[index]
+            .kind
+        {
+            NodeKind::Widget(Widget::Text(props)) => props.color.argb(),
+            other => panic!("expected text, got {other:?}"),
+        };
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&page().into_raw(), viewport());
+        assert_eq!(text_color(&runtime, 0), Color::TEXT.light);
+
+        runtime.set_color_scheme(ColorScheme::Dark);
+        let update = runtime.update(&page().into_raw(), viewport());
+
+        // The column and the default-coloured text change; the text with a
+        // fixed colour does not, and nothing moves.
+        assert_eq!(update.ops.len(), 2, "{:?}", update.ops);
+        assert!(update.ops.iter().all(|op| matches!(op, Op::Update(_))));
+        assert_eq!(text_color(&runtime, 0), Color::TEXT.dark);
+        assert_eq!(text_color(&runtime, 1), 0xFF11_2233);
+        assert_eq!(
+            runtime.tree().children[0].style.background,
+            Some(Color::fixed(0xFF00_0000))
+        );
     }
 }

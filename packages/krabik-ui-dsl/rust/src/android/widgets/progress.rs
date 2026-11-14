@@ -26,7 +26,7 @@ pub(crate) fn update_progress(
         &[
             JValue::Object(view),
             JValue::Float(props.value),
-            JValue::Int(props.color as jint),
+            JValue::Int(props.color.argb() as jint),
         ],
     )
 }
@@ -61,7 +61,7 @@ pub(crate) fn update_spinner(
         &ids.krabik_views,
         &[
             JValue::Object(view),
-            JValue::Int(props.color as jni::sys::jint),
+            JValue::Int(props.color.argb() as jni::sys::jint),
         ],
     )
 }

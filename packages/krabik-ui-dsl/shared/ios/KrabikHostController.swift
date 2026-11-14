@@ -26,6 +26,15 @@ final class KrabikHostController: UIViewController {
         }
     }
 
+    /// Colours Rust paints are fixed values, not dynamic system colours, so
+    /// Rust is told when the appearance changes and repaints them.
+    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+        super.traitCollectionDidChange(previous)
+        if previous?.userInterfaceStyle != traitCollection.userInterfaceStyle, session != 0 {
+            krabik_ios_set_color_scheme(session, traitCollection.userInterfaceStyle == .dark)
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -33,7 +42,8 @@ final class KrabikHostController: UIViewController {
         session = krabik_ios_create(
             Unmanaged.passUnretained(mainHost).toOpaque(),
             Double(view.bounds.width),
-            Double(view.bounds.height)
+            Double(view.bounds.height),
+            traitCollection.userInterfaceStyle == .dark
         )
         mainHost.bindMain(session: session)
         mainHost.frame = view.bounds
@@ -339,7 +349,7 @@ final class KrabikHostController: UIViewController {
     /// so content never sits under the status bar, home indicator or tab bar.
     private func hostController(
         _ host: RustHostView,
-        background: UIColor = .white
+        background: UIColor = .systemBackground
     ) -> UIViewController {
         let controller = UIViewController()
         controller.view.backgroundColor = background

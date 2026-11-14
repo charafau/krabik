@@ -35,7 +35,7 @@ pub use text_field::*;
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Wrap;
-use crate::style::FontWeight;
+use crate::style::{Color, ColorScheme, FontWeight};
 
 /// Declares [`Widget`] from one table: a variant, its properties type and its
 /// tag per line.
@@ -122,6 +122,11 @@ impl Widget {
         self.props().intrinsic_size(max_width, measurer)
     }
 
+    /// Picks the value for `scheme` in every colour the widget has.
+    pub(crate) fn resolve_colors(&mut self, scheme: ColorScheme) {
+        self.props_mut().resolve_colors(scheme);
+    }
+
     /// The text size, colour and weight, for a widget that shows text.
     pub(crate) fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
         self.props_mut().text_style()
@@ -141,6 +146,9 @@ pub(crate) trait WidgetProps: IntrinsicSize {
     fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
         None
     }
+
+    /// Picks the value for `scheme` in every colour the widget has.
+    fn resolve_colors(&mut self, scheme: ColorScheme);
 }
 
 /// How much room a widget wants. Written by hand for every widget.
@@ -153,7 +161,7 @@ pub(crate) trait IntrinsicSize {
 /// The text properties the shared `size`, `color` and `bold` builders set.
 pub(crate) struct TextStyleMut<'a> {
     pub size: &'a mut f32,
-    pub color: &'a mut u32,
+    pub color: &'a mut Color,
     pub weight: &'a mut FontWeight,
 }
 

@@ -5,6 +5,7 @@ use krabik_ui_dsl_macros::Widget;
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
+use crate::style::Color;
 use crate::style::FontWeight;
 use crate::widgets::IntrinsicSize;
 use crate::widgets::TextProps;
@@ -21,9 +22,9 @@ pub struct ButtonProps {
     /// Font size in logical points.
     #[widget(default = 16.0)]
     pub size: f32,
-    /// ARGB text color.
-    #[widget(default = 0xFF00_0000)]
-    pub color: u32,
+    /// Text color.
+    #[widget(default = Color::TEXT)]
+    pub color: Color,
     /// Font weight.
     #[widget(default = FontWeight::Normal)]
     pub weight: FontWeight,

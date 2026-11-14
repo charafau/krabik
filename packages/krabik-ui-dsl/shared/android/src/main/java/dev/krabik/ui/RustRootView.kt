@@ -2,6 +2,7 @@ package dev.krabik.ui
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.content.res.Configuration
 import android.util.LongSparseArray
 import android.view.View
 import android.view.ViewGroup
@@ -26,6 +27,7 @@ class RustRootView(
     context: Context,
     sessionHandle: Long = 0L,
     host: Long = 0L,
+    retainedApp: Long = 0L,
 ) : ViewGroup(context), View.OnClickListener {
 
     private val ownsSession = sessionHandle == 0L
@@ -35,7 +37,9 @@ class RustRootView(
     val session: Long
         get() = handle
     private var handle: Long = if (ownsSession) {
-        nativeCreate(context, resources.displayMetrics.density)
+        val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+            Configuration.UI_MODE_NIGHT_YES
+        nativeCreate(context, resources.displayMetrics.density, night, retainedApp)
     } else {
         sessionHandle
     }
@@ -330,8 +334,12 @@ class RustRootView(
     private fun lerp(start: Int, end: Int, fraction: Float): Int =
         (start + (end - start) * fraction).roundToInt()
 
-    private companion object {
-        const val ANIMATION_STRIDE = 6
+    companion object {
+        private const val ANIMATION_STRIDE = 6
+
+        /** Drops an application that was retained but never picked up again. */
+        @JvmStatic
+        external fun nativeDropRetainedApp(id: Long)
     }
 
     /** Forwards an edit of a native input back to Rust. */
@@ -482,21 +490,31 @@ class RustRootView(
         }
     }
 
-    /** Releases the Rust state when the activity goes away. */
-    fun destroy() {
+    /**
+     * Releases the Rust state when the activity goes away.
+     *
+     * With [retain], the application itself is kept for the activity that
+     * replaces this one; the returned id is what that activity passes as
+     * `retainedApp`. Otherwise returns `0`.
+     */
+    fun destroy(retain: Boolean = false): Long {
+        var retained = 0L
         if (handle != 0L) {
             if (ownsSession) {
-                nativeDestroy(handle)
+                retained = nativeDestroy(handle, retain)
             } else {
                 nativeDestroyHost(handle, hostId)
             }
             handle = 0L
         }
+        return retained
     }
 
     private external fun nativeCreate(
         context: Context,
         density: Float,
+        night: Boolean,
+        retainedApp: Long,
     ): Long
 
     private external fun nativeRender(handle: Long, host: Long, widthPx: Int, heightPx: Int)
@@ -568,7 +586,7 @@ class RustRootView(
 
     private external fun nativeUnbindRow(handle: Long, host: Long, nodeId: Long, holderId: Long)
 
-    private external fun nativeDestroy(handle: Long)
+    private external fun nativeDestroy(handle: Long, retain: Boolean): Long
 
     private external fun nativeAttachHost(handle: Long, host: Long)
 

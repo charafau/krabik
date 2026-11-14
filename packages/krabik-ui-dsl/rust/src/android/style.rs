@@ -4,6 +4,7 @@ use crate::android::handles::get as jni_handles;
 use crate::frame_batch::FrameBatch;
 use crate::geometry::{Rect, Size};
 use crate::render::RenderNode;
+use crate::style::Color;
 use crate::tree::NodeKind;
 use crate::ui::{Border, EdgeInsets, Gradient, GradientDirection, dim_color};
 use crate::widgets::Widget;
@@ -66,10 +67,10 @@ pub(crate) fn apply_style(
         &ids.krabik_style,
         &[
             JValue::Object(view),
-            JValue::Int(background.unwrap_or(0) as jint),
+            JValue::Int(background.map_or(0, Color::argb) as jint),
             JValue::Bool(background.is_some()),
-            JValue::Int(gradient.map_or(0, |gradient| gradient.start) as jint),
-            JValue::Int(gradient.map_or(0, |gradient| gradient.end) as jint),
+            JValue::Int(gradient.map_or(0, |gradient| gradient.start.argb()) as jint),
+            JValue::Int(gradient.map_or(0, |gradient| gradient.end.argb()) as jint),
             JValue::Bool(gradient.is_some()),
             JValue::Bool(
                 gradient
@@ -80,7 +81,7 @@ pub(crate) fn apply_style(
             JValue::Float(radii.bottom_right),
             JValue::Float(radii.bottom_left),
             JValue::Float(border.map_or(0.0, |border| border.width)),
-            JValue::Int(border.map_or(0, |border| border.color) as jint),
+            JValue::Int(border.map_or(0, |border| border.color.argb()) as jint),
             JValue::Bool(border.is_some()),
             JValue::Float(node.style.opacity.unwrap_or(1.0)),
             JValue::Bool(ripple),

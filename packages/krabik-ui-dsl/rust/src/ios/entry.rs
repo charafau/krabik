@@ -5,6 +5,7 @@ use crate::host::HostKind;
 use crate::ios::controller::{IosController, IosSession};
 use crate::ios::host::IosState;
 use crate::ios::{guard, infallible, with_session};
+use crate::style::ColorScheme;
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::NSObject;
@@ -27,7 +28,12 @@ pub(crate) fn states() -> &'static Mutex<HashMap<u64, IosSession>> {
 ///
 /// `root` must be a live `UIView` and the call must happen on the main thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn krabik_ios_create(root: *mut c_void, width: f64, height: f64) -> u64 {
+pub unsafe extern "C" fn krabik_ios_create(
+    root: *mut c_void,
+    width: f64,
+    height: f64,
+    dark: bool,
+) -> u64 {
     let Some(mtm) = MainThreadMarker::new() else {
         return 0;
     };
@@ -40,10 +46,38 @@ pub unsafe extern "C" fn krabik_ios_create(root: *mut c_void, width: f64, height
     let mut main = IosState::new(handle, 0, HostKind::Main, &root, mtm);
     main.viewport = Size::new(width.max(0.0) as f32, height.max(0.0) as f32);
     let mut session = IosSession::new(crate::app::create_app(), main);
+    session.set_color_scheme(scheme(dark));
     let mut cx = mtm;
     guard("create", || infallible(session.render_all(&mut cx)));
     states().lock().expect("ios states").insert(handle, session);
     handle
+}
+
+fn scheme(dark: bool) -> ColorScheme {
+    if dark {
+        ColorScheme::Dark
+    } else {
+        ColorScheme::Light
+    }
+}
+
+/// Tells the session that the device switched between its light and dark
+/// appearance, and repaints what depends on it.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_set_color_scheme(handle: u64, dark: bool) {
+    let Some(mut mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    guard("color scheme", || {
+        with_session(handle, |session| {
+            session.set_color_scheme(scheme(dark));
+            infallible(session.render_all(&mut mtm));
+        });
+    });
 }
 
 /// Rebuilds the tree for the new viewport and applies the resulting operations.
