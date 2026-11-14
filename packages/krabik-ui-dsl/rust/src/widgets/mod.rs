@@ -37,97 +37,79 @@ use crate::engine::measure::Measure;
 use crate::message::Wrap;
 use crate::style::FontWeight;
 
-/// A leaf widget: one native view with no children of its own.
-///
-/// This is the single list of widgets. Every place that needs to treat
-/// widgets differently matches on it exhaustively, so adding a variant makes
-/// the compiler point at each place that must handle it.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Widget {
+/// Declares [`Widget`] from one table: a variant, its properties type and its
+/// tag per line.
+macro_rules! widgets {
+    ($($(#[$doc:meta])* $variant:ident($props:ty) = $tag:literal,)+) => {
+        /// A leaf widget: one native view with no children of its own.
+        ///
+        /// This is the single list of widgets. Every place that needs to
+        /// treat widgets differently matches on it exhaustively, so adding a
+        /// variant makes the compiler point at each place that must handle
+        /// it.
+        #[derive(Clone, Debug, PartialEq)]
+        pub enum Widget {
+            $($(#[$doc])* $variant($props),)+
+        }
+
+        impl Widget {
+            /// A stable tag mixed into node identifiers, so a node that
+            /// changes widget type gets a new identity.
+            pub(crate) fn tag(&self) -> u64 {
+                match self {
+                    $(Self::$variant(_) => $tag,)+
+                }
+            }
+
+            /// The widget's properties, behind the interface every widget
+            /// shares.
+            fn props(&self) -> &dyn WidgetProps {
+                match self {
+                    $(Self::$variant(props) => props,)+
+                }
+            }
+
+            fn props_mut(&mut self) -> &mut dyn WidgetProps {
+                match self {
+                    $(Self::$variant(props) => props,)+
+                }
+            }
+        }
+    };
+}
+
+// Tags must never be reused: they are part of a node's identity. The
+// containers in `ElementKind` use 1, 2, 3, 8, 9, 11 and 20.
+widgets! {
     /// A run of text rendered by a native label.
-    Text(TextProps),
+    Text(TextProps) = 4,
     /// A native button.
-    Button(ButtonProps),
+    Button(ButtonProps) = 5,
     /// A native text input.
-    TextField(TextFieldProps),
-    /// A native on/off switch.
-    Switch(SwitchProps),
-    /// A native checkbox with a label.
-    Checkbox(CheckProps),
-    /// A native radio button with a label.
-    RadioButton(CheckProps),
-    /// A native group of mutually exclusive radio buttons.
-    RadioGroup(RadioGroupProps),
-    /// A native tab bar.
-    TabBar(TabBarProps),
-    /// A native date, time or date-and-time picker.
-    DatePicker(DatePickerProps),
-    /// A native slider.
-    Slider(SliderProps),
-    /// A native determinate progress indicator.
-    Progress(ProgressProps),
-    /// A native indeterminate progress spinner.
-    Spinner(SpinnerProps),
+    TextField(TextFieldProps) = 6,
     /// A native image.
-    Image(ImageProps),
+    Image(ImageProps) = 7,
+    /// A native on/off switch.
+    Switch(SwitchProps) = 10,
+    /// A native checkbox with a label.
+    Checkbox(CheckProps) = 12,
+    /// A native radio button with a label.
+    RadioButton(CheckProps) = 13,
+    /// A native slider.
+    Slider(SliderProps) = 14,
+    /// A native determinate progress indicator.
+    Progress(ProgressProps) = 15,
+    /// A native group of mutually exclusive radio buttons.
+    RadioGroup(RadioGroupProps) = 16,
+    /// A native indeterminate progress spinner.
+    Spinner(SpinnerProps) = 17,
+    /// A native date, time or date-and-time picker.
+    DatePicker(DatePickerProps) = 18,
+    /// A native tab bar.
+    TabBar(TabBarProps) = 19,
 }
 
 impl Widget {
-    /// A stable tag mixed into node identifiers, so a node that changes
-    /// widget type gets a new identity. Values must never be reused.
-    pub(crate) fn tag(&self) -> u64 {
-        match self {
-            Self::Text(_) => 4,
-            Self::Button(_) => 5,
-            Self::TextField(_) => 6,
-            Self::Image(_) => 7,
-            Self::Switch(_) => 10,
-            Self::Checkbox(_) => 12,
-            Self::RadioButton(_) => 13,
-            Self::Slider(_) => 14,
-            Self::Progress(_) => 15,
-            Self::RadioGroup(_) => 16,
-            Self::Spinner(_) => 17,
-            Self::DatePicker(_) => 18,
-            Self::TabBar(_) => 19,
-        }
-    }
-
-    /// The widget's properties, behind the interface every widget shares.
-    fn props(&self) -> &dyn WidgetProps {
-        match self {
-            Self::Text(props) => props,
-            Self::Button(props) => props,
-            Self::TextField(props) => props,
-            Self::Switch(props) => props,
-            Self::Checkbox(props) | Self::RadioButton(props) => props,
-            Self::RadioGroup(props) => props,
-            Self::TabBar(props) => props,
-            Self::DatePicker(props) => props,
-            Self::Slider(props) => props,
-            Self::Progress(props) => props,
-            Self::Spinner(props) => props,
-            Self::Image(props) => props,
-        }
-    }
-
-    fn props_mut(&mut self) -> &mut dyn WidgetProps {
-        match self {
-            Self::Text(props) => props,
-            Self::Button(props) => props,
-            Self::TextField(props) => props,
-            Self::Switch(props) => props,
-            Self::Checkbox(props) | Self::RadioButton(props) => props,
-            Self::RadioGroup(props) => props,
-            Self::TabBar(props) => props,
-            Self::DatePicker(props) => props,
-            Self::Slider(props) => props,
-            Self::Progress(props) => props,
-            Self::Spinner(props) => props,
-            Self::Image(props) => props,
-        }
-    }
-
     /// Re-wraps every message the widget can produce; see
     /// [`Element::map`](crate::element::Element::map).
     pub(crate) fn map_messages(&mut self, wrap: &Wrap) {
@@ -149,18 +131,23 @@ impl Widget {
 /// What every widget's properties provide to the framework.
 ///
 /// `Widget` forwards to this, so a new widget implements it once instead of
-/// adding an arm to each method.
-pub(crate) trait WidgetProps {
+/// adding an arm to each method. `#[derive(Widget)]` writes the
+/// implementation.
+pub(crate) trait WidgetProps: IntrinsicSize {
     /// Re-wraps every message the widget can produce.
     fn map_messages(&mut self, wrap: &Wrap);
-
-    /// The size the content wants when the style does not set one.
-    fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size;
 
     /// The text style, for a widget that shows text.
     fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
         None
     }
+}
+
+/// How much room a widget wants. Written by hand for every widget.
+pub(crate) trait IntrinsicSize {
+    /// The size the content wants when the style does not set one.
+    /// `max_width` is the width available to the content, if bounded.
+    fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size;
 }
 
 /// The text properties the shared `size`, `color` and `bold` builders set.

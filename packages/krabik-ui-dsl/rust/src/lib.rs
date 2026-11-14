@@ -10,6 +10,9 @@
 //!
 //! The guide in `docs/` walks through all of it.
 
+// Lets `view!`, which names this crate by its full path, work inside it too.
+extern crate self as krabik_ui_dsl;
+
 pub mod app;
 pub(crate) mod element;
 pub mod engine;
@@ -35,6 +38,7 @@ mod animation;
 mod frame_batch;
 
 pub use app::{App, Component, set_app_factory};
+pub use krabik_ui_dsl_macros::view;
 // The engine modules keep their short public paths, e.g. `krabik_ui_dsl::runtime`.
 pub use engine::{geometry, layout, measure, render, runtime, tree};
 

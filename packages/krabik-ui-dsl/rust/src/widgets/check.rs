@@ -8,6 +8,7 @@ use crate::engine::measure::Measure;
 use crate::message::Handler;
 use crate::message::Wrap;
 use crate::style::FontWeight;
+use crate::widgets::IntrinsicSize;
 use crate::widgets::TextProps;
 use crate::widgets::TextStyleMut;
 use crate::widgets::Widget;
@@ -155,7 +156,9 @@ impl WidgetProps for CheckProps {
             weight: &mut self.weight,
         })
     }
+}
 
+impl IntrinsicSize for CheckProps {
     /// The indicator, the gap and the label, at least one touch target tall.
     fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
         let inner_width = max_width.map(|width| (width - CHECK_INDICATOR - CHECK_GAP).max(0.0));

@@ -1,13 +1,10 @@
 //! The `image` widget: properties and builder.
 
-use std::marker::PhantomData;
+use krabik_ui_dsl_macros::Widget;
 
-use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
-use crate::message::Wrap;
-use crate::widgets::Widget;
-use crate::widgets::WidgetProps;
+use crate::widgets::IntrinsicSize;
 
 /// Where an image is loaded from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,59 +38,22 @@ pub enum ImageScale {
 }
 
 /// Platform-independent properties of an image node.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Widget)]
+#[widget(
+    name = Image,
+    about = "A native image.",
+    new = "Creates an image with the given source.\n\nGive the image an explicit width and height, or let a parent stretch it; intrinsic sizing is not available for remote images yet."
+)]
 pub struct ImageProps {
     /// The source of the image.
+    #[widget(arg)]
     pub source: ImageSource,
     /// How the image fills its frame.
+    #[widget(set)]
     pub scale: ImageScale,
 }
 
-impl ImageProps {
-    /// Creates an image with the given source.
-    pub fn new(source: ImageSource) -> Self {
-        Self {
-            source,
-            scale: ImageScale::Fit,
-        }
-    }
-}
-
-/// A native image.
-pub struct Image<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
-
-impl<M> Image<M> {
-    /// Creates an image with the given source.
-    ///
-    /// Give the image an explicit width and height, or let a parent stretch it;
-    /// intrinsic sizing is not available for remote images yet.
-    pub fn new(source: ImageSource) -> Self {
-        Self(
-            RawElement::leaf(ElementKind::Widget(Widget::Image(ImageProps::new(source)))),
-            PhantomData,
-        )
-    }
-
-    /// Sets how the image fills its frame.
-    pub fn scale(mut self, scale: ImageScale) -> Self {
-        if let ElementKind::Widget(Widget::Image(props)) = &mut self.0.kind {
-            props.scale = scale;
-        }
-        self
-    }
-}
-
-impl<M> From<Image<M>> for Element<M> {
-    fn from(component: Image<M>) -> Self {
-        Element::from_raw(component.0)
-    }
-}
-
-style_builder!(Image);
-
-impl WidgetProps for ImageProps {
-    fn map_messages(&mut self, _wrap: &Wrap) {}
-
+impl IntrinsicSize for ImageProps {
     /// The image's natural size, or zero while it is unknown (for example a
     /// remote image that has not loaded). The layout scales it to the
     /// node's style.

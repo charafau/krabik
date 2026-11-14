@@ -7,6 +7,7 @@ edition = "2024"
 # and builds the native library its Android and iOS shells load.
 
 [dependencies]
+krabik-ui-dsl-macros = { path = "macros" }
 jni = "0.22"
 taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
 
@@ -59,3 +60,4 @@ objc2-ui-kit = { version = "0.3", features = [
 
 # Not part of the repository's root workspace.
 [workspace]
+members = ["macros"]

@@ -8,6 +8,7 @@ use crate::engine::measure::Measure;
 use crate::message::Wrap;
 use crate::style::CONTROL_ACCENT;
 use crate::widgets::CONTROL_WIDTH;
+use crate::widgets::IntrinsicSize;
 use crate::widgets::Widget;
 use crate::widgets::WidgetProps;
 
@@ -100,7 +101,9 @@ const SPINNER_SIZE: f32 = 24.0;
 
 impl WidgetProps for ProgressProps {
     fn map_messages(&mut self, _wrap: &Wrap) {}
+}
 
+impl IntrinsicSize for ProgressProps {
     /// A progress bar fills the width it is given.
     fn intrinsic_size(&self, max_width: Option<f32>, _measurer: &dyn Measure) -> Size {
         Size::new(max_width.unwrap_or(CONTROL_WIDTH), PROGRESS_HEIGHT)
@@ -109,7 +112,9 @@ impl WidgetProps for ProgressProps {
 
 impl WidgetProps for SpinnerProps {
     fn map_messages(&mut self, _wrap: &Wrap) {}
+}
 
+impl IntrinsicSize for SpinnerProps {
     /// A spinner is a fixed square.
     fn intrinsic_size(&self, _max_width: Option<f32>, _measurer: &dyn Measure) -> Size {
         Size::new(SPINNER_SIZE, SPINNER_SIZE)
