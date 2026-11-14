@@ -537,6 +537,18 @@ pub(crate) fn node_event(
     }
 
     let message = actions_for::<P>(state, id).and_then(|actions| actions.message(&event));
+
+    // The control already shows the new value. Whatever the application
+    // makes of the message, the control is updated from the state.
+    let changes_value = matches!(
+        event,
+        NodeEvent::Toggle(_) | NodeEvent::Text(_) | NodeEvent::Slider(_)
+            | NodeEvent::Select(_) | NodeEvent::Picker(_)
+    );
+    if changes_value && message.is_some() {
+        state.runtime_mut().reapply(id);
+    }
+
     match message {
         Some(message) => self.update(cx, message),
         None if engine_changed => self.render_all(cx),
@@ -559,7 +571,11 @@ happened. Then:
    may move a list's window (`Runtime::scroll`), and a focus change may change which row is pinned
    (`track_focus`). Each returns whether a re-render is needed.
 3. **Resolve the message** with `actions_for`.
-4. **Act.** With a message: `app.update(message)` and `render_all`. Without a message but with an
+4. **Mark a changed control.** A toggle, text change, slider move, selection or picker change
+   means the native view already shows a new value. If the event has a message, the runtime is
+   told to update that node on the next render even when its description is unchanged
+   (`Runtime::reapply`), so an application that refuses the value gets the control set back.
+5. **Act.** With a message: `app.update(message)` and `render_all`. Without a message but with an
    engine change: `render_all` only. With neither: nothing. Most scroll events end here.
 
 ### `actions_for`: the main tree, then recycled rows

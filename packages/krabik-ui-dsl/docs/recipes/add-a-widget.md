@@ -1068,17 +1068,15 @@ above.
 
 **The example's string tables** (step 18).
 
-**A control that changes itself can drift from the application's state.** This is a property of
-the whole framework, not of the stepper, and it is the item I would most like a reader to know.
+**A control that changes itself has to be set back when the application disagrees.**
 `UIStepper` changes its own value when pressed, then Rust is told, the application updates, and
 the next render applies the value the application now holds. If the application does *not* change
 its state (it ignores the message, or clamps the value back to what it was), the rebuilt tree
-equals the old one, the diff emits no `Op::Update`, and nothing resets the control. UIKit shows
-the new number, the application holds the old one. The same is true for `UISwitch`, `KrabikSwitch`
-and the sliders today. For the stepper the damage is limited because UIKit and
-`Actions::message` clamp to the same range, and the Kotlin view above avoids it by never changing
-itself. A general fix would be for the session to re-apply a widget's properties after an event
-whose message left the tree unchanged; that does not exist.
+equals the old one. The session covers this: after a value event (`Toggle`, `Text`, `Slider`,
+`Select`, `Picker`) it asks the runtime to update that node on the next render even if nothing
+about it changed. What the widget owes in return is an update function that compares against the
+value the native view shows *now*. A function that compares against a copy it stored at the last
+render will see no difference and leave the control wrong.
 
 ## Where this lives
 

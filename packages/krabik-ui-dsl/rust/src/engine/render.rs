@@ -99,6 +99,16 @@ impl Renderer for RecordingRenderer {
 /// children, which are reparented instead. All removals come last, deepest
 /// first, so a container is detached after the views it hosts.
 pub fn diff(old: &UiNode, new: &UiNode) -> Vec<Op> {
+    diff_reapplying(old, new, None)
+}
+
+/// [`diff`], which also updates the node `reapply` when nothing about it
+/// changed.
+///
+/// A native control shows what the user just did to it. When the application
+/// rejects that value the description is unchanged, so a plain diff would
+/// leave the control showing a value the state does not hold.
+pub fn diff_reapplying(old: &UiNode, new: &UiNode, reapply: Option<NodeId>) -> Vec<Op> {
     let previous = tree::index(old);
     let old_parents = tree::renderable_parents(old);
     let new_parents = tree::renderable_parents(new);
@@ -139,7 +149,10 @@ pub fn diff(old: &UiNode, new: &UiNode) -> Vec<Op> {
                         parent,
                     });
                 }
-                if previous.kind != node.kind || previous.style != node.style {
+                if previous.kind != node.kind
+                    || previous.style != node.style
+                    || reapply == Some(node.id)
+                {
                     ops.push(Op::Update(RenderNode::new(node, parent)));
                 }
             }

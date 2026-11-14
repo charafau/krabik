@@ -533,28 +533,39 @@ Symptom: a switch looks on, the application's state says off; or a slider sits w
 left it although the application clamped the value.
 
 Native controls change themselves when touched. Rust is then told, the application updates, and
-the next render writes the application's value back. That last step only happens when the tree
-changed:
+the next render writes the application's value back, whether or not the description changed:
 
 ```rust,ignore
-// rust/src/engine/runtime.rs, in `update`
-        // Most messages change little or nothing on a given host. When the
-        // rebuilt tree equals the current one, the frames are still valid, so
-        // the layout pass (and the native text measurement behind it) is
-        // skipped.
+// rust/src/host/session.rs, in `node_event`
+        let changes_value = matches!(
+            event,
+            NodeEvent::Toggle(_)
+                | NodeEvent::Text(_)
+                | NodeEvent::Slider(_)
+                | NodeEvent::Select(_)
+                | NodeEvent::Picker(_)
+        );
+        if changes_value && message.is_some() {
+            state.runtime_mut().reapply(id);
+        }
 ```
 
-and the diff emits `Update` only `if previous.kind != node.kind || previous.style != node.style`.
-If `update` ignores the message, or maps the new value back to the old one, the tree is equal,
-no op is emitted, and the control keeps what the user did. The engine believes the view shows the
-old value because it never learned otherwise.
+A control with no handler produces no message and is left as the user set it.
 
-There is no mechanism for this today. The chrome has one (the session remembers what the
-platform shows and corrects it; see [Add a chrome slot](add-a-chrome-slot.md#the-two-patterns));
-widgets do not. Workarounds: accept every value the control reports and derive what you need from
-it, or express "this cannot change now" with `.enabled(false)`.
+`Runtime::reapply` names one node, and the next diff emits an `Update` for it even when its
+properties are equal (`render::diff_reapplying`). A control inside a recycled row is not in the
+host's tree; the runtime keeps its id until the row is bound again, and that bind skips the
+"row unchanged" shortcut. The bottom navigation bar follows the chrome rule instead: the session
+records the destination the user tapped, so a different one in the state is sent again.
 
-Check: step 3 shows an empty batch for the message in question.
+So if a control still shows a value the application does not hold, the `Update` arrived and the
+platform update function did not apply it. Look there: it must compare against what the native
+view shows now, not against a value cached from the last render. The iOS pager used to do the
+latter and stayed on a page the application had refused.
+
+Check: step 3 shows an `Update` for the control after its own event; `RejectedInputTest` and
+`testRejectedInput` in the harness app cover a switch, a tab bar, a slider, a text field and a
+switch in a recycled row.
 
 ### Two widgets that share a tag
 

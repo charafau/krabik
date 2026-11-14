@@ -349,7 +349,9 @@ impl IosState {
 
         // A render rebinds every visible row. Most of them did not change:
         // keep the widgets and frames, and only take over the new handlers.
-        if let Some(state) = self.row_states.get_mut(&key)
+        let reapply = self.runtime.take_row_reapply(&tree);
+        if reapply.is_none()
+            && let Some(state) = self.row_states.get_mut(&key)
             && state.list == list
             && state.index == index
             && state.width == width
@@ -396,7 +398,7 @@ impl IosState {
             (UiNode::empty(), LayoutResult::default(), HashMap::new())
         };
 
-        let mut ops = render::diff(&old_tree, &tree);
+        let mut ops = render::diff_reapplying(&old_tree, &tree, reapply);
         ops.extend(render::diff_layout(&old_tree, &tree, &old_layout, &layout));
 
         // The snapshot shows the old content while the new widgets are laid

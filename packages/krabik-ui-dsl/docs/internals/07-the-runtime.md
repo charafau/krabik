@@ -355,6 +355,12 @@ which are still correct.
 `diff` runs even on the fast path. For equal trees it returns nothing; with a recycler it returns
 the one `Update`.
 
+The call is `render::diff_reapplying(&self.tree, &next, in_tree)`. `in_tree` is the node named by
+`Runtime::reapply`, which the session calls when the user changed a control (chapter 8). That node
+gets an `Update` even when it is equal, because the native view no longer shows what the tree
+says. The request is used once. If the node is not in this tree it belongs to a recycled row, and
+the id moves to `row_reapply` until `take_row_reapply` hands it to the bind of that row.
+
 ### Step 9: commit
 
 ```rust,ignore

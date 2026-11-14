@@ -275,7 +275,9 @@ types, the field reports the new text through `on_change`; your `update` stores 
 `.selected(index)`. This is the "controlled component" pattern from React, and it follows from the
 rule that Rust owns all state.
 
-If you forget to store a value, the widget snaps back to the old one on the next render. If you
+If you forget to store a value, the widget snaps back to the old one straight away: after every
+change the user makes, the control is set to what your state says. That is also how you refuse
+input. Strip the letters from a digits-only field in `update` and the field shows only digits. If you
 leave out `on_change`, the field cannot be edited in any lasting way.
 
 ## Starting the Notes app

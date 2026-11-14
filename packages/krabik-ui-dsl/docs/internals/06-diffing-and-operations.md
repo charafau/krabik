@@ -122,7 +122,9 @@ match previous.get(&node.id) {
    this can happen.
 4. **Same id, same variant.** Two independent checks: if the nearest renderable ancestor changed,
    `Reparent`; if the kind (which includes all widget properties) or the style is not equal,
-   `Update`. A node whose properties and parent are unchanged produces nothing.
+   `Update`. A node whose properties and parent are unchanged produces nothing, with one
+   exception: the node passed to `diff_reapplying` as `reapply` always gets an `Update`. That is
+   the control the user just changed (chapter 7, step 8).
 
 Remember from chapter 2 that handlers compare equal when both are set. A re-created closure is not
 a change, so case 4 produces nothing for a button whose `on_click` was rebuilt.

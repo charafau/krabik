@@ -23,7 +23,9 @@ class KrabikTabBar(
 
     private var silent = false
     private var labels: List<String> = emptyList()
-    private var selectedIndex = 0
+    /** The tab shown as selected. */
+    var selectedIndex = 0
+        private set
     private var size = 14f
     private var color = 0xFF00_0000.toInt()
     private var bold = false

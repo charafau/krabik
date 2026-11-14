@@ -72,6 +72,12 @@ pub struct Runtime {
     revision: u64,
     /// The appearance colours are resolved for.
     scheme: ColorScheme,
+    /// A control the user just changed, updated by the next render even when
+    /// its description is unchanged.
+    reapply: Option<NodeId>,
+    /// The same for a control inside a recycled row, which is updated when
+    /// its row is bound again.
+    row_reapply: Option<NodeId>,
 }
 
 impl Runtime {
@@ -91,6 +97,8 @@ impl Runtime {
             viewport: Size::ZERO,
             revision: 0,
             scheme: ColorScheme::Light,
+            reapply: None,
+            row_reapply: None,
         }
     }
 
@@ -98,6 +106,23 @@ impl Runtime {
     /// carries the colours that changed.
     pub fn set_color_scheme(&mut self, scheme: ColorScheme) {
         self.scheme = scheme;
+    }
+
+    /// Makes the next render update the control `id` from the description,
+    /// whether or not the description changed.
+    ///
+    /// Called when the user changed the control: the native view already
+    /// shows the new value, and the application may not accept it.
+    pub fn reapply(&mut self, id: NodeId) {
+        self.reapply = Some(id);
+    }
+
+    /// The control to update while binding `row`, if it is inside that row.
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    pub(crate) fn take_row_reapply(&mut self, row: &UiNode) -> Option<NodeId> {
+        let id = self.row_reapply?;
+        tree::find(row, id)?;
+        self.row_reapply.take()
     }
 
     /// Rebuilds the tree from `element` and returns the batch to apply.
@@ -177,7 +202,14 @@ impl Runtime {
             info.focused_rows
         };
 
-        let mut ops = render::diff(&self.tree, &next);
+        // A control outside this tree lives in a recycled row.
+        let reapply = self.reapply.take();
+        let in_tree = reapply.filter(|id| tree::find(&next, *id).is_some());
+        if in_tree.is_none() && reapply.is_some() {
+            self.row_reapply = reapply;
+        }
+
+        let mut ops = render::diff_reapplying(&self.tree, &next, in_tree);
         if let Some(layout) = layout {
             let mut layout_ops = render::diff_layout(&self.tree, &next, &self.layout, &layout);
             if suppress_animation {

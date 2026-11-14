@@ -54,6 +54,66 @@ final class GalleryUITests: XCTestCase {
         capture("16-controls")
     }
 
+    /// A control shows what the user did straight away; when the application
+    /// does not accept it, the control goes back to what the state says.
+    func testRejectedInput() throws {
+        open("Rejected input")
+        XCTAssertTrue(app.staticTexts["Refused: 0"].waitForExistence(timeout: 5))
+
+        let locked = app.switches["Locked switch"]
+        XCTAssertTrue(locked.waitForExistence(timeout: 5))
+        locked.tap()
+        XCTAssertTrue(app.staticTexts["Refused: 1"].waitForExistence(timeout: 5))
+        expect(locked, value: "0")
+
+        let tabs = app.segmentedControls["Locked tabs"]
+        XCTAssertTrue(tabs.waitForExistence(timeout: 5))
+        tabs.buttons["Second"].tap()
+        XCTAssertTrue(app.staticTexts["Refused: 2"].waitForExistence(timeout: 5))
+        expectSelected(tabs.buttons["First"])
+
+        let slider = app.sliders["Capped"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5))
+        slider.adjust(toNormalizedSliderPosition: 0.9)
+        XCTAssertTrue(app.staticTexts["Capped: 50"].waitForExistence(timeout: 5))
+        expect(slider, value: "50%")
+
+        // The same rule inside a recycled row. Checked before typing, because
+        // the keyboard covers the list.
+        let row = app.switches["Row switch 2"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        XCTAssertTrue(app.staticTexts["Refused: 3"].waitForExistence(timeout: 5))
+        expect(row, value: "0")
+        let digits = app.textFields["Digits only"]
+        XCTAssertTrue(digits.waitForExistence(timeout: 5))
+        digits.tap()
+        digits.typeText("a1b2")
+        XCTAssertTrue(app.staticTexts["Digits: 12"].waitForExistence(timeout: 5))
+        expect(digits, value: "12")
+
+        capture("17-rejected-input")
+    }
+
+    private func expect(_ element: XCUIElement, value: String) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", value),
+            object: element,
+        )
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [expectation], timeout: 5), .completed,
+            "expected \(value), found \(String(describing: element.value))",
+        )
+    }
+
+    private func expectSelected(_ element: XCUIElement) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isSelected == true"),
+            object: element,
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: 5), .completed)
+    }
+
     func testGalleryDemos() throws {
         capture("01-gallery")
 

@@ -230,8 +230,11 @@ pub fn build_at(element: &RawElement, root: NodeId) -> (UiNode, BuildInfo) {
 /// across rebinds while keeping them out of the main tree's identifier space.
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 pub(crate) fn row_root(list: NodeId, index: usize) -> NodeId {
-    let mixed = list.0.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (index as u64);
-    NodeId(mixed | 1)
+    // A tag no widget uses keeps rows apart from the list's own children.
+    const ROW_TAG: u64 = 0x726f_7773; // "rows"
+    let id = node_id(list, index, None, ROW_TAG);
+    // The root must never collide with the synthetic tree root.
+    if id == ROOT_ID { NodeId(id.0 ^ 1) } else { id }
 }
 
 /// Picks the value for `scheme` in every colour of the tree.
@@ -1256,6 +1259,11 @@ mod tests {
         let list = NodeId(7);
         assert_eq!(row_root(list, 3), row_root(list, 3));
         assert_ne!(row_root(list, 3), row_root(list, 4));
+        // Neighbouring rows once shared a root, which sent a row's events to
+        // the row next to it.
+        let roots: std::collections::HashSet<NodeId> =
+            (0..10_000).map(|index| row_root(list, index)).collect();
+        assert_eq!(roots.len(), 10_000);
         assert_ne!(row_root(list, 3), row_root(NodeId(8), 3));
         // The root must never collide with the synthetic tree root.
         assert_ne!(row_root(list, 0), ROOT_ID);
