@@ -1,7 +1,11 @@
 # Krabik UI DSL — Roadmap & Status
 
 How the framework works is described in the [documentation](docs/README.md). This file tracks
-status.
+status: what is done, what is left, and what is known to be rough.
+
+**Where things stand.** Everything planned so far is done (sections 1 to 8). What is left needs
+something this machine does not have (a GitHub remote, a physical iPhone) or is a follow-up
+nobody has asked for yet; see the "Remaining" section below.
 
 ---
 
@@ -10,7 +14,7 @@ status.
 > The entries below are a log, oldest first. Sections 1 to 5 were written before the
 > restructure (section 6): file names such as `rust/src/android.rs`, string actions and
 > `Event::…` in them refer to code that has since been reorganized. The commit-by-commit account
-> of sections 6 and 7 is in [docs/design/history.md](docs/design/history.md).
+> of sections 6 to 8 is in [docs/design/history.md](docs/design/history.md).
 
 ### 1. Decouple Application Code from Platform Renderer ✅
 
@@ -435,6 +439,58 @@ Additional capabilities:
 - Stepped sliders and indeterminate spinners
 - Controls demo with switches, checks, a radio group, continuous and stepped sliders, a progress bar and a spinner, covered by `ControlsTest` on Android and `testControls` on iOS
 
+### 4. Optimize JNI Performance ✅
+
+**Class/method ID caching ✅**
+
+Every property update used to resolve its class and method by name
+(`FindClass` + `GetMethodID`) before the call, so a single frame paid hundreds
+of JNI table lookups. [`android/handles.rs`](rust/src/android/handles.rs) now
+resolves every class, method, field and constructor once, in `nativeCreate`
+(where the app's class loader is current), and holds global references to the
+declaring classes so the IDs stay valid for the process lifetime. The render
+paths call through small typed wrappers that keep the previous exception
+checks.
+
+Measured on the `Pixel_10` emulator (API 37.1, arm64) with a temporary timer
+around `AndroidState::render`, 60 taps of the Counter demo's "Add one" button:
+
+| | median | mean | min |
+|---|---|---|---|
+| before | 546 µs | 1009 µs | 447 µs |
+| cached handles | 396 µs | 770 µs | 339 µs |
+
+**One call per frame update ✅**
+
+A layout update used to cost four crossings per node: `setX`, `setY`, a new
+`FrameLayout.LayoutParams` allocation and `setLayoutParams`. `RustRootView`
+now exposes `applyFrame(view, x, y, width, height)`; the Kotlin side mutates
+the existing params, reassigns them only when the size changed, and updates
+the translation. A pure move no longer allocates or schedules a layout pass.
+
+Measured on the `Pixel_10` emulator (API 37.1, arm64) with a temporary timer
+around the operation loop, forcing a full re-layout by alternating the
+viewport width (about 12 layout operations per frame):
+
+| | median | mean | p90 |
+|---|---|---|---|
+| four calls per node | 372 µs | 568 µs | 1008 µs |
+| `applyFrame` | 348 µs | 428 µs | 706 µs |
+
+**Batched operations ✅**
+
+`RustRootView.applyLayouts(ids, frames)` applies a whole frame of layout
+updates with one crossing: two primitive arrays plus a registry of node ids to
+views. Rust registers a view when it creates it and unregisters it when it
+removes it; Kotlin keeps weak references, so a missed unregister can never keep
+a detached view alive. The per-node `applyFrame` call stays for reparenting,
+which moves exactly one view.
+
+Applying operations is only ~0.35 ms of a ~2.6 ms full render on the demo
+screens, so the end-to-end gain is small there. The batch API is about the
+shape of the cost: it no longer grows with the number of nodes, which is what
+matters for large lists.
+
 ### 5. Type-Safe State Management & Event Dispatch ✅
 
 Events are typed in `rust/src/app.rs`:
@@ -550,58 +606,29 @@ machine.
 The iOS projects build and link for a device (`aarch64-apple-ios`), but that was only checked
 without signing. Put `DEVELOPMENT_TEAM = <team id>` in an app's `ios/Local.xcconfig` and run it.
 
-### 4. Optimize JNI Performance ⚠️
+### Make the iOS showcase suite faster ❌
 
-**Class/method ID caching ✅**
+`example/ios/UITests` takes about 15 minutes for 12 tests. Every test relaunches the app, and
+the `open` helper swipes to the top of the catalogue eight times before scrolling down to a
+page. Giving the tests a direct way to a page (a launch argument that sets the starting stack,
+or a search field on the catalogue) would bring it down to a few minutes. The Android suite has
+the same shape, with 18 tests.
 
-Every property update used to resolve its class and method by name
-(`FindClass` + `GetMethodID`) before the call, so a single frame paid hundreds
-of JNI table lookups. [`android/handles.rs`](rust/src/android/handles.rs) now
-resolves every class, method, field and constructor once, in `nativeCreate`
-(where the app's class loader is current), and holds global references to the
-declaring classes so the IDs stay valid for the process lifetime. The render
-paths call through small typed wrappers that keep the previous exception
-checks.
+### Background work: what the first version leaves out ❌
 
-Measured on the `Pixel_10` emulator (API 37.1, arm64) with a temporary timer
-around `AndroidState::render`, 60 taps of the Counter demo's "Add one" button:
+`Command` and `Subscription` cover the common cases. Not there yet, in rough order of how soon
+an app will want them:
 
-| | median | mean | min |
-|---|---|---|---|
-| before | 546 µs | 1009 µs | 447 µs |
-| cached handles | 396 µs | 770 µs | 339 µs |
-
-**One call per frame update ✅**
-
-A layout update used to cost four crossings per node: `setX`, `setY`, a new
-`FrameLayout.LayoutParams` allocation and `setLayoutParams`. `RustRootView`
-now exposes `applyFrame(view, x, y, width, height)`; the Kotlin side mutates
-the existing params, reassigns them only when the size changed, and updates
-the translation. A pure move no longer allocates or schedules a layout pass.
-
-Measured on the `Pixel_10` emulator (API 37.1, arm64) with a temporary timer
-around the operation loop, forcing a full re-layout by alternating the
-viewport width (about 12 layout operations per frame):
-
-| | median | mean | p90 |
-|---|---|---|---|
-| four calls per node | 372 µs | 568 µs | 1008 µs |
-| `applyFrame` | 348 µs | 428 µs | 706 µs |
-
-**Batched operations ✅**
-
-`RustRootView.applyLayouts(ids, frames)` applies a whole frame of layout
-updates with one crossing: two primitive arrays plus a registry of node ids to
-views. Rust registers a view when it creates it and unregisters it when it
-removes it; Kotlin keeps weak references, so a missed unregister can never keep
-a detached view alive. The per-node `applyFrame` call stays for reparenting,
-which moves exactly one view.
-
-Applying operations is only ~0.35 ms of a ~2.6 ms full render on the demo
-screens, so the end-to-end gain is small there. The batch API is about the
-shape of the cost: it no longer grows with the number of nodes, which is what
-matters for large lists.
-
+- **Cancellation.** A command cannot be stopped; its result arrives and `update` decides
+  whether it still matters.
+- **A failure channel.** A panic in a command's closure ends its thread and nothing is sent, so
+  the state can stay "loading". Apps put a `Result` in the message; the framework could catch
+  the panic and report it.
+- **A thread pool or a limit.** Every command gets its own thread.
+- **Subscriptions other than timers.** `Subscription::every` is the only kind; app lifecycle
+  (foreground, background) and connectivity would fit the same shape.
+- **iOS does not keep the application across a scene's destruction**, so work that outlives its
+  session only matters on Android today.
 
 ---
 
@@ -638,9 +665,9 @@ matters for large lists.
 
 ## Known rough edges
 
-Found while the documentation was written by reading every file. None is a crash; each is a place
-where behaviour is surprising or one platform does less than the other. They were read from the
-source, not all reproduced on a device.
+What is left of the list that was made while the documentation was written, plus what the work
+since then turned up. None is a crash; each is a place where behaviour is surprising or one
+platform does less than the other.
 
 ### Behaviour
 
@@ -648,12 +675,24 @@ source, not all reproduced on a device.
   the tree is built; the rows of a recycled list are built on demand outside it.
 - **A list is windowed for the whole screen on its first render**, because its own height is
   only known after layout. From the second render on it materializes only its own rows.
+- **A holder given another item gets new views.** Row ids are derived from the item, so a
+  recycled list reuses a holder's views only when the same item is bound again (which every
+  render does for the visible rows), not while scrolling to new items.
+- **A control with no handler keeps what the user did.** The "control follows state" rule
+  applies when the control reports to the application; a switch without `on_toggle` is left
+  as the user set it.
+- **A timer is not exact.** `Subscription::every` sleeps for the interval between ticks and a
+  tick waits for the UI thread; compute elapsed time from a stored start instead of counting.
 
 ### One platform does less
 
 - iOS: the date picker ignores text size, colour and weight (`UIDatePicker` has no API for
   them); a view with a border or a shadow shows one radius on all its rounded corners; the alert
   has no `cancelable` option (a UIKit alert cannot be dismissed by tapping outside).
+- iOS: the swipe-back gesture is not offered on the first screen of a stack, and a mask for
+  per-corner radii is not animated with the view's frame.
+- Android: `sheet_resized` is ignored, on the assumption that the Material bottom sheet follows
+  its content; that was checked with the showcase's growing sheet only.
 
 ### Safety nets that are missing
 
@@ -671,6 +710,8 @@ source, not all reproduced on a device.
   not behind a `cfg`. The framework itself only does on Android.
 - Minified builds were checked by hand on the showcase; the instrumented suites cannot run
   against a minified app. Resource shrinking would remove drawables that Rust names as icons.
+- A stale `app/src/main/jniLibs` from before the per-variant folders is still packaged if it
+  exists; delete it once (it is ignored by git, so `git status` does not show it).
 
 ## Nice-to-haves
 
