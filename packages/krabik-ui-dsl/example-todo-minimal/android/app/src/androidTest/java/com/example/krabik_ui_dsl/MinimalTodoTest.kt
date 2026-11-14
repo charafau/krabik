@@ -19,6 +19,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import dev.krabik.ui.testing.findRecycler
 
 /** Drives the minimal todo app through its native widgets. */
 @RunWith(AndroidJUnit4::class)
@@ -53,13 +54,4 @@ class MinimalTodoTest {
         }
     }
 
-    private fun findRecycler(view: View): RecyclerView? {
-        if (view is RecyclerView) return view
-        if (view is ViewGroup) {
-            for (index in 0 until view.childCount) {
-                findRecycler(view.getChildAt(index))?.let { return it }
-            }
-        }
-        return null
-    }
 }

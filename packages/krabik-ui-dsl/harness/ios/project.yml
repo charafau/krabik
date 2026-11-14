@@ -8,12 +8,16 @@ options:
     iOS: "16.0"
   createIntermediateGroups: true
 
+# `Local.xcconfig` is optional and not committed: put DEVELOPMENT_TEAM = <your
+# team id> there to run on a device. The simulator needs no signing identity.
+configFiles:
+  Debug: Signing.xcconfig
+  Release: Signing.xcconfig
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    RUST_TARGET: aarch64-apple-ios-sim
     GENERATE_INFOPLIST_FILE: YES
-    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGN_STYLE: Automatic
     INFOPLIST_KEY_UILaunchScreen_Generation: YES
     INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
     # The Rust build phase runs cargo, which reads and writes outside the
@@ -35,22 +39,17 @@ targets:
       - name: Build Rust library
         basedOnDependencyAnalysis: false
         script: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-          cd "$SRCROOT/../rust"
-          if [ "$CONFIGURATION" = "Release" ]; then
-            cargo build --target "$RUST_TARGET" --release
-          else
-            cargo build --target "$RUST_TARGET"
-          fi
+          "$SRCROOT/../../shared/build-rust-ios.sh"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.krabik-ui-dsl
         PRODUCT_NAME: KrabikUiDsl
+        RUST_LIB: krabik_ui_dsl_harness
         SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridging.h
         LIBRARY_SEARCH_PATHS:
-          - $(SRCROOT)/../rust/target/$(RUST_TARGET)/$(CONFIGURATION:lower)
+          - $(SRCROOT)/../rust/target/xcode/$(PLATFORM_NAME)-$(CONFIGURATION)
         OTHER_LDFLAGS:
-          - -lkrabik_ui_dsl_harness
+          - -l$(RUST_LIB)
     scheme:
       testTargets:
         - KrabikUiDslUITests

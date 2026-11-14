@@ -36,6 +36,7 @@
 		D9D8CB065473D15E33870765 /* KrabikUiDslUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = KrabikUiDslUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E2883F93A30F7B98767E9D75 /* KrabikHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikHostController.swift; sourceTree = "<group>"; };
 		ED7C5B083848A62E1198E281 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		"TEMP_F91848A3-3FDF-47AC-AA3D-ABC75912E537" /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -112,6 +113,14 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		"TEMP_47AAE0B7-B289-4AD4-9BF6-FC08EEF489B9" /* ios */ = {
+			isa = PBXGroup;
+			children = (
+				"TEMP_F91848A3-3FDF-47AC-AA3D-ABC75912E537" /* Signing.xcconfig */,
+			);
+			path = ios;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -161,7 +170,11 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					54CB8E8E132E57FBFAB40012 = {
+						ProvisioningStyle = Automatic;
+					};
 					5B0CBD0E87C34E60CF471CAE = {
+						ProvisioningStyle = Automatic;
 						TestTargetID = 54CB8E8E132E57FBFAB40012;
 					};
 				};
@@ -215,7 +228,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "export PATH=\"$HOME/.cargo/bin:$PATH\"\ncd \"$SRCROOT/../rust\"\nif [ \"$CONFIGURATION\" = \"Release\" ]; then\n  cargo build --target \"$RUST_TARGET\" --release\nelse\n  cargo build --target \"$RUST_TARGET\"\nfi\n";
+			shellScript = "\"$SRCROOT/../../shared/build-rust-ios.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -292,13 +305,14 @@
 					"@executable_path/Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = (
-					"$(SRCROOT)/../rust/target/$(RUST_TARGET)/$(CONFIGURATION:lower)",
+					"$(SRCROOT)/../rust/target/xcode/$(PLATFORM_NAME)-$(CONFIGURATION)",
 				);
 				OTHER_LDFLAGS = (
-					"-lkrabik_ui_dsl_harness",
+					"-l$(RUST_LIB)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.krabik-ui-dsl";
 				PRODUCT_NAME = KrabikUiDsl;
+				RUST_LIB = krabik_ui_dsl_harness;
 				SDKROOT = iphoneos;
 				SWIFT_OBJC_BRIDGING_HEADER = Sources/Bridging.h;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -307,6 +321,7 @@
 		};
 		78ECFBC7810AD089B8F65AB7 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = "TEMP_F91848A3-3FDF-47AC-AA3D-ABC75912E537" /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -338,7 +353,7 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -366,7 +381,6 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				RUST_TARGET = "aarch64-apple-ios-sim";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -384,13 +398,14 @@
 					"@executable_path/Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = (
-					"$(SRCROOT)/../rust/target/$(RUST_TARGET)/$(CONFIGURATION:lower)",
+					"$(SRCROOT)/../rust/target/xcode/$(PLATFORM_NAME)-$(CONFIGURATION)",
 				);
 				OTHER_LDFLAGS = (
-					"-lkrabik_ui_dsl_harness",
+					"-l$(RUST_LIB)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.krabik-ui-dsl";
 				PRODUCT_NAME = KrabikUiDsl;
+				RUST_LIB = krabik_ui_dsl_harness;
 				SDKROOT = iphoneos;
 				SWIFT_OBJC_BRIDGING_HEADER = Sources/Bridging.h;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -399,6 +414,7 @@
 		};
 		C39F0D98F62103ABDA8D0BC5 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = "TEMP_F91848A3-3FDF-47AC-AA3D-ABC75912E537" /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -430,7 +446,7 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -451,7 +467,6 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				RUST_TARGET = "aarch64-apple-ios-sim";
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";

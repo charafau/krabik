@@ -34,8 +34,9 @@ jobs:
       - run: cargo clippy --manifest-path packages/krabik-ui-android/example/rust/Cargo.toml --all-targets -- -D warnings
       # the UI DSL library is a standalone project, outside the workspace
       - run: cargo fmt --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --all --check
-      - run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml
+      # `--workspace` includes the macro crate next to the library
+      - run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --workspace --all-targets -- -D warnings
+      - run: cargo test --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --workspace
       # each DSL app (the dev harness and the examples) is its own project
       - run: cargo fmt --manifest-path packages/krabik-ui-dsl/harness/rust/Cargo.toml --check
       - run: cargo clippy --manifest-path packages/krabik-ui-dsl/harness/rust/Cargo.toml --all-targets -- -D warnings
@@ -57,7 +58,7 @@ jobs:
       # overrides the toolchain file, which pins the stable channel
       RUSTUP_TOOLCHAIN: 1.99.1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # the ref is the action's release, not the toolchain: passing the version
       # as a ref makes Dependabot "update" it to a Rust release that may not exist
       - uses: dtolnay/rust-toolchain@master
@@ -117,7 +118,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios-sim
+          targets: aarch64-apple-ios-sim, aarch64-apple-ios
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
@@ -129,6 +130,10 @@ jobs:
       # lints the iOS renderer, which the `check` job never compiles because
       # it runs on Linux and macOS hosts, not the iOS target
       - run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --target aarch64-apple-ios-sim -- -D warnings
+      # a real device is a different target from the simulator; keep it building
+      - name: Build the example static library for a device
+        working-directory: packages/krabik-ui-dsl/example/rust
+        run: cargo build --target aarch64-apple-ios
       - name: Build the dev harness static library
         working-directory: packages/krabik-ui-dsl/harness/rust
         run: cargo build --target aarch64-apple-ios-sim
@@ -141,3 +146,93 @@ jobs:
       - name: Build the minimal todo example static library
         working-directory: packages/krabik-ui-dsl/example-todo-minimal/rust
         run: cargo build --target aarch64-apple-ios-sim
+
+  # Runs the Espresso suites of every DSL app on an emulator. The emulator is
+  # x86_64, like the runner, so the apps are built for that ABI here.
+  android-ui:
+    name: android ui tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            packages/krabik-ui-dsl/rust
+            packages/krabik-ui-dsl/harness/rust
+            packages/krabik-ui-dsl/example/rust
+            packages/krabik-ui-dsl/example-todo/rust
+            packages/krabik-ui-dsl/example-todo-minimal/rust
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platforms;android-37.0 build-tools;37.0.0 ndk;27.2.12479018
+      - uses: gradle/actions/setup-gradle@v6
+      # hardware acceleration for the emulator on GitHub's Linux runners
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run the UI tests of every app
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: false
+          script: |
+            cd packages/krabik-ui-dsl/harness/android && ./gradlew :app:connectedDebugAndroidTest --no-daemon -PkrabikAbis=x86_64
+            cd packages/krabik-ui-dsl/example/android && ./gradlew :app:connectedDebugAndroidTest --no-daemon -PkrabikAbis=x86_64
+            cd packages/krabik-ui-dsl/example-todo/android && ./gradlew :app:connectedDebugAndroidTest --no-daemon -PkrabikAbis=x86_64
+            cd packages/krabik-ui-dsl/example-todo-minimal/android && ./gradlew :app:connectedDebugAndroidTest --no-daemon -PkrabikAbis=x86_64
+      - name: Keep the test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ui-test-reports
+          path: packages/krabik-ui-dsl/*/android/app/build/reports/androidTests
+
+  # Runs the XCUITest suites of every DSL app on a simulator. Each Xcode
+  # project builds its Rust library itself in a build phase.
+  ios-ui:
+    name: ios ui tests
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            packages/krabik-ui-dsl/rust
+            packages/krabik-ui-dsl/harness/rust
+            packages/krabik-ui-dsl/example/rust
+            packages/krabik-ui-dsl/example-todo/rust
+            packages/krabik-ui-dsl/example-todo-minimal/rust
+      # the image's simulators change over time, so take the first iPhone it has
+      - name: Pick a simulator
+        run: |
+          id=$(xcrun simctl list devices available | grep -m1 -oE 'iPhone[^(]*\(([0-9A-F-]{36})\)' | grep -oE '[0-9A-F-]{36}')
+          test -n "$id"
+          echo "SIMULATOR=$id" >> "$GITHUB_ENV"
+      - name: Test the dev harness
+        working-directory: packages/krabik-ui-dsl/harness/ios
+        run: xcodebuild test -project KrabikUiDsl.xcodeproj -scheme KrabikUiDsl -destination "platform=iOS Simulator,id=$SIMULATOR"
+      - name: Test the example
+        working-directory: packages/krabik-ui-dsl/example/ios
+        run: xcodebuild test -project KrabikUiDslExample.xcodeproj -scheme KrabikUiDslExample -destination "platform=iOS Simulator,id=$SIMULATOR"
+      - name: Test the todo example
+        working-directory: packages/krabik-ui-dsl/example-todo/ios
+        run: xcodebuild test -project KrabikUiDslTodo.xcodeproj -scheme KrabikUiDslTodo -destination "platform=iOS Simulator,id=$SIMULATOR"
+      - name: Test the minimal todo example
+        working-directory: packages/krabik-ui-dsl/example-todo-minimal/ios
+        run: xcodebuild test -project KrabikUiDslTodoMinimal.xcodeproj -scheme KrabikUiDslTodoMinimal -destination "platform=iOS Simulator,id=$SIMULATOR"

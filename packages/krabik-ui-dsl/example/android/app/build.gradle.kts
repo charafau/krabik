@@ -13,6 +13,7 @@ android {
     targetSdk = 37
     versionCode = 1
     versionName = "1.0"
+    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   buildTypes {
@@ -20,6 +21,8 @@ android {
       isMinifyEnabled = false
     }
   }
+  // View finders shared by the instrumented tests of every app.
+  sourceSets["androidTest"].kotlin.srcDir(project(":krabik-ui").projectDir.resolve("../android-test"))
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
@@ -34,6 +37,7 @@ dependencies {
   // The framework's Android half (shared/android).
   implementation(project(":krabik-ui"))
 
+  androidTestImplementation(libs.androidx.recyclerview)
   androidTestImplementation(libs.androidx.test.core)
   androidTestImplementation(libs.androidx.test.ext.junit)
   androidTestImplementation(libs.androidx.test.runner)

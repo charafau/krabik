@@ -1,6 +1,9 @@
 package com.example.krabik_ui_dsl
 
 import dev.krabik.ui.*
+import dev.krabik.ui.testing.findRustRoot
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.widget.ProgressBar
@@ -144,6 +147,53 @@ class ShowcaseTest {
     }
 
     /**
+     * The manifest handles rotation itself, so the activity, the Rust session
+     * and the native views all survive it; only the layout changes.
+     */
+    @Test
+    fun rotationKeepsTheActivityTheStackAndTheState() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            openPage("Radio group")
+            onView(withText("Large")).perform(click())
+            onView(withText("Selected: Large")).check(matches(isDisplayed()))
+
+            var portrait: MainActivity? = null
+            var portraitWidth = 0
+            scenario.onActivity { activity ->
+                portrait = activity
+                portraitWidth = findRustRoot(activity.window.decorView)!!.width
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            }
+            Thread.sleep(2000)
+
+            try {
+                scenario.onActivity { activity ->
+                    assertTrue("rotation must not recreate the activity", activity === portrait)
+                    assertTrue(
+                        "the device is in landscape",
+                        activity.resources.configuration.orientation ==
+                            Configuration.ORIENTATION_LANDSCAPE,
+                    )
+                    val root = findRustRoot(activity.window.decorView)!!
+                    assertTrue("Rust laid the screen out for the new width", root.width > portraitWidth)
+                }
+                // Same screen, same choice.
+                onView(withText("Selected: Large")).check(matches(isDisplayed()))
+            } finally {
+                scenario.onActivity { activity ->
+                    activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                }
+                Thread.sleep(2000)
+            }
+
+            // The stack is intact: back returns to the catalog.
+            onView(withText("Selected: Large")).check(matches(isDisplayed()))
+            tapBack()
+            onView(withText("Krabik UI DSL")).check(matches(isDisplayed()))
+        }
+    }
+
+    /**
      * A switch between light and dark recreates the activity, so the native
      * chrome picks up the new theme. The application and its screens must
      * come back as they were, repainted for the new appearance.
@@ -216,33 +266,29 @@ class ShowcaseTest {
             onView(withText("Krabik UI DSL")).check(matches(isDisplayed()))
 
             openPage("Dialog")
-            onView(withText("Delete task?")).check(matches(isDisplayed()))
+            awaitText("Delete task?")
             onView(withText("Cancel")).perform(click())
-            onView(withText("Delete task?")).check(doesNotExist())
+            awaitNoText("Delete task?")
 
             // The system alert's other button and the back button close it too.
             openPage("Dialog")
             onView(withText("Delete")).perform(click())
-            onView(withText("Delete task?")).check(doesNotExist())
+            awaitNoText("Delete task?")
             openPage("Dialog")
             androidx.test.espresso.Espresso.pressBack()
-            onView(withText("Delete task?")).check(doesNotExist())
+            awaitNoText("Delete task?")
 
             openPage("Bottom sheet")
             onView(withText("Open bottom sheet")).check(matches(isDisplayed()))
-            onView(withText("Open bottom sheet")).perform(click())
-            onView(withText("Filters")).check(matches(isDisplayed()))
+            openSheet()
             onView(withText("Close")).perform(click())
-            onView(withText("Filters")).check(doesNotExist())
+            awaitNoText("Filters")
 
             // A native dismissal reaches Rust, so the sheet can be reopened.
-            onView(withText("Open bottom sheet")).perform(click())
-            onView(withText("Filters")).check(matches(isDisplayed()))
+            openSheet()
             androidx.test.espresso.Espresso.pressBack()
-            Thread.sleep(500)
-            onView(withText("Filters")).check(doesNotExist())
-            onView(withText("Open bottom sheet")).perform(click())
-            onView(withText("Filters")).check(matches(isDisplayed()))
+            awaitNoText("Filters")
+            openSheet()
             onView(withText("Close")).perform(click())
             onView(withText("Open bottom sheet")).check(matches(isDisplayed()))
             tapBack()
@@ -366,5 +412,25 @@ class ShowcaseTest {
             }
         }
         return null
+    }
+
+    /**
+     * Opens the bottom sheet and waits for it.
+     *
+     * A sheet that was just dismissed keeps its window on screen while it
+     * animates out, and a tap during that time lands on its scrim instead of
+     * the button underneath. Tap again once the window is gone.
+     */
+    private fun openSheet() {
+        repeat(4) {
+            onView(withText("Open bottom sheet")).perform(click())
+            try {
+                awaitText("Filters", timeoutMs = 1500)
+                return
+            } catch (_: Throwable) {
+                // The previous sheet's window swallowed the tap.
+            }
+        }
+        awaitText("Filters")
     }
 }

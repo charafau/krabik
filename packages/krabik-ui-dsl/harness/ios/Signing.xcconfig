@@ -1,0 +1,4 @@
+// Signing settings for this app. Create `Local.xcconfig` next to this file
+// with `DEVELOPMENT_TEAM = <your team id>` to build for a device; it is
+// ignored by git.
+#include? "Local.xcconfig"

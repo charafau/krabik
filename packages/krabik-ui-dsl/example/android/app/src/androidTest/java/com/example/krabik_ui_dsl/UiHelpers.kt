@@ -1,5 +1,7 @@
 package com.example.krabik_ui_dsl
 
+import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import dev.krabik.ui.*
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.CoordinatesProvider
@@ -94,3 +96,37 @@ internal fun isVisible(text: String): Boolean =
     } catch (_: Throwable) {
         false
     }
+
+/**
+ * Waits until a view with exactly [text] is displayed.
+ *
+ * A dialog or sheet lives in its own window, which appears a moment after
+ * the tap that asked for it; an immediate assertion would still be looking
+ * at the activity's window.
+ */
+internal fun awaitText(text: String, timeoutMs: Long = 3000) {
+    val deadline = System.currentTimeMillis() + timeoutMs
+    while (true) {
+        try {
+            onView(withText(text)).check(matches(isDisplayed()))
+            return
+        } catch (failure: Throwable) {
+            if (System.currentTimeMillis() > deadline) throw failure
+            Thread.sleep(100)
+        }
+    }
+}
+
+/** Waits until no view with exactly [text] is left in the focused window. */
+internal fun awaitNoText(text: String, timeoutMs: Long = 3000) {
+    val deadline = System.currentTimeMillis() + timeoutMs
+    while (true) {
+        try {
+            onView(withText(text)).check(doesNotExist())
+            return
+        } catch (failure: Throwable) {
+            if (System.currentTimeMillis() > deadline) throw failure
+            Thread.sleep(100)
+        }
+    }
+}
