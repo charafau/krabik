@@ -17,6 +17,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import dev.krabik.ui.testing.findRustRoot
 
 /**
  * Verifies that the virtualized list only materializes the rows around the
@@ -107,15 +108,6 @@ class ListTest {
         }
     }
 
-    private fun findRustRoot(view: View): RustRootView? {
-        if (view is RustRootView) return view
-        if (view is ViewGroup) {
-            for (index in 0 until view.childCount) {
-                findRustRoot(view.getChildAt(index))?.let { return it }
-            }
-        }
-        return null
-    }
 
     companion object {
         private val ROW = Regex("""Row (\d+)""")

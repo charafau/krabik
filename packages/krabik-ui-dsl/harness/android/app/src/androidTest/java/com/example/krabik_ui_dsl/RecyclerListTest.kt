@@ -28,6 +28,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import dev.krabik.ui.testing.findRecycler
 
 /**
  * Checks that a `recycled` list is backed by a RecyclerView, that holder
@@ -172,15 +173,6 @@ class RecyclerListTest {
         }
     }
 
-    private fun findRecycler(view: View): RecyclerView? {
-        if (view is RecyclerView) return view
-        if (view is ViewGroup) {
-            for (index in 0 until view.childCount) {
-                findRecycler(view.getChildAt(index))?.let { return it }
-            }
-        }
-        return null
-    }
 
     private fun firstTapButton(view: View): Button? {
         if (view is Button && view.text == "Tap") return view

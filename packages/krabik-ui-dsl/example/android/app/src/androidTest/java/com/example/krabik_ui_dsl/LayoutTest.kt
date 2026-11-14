@@ -21,6 +21,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import dev.krabik.ui.testing.findRustRoot
 
 /**
  * Verifies that the frames Rust sends actually reach the native views.
@@ -130,19 +131,6 @@ class LayoutTest {
         }
     }
 
-    private fun findRustRoot(view: View): RustRootView? {
-        // A navigation session also keeps the (hidden) main host alive; only
-        // the visible screen host owns the registered widgets.
-        if (view is RustRootView && view.isShown && view.registeredViewCount() > 0) {
-            return view
-        }
-        if (view is ViewGroup) {
-            for (index in 0 until view.childCount) {
-                findRustRoot(view.getChildAt(index))?.let { return it }
-            }
-        }
-        return null
-    }
 
     private fun findText(root: View, text: String): TextView? {
         if (root is TextView && root.text?.toString()?.contains(text) == true) {

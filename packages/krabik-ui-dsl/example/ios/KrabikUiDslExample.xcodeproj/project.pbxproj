@@ -38,6 +38,7 @@
 		F36B8BF2DAD5BBF7E5A37E0A /* ChecklistUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChecklistUITests.swift; sourceTree = "<group>"; };
 		F43B1CE5B765D850DC80771C /* KrabikHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikHostController.swift; sourceTree = "<group>"; };
 		F7B3313EC88FE48C53F06030 /* RustRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustRootView.swift; sourceTree = "<group>"; };
+		"TEMP_50FC4C1B-0EBA-4300-A9B9-8750AA601361" /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -115,6 +116,14 @@
 			path = ../..;
 			sourceTree = "<group>";
 		};
+		"TEMP_29C74FBE-CD7F-4160-9432-22A56C760393" /* ios */ = {
+			isa = PBXGroup;
+			children = (
+				"TEMP_50FC4C1B-0EBA-4300-A9B9-8750AA601361" /* Signing.xcconfig */,
+			);
+			path = ios;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -165,7 +174,11 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					02CEA64670569127D1D97C3B = {
+						ProvisioningStyle = Automatic;
 						TestTargetID = D7CB24A5FE50B028E5F012A6;
+					};
+					D7CB24A5FE50B028E5F012A6 = {
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -218,7 +231,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "export PATH=\"$HOME/.cargo/bin:$PATH\"\ncd \"$SRCROOT/../rust\"\nif [ \"$CONFIGURATION\" = \"Release\" ]; then\n  cargo build --target \"$RUST_TARGET\" --release\nelse\n  cargo build --target \"$RUST_TARGET\"\nfi\n";
+			shellScript = "\"$SRCROOT/../../shared/build-rust-ios.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -264,13 +277,14 @@
 					"@executable_path/Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = (
-					"$(SRCROOT)/../rust/target/$(RUST_TARGET)/$(CONFIGURATION:lower)",
+					"$(SRCROOT)/../rust/target/xcode/$(PLATFORM_NAME)-$(CONFIGURATION)",
 				);
 				OTHER_LDFLAGS = (
-					"-lkrabik_ui_dsl_example",
+					"-l$(RUST_LIB)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.krabik-ui-dsl-example";
 				PRODUCT_NAME = KrabikUiDslExample;
+				RUST_LIB = krabik_ui_dsl_example;
 				SDKROOT = iphoneos;
 				SWIFT_OBJC_BRIDGING_HEADER = Sources/Bridging.h;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -287,13 +301,14 @@
 					"@executable_path/Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = (
-					"$(SRCROOT)/../rust/target/$(RUST_TARGET)/$(CONFIGURATION:lower)",
+					"$(SRCROOT)/../rust/target/xcode/$(PLATFORM_NAME)-$(CONFIGURATION)",
 				);
 				OTHER_LDFLAGS = (
-					"-lkrabik_ui_dsl_example",
+					"-l$(RUST_LIB)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.krabik-ui-dsl-example";
 				PRODUCT_NAME = KrabikUiDslExample;
+				RUST_LIB = krabik_ui_dsl_example;
 				SDKROOT = iphoneos;
 				SWIFT_OBJC_BRIDGING_HEADER = Sources/Bridging.h;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -302,6 +317,7 @@
 		};
 		E8B8C590BFEE60488A68D21E /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = "TEMP_50FC4C1B-0EBA-4300-A9B9-8750AA601361" /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -333,7 +349,7 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -361,7 +377,6 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				RUST_TARGET = "aarch64-apple-ios-sim";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -387,6 +402,7 @@
 		};
 		F1493BC7579C62791628E535 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = "TEMP_50FC4C1B-0EBA-4300-A9B9-8750AA601361" /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -418,7 +434,7 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -439,7 +455,6 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				RUST_TARGET = "aarch64-apple-ios-sim";
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
