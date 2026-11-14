@@ -269,19 +269,20 @@ abis.get().forEachIndexed { index, abi ->
 
 For each ABI: run `cargo build --target <triple>` with one environment variable set, for example
 `CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=/path/to/aarch64-linux-android24-clang`, then copy the
-resulting `.so` to `app/src/main/jniLibs/<abi>/`. That directory is where the Android Gradle
-Plugin looks for native libraries by default, so packaging needs no further configuration. It is
-generated, and ignored by git. Before building, the task deletes `jniLibs` subdirectories of ABIs
-that are not wanted this time, so a stale library cannot be packaged.
+resulting `.so` to `app/build/rustJniLibs/<debug|release>/<abi>/`. The script registers that
+folder as a native-library folder of the matching build type, so debug and release each package
+their own library and neither can pick up the other's. It is under `build/`, so it is generated
+and never committed. Before building, the task deletes subdirectories of ABIs that are not
+wanted this time, so a stale library cannot be packaged.
 
 No cargo plugin (`cargo-ndk` and the like) is involved; it is plain cargo with a linker variable.
 
 **Inputs and outputs.** `BuildRustLibs` declares its inputs: the crate's `src`, `Cargo.toml`,
-`Cargo.lock`, `build.rs`, and, as `dependencySources`, the framework's `rust/src`. Gradle skips
-the task when none of them changed. The framework sources are listed because an app crate
-compiles the framework in; without that input, editing the framework would not rebuild the app's
-library. (Cargo would notice, but Gradle would never run cargo.) Note that `rust/macros/src` is
-not among the inputs, so a change only to the macro crate does not trigger the task.
+`Cargo.lock`, `build.rs`, and, as `dependencySources`, the framework's `rust/src` and
+`rust/macros/src` with both of their `Cargo.toml` files. Gradle skips the task when none of them
+changed. The framework and its macro crate are listed because an app crate compiles them in;
+without those inputs, editing either would not rebuild the app's library. (Cargo would notice,
+but Gradle would never run cargo.)
 
 **Hooking in.**
 
@@ -301,8 +302,15 @@ that collect native libraries are made to depend on the matching one. So
 `./gradlew :app:assembleDebug` builds the Rust library in debug and
 `./gradlew :app:assembleRelease` builds it in release, with no extra command.
 
-A limitation that follows from the shared `jniLibs` directory: debug and release write to the
-same place, so building one after the other replaces the library.
+**Minified builds.** Rust finds the Kotlin classes, constructors and methods by name, which R8
+cannot see. The library module therefore ships `consumer-rules.pro`, applied automatically to
+every app that depends on it; it keeps the `dev.krabik.ui` package whole and every `native`
+method. A minified build of the showcase was installed and driven by hand through several
+screens to check this. The instrumented suites cannot run against a minified app (the test APK
+expects library classes that minification removes from the app), so that check is manual. Two
+things the rules do not cover: an app's drawables that Rust names as icons are found with
+`getIdentifier`, so resource shrinking would remove them unless the app keeps them; and an app's
+own classes that only Rust refers to need the app's own rules.
 
 ## iOS
 

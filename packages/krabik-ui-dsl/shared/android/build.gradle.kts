@@ -12,6 +12,8 @@ android {
 
   defaultConfig {
     minSdk = 24
+    // Rust looks this package up by name; see the file for why.
+    consumerProguardFiles("consumer-rules.pro")
   }
 
   compileOptions {

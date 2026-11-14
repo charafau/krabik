@@ -118,7 +118,7 @@ it.
 ## Build and run: Android
 
 Gradle drives the whole flow. Every assemble that packages native libraries runs `cargo build` for
-the selected ABIs first and copies the resulting `.so` files into `app/src/main/jniLibs`, so there
+the selected ABIs first and copies the resulting `.so` files into `app/build/rustJniLibs`, so there
 is no separate step to remember:
 
 ```bash
