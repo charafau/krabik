@@ -616,10 +616,6 @@ source, not all reproduced on a device.
 
 ### Behaviour
 
-- **Native controls can drift from state.** If `update` ignores or reverts a value, the tree is
-  unchanged, nothing is sent, and a switch, slider or bottom navigation bar keeps what the user
-  did. Host chrome that can be dismissed natively (drawer, snackbar, dialog, sheet) has a
-  "remember what the platform shows and re-sync" rule; widgets and the bottom bar do not.
 - **Route keys must be unique in a stack.** A screen's host is found by its key, so the same key
   twice makes one pop drop both. Documented on `Route`; not enforced.
 - **Nothing pops unless the app implements `App::back`.** The app bar's back arrow goes through

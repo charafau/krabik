@@ -13,7 +13,7 @@ use krabik_ui_dsl::ui::{
     Align, Button, Checkbox, Color, Column, CornerRadii, DatePicker, DatePickerValue, DateValue,
     EdgeInsets, Element, Gradient, Image, ImageScale, ImageSource, ImeAction, Justify,
     KeyboardType, List, ProgressIndicator, RadioGroup, Row, ScrollView, Slider, Spacer, Switch,
-    Text, TextAlign, TextField,
+    TabBar, Text, TextAlign, TextField,
 };
 
 pub const COLOR_MUTED: Color = Color::adaptive(0xFF66_6666, 0xFFA0_A4A8);
@@ -40,6 +40,7 @@ pub enum Demo {
     Media,
     Styling,
     Controls,
+    Rejected,
     List,
     ListVariable,
     ListRecycled,
@@ -78,6 +79,12 @@ pub enum Msg {
     RecycledRefresh,
     /// The note at this index was edited.
     Note(usize, String),
+    /// A control the application never lets the user change.
+    Refused,
+    /// A slider the application caps at 50.
+    Capped(f32),
+    /// A field the application strips everything but digits from.
+    Digits(String),
 }
 
 /// The state of the gallery demo application.
@@ -115,6 +122,14 @@ pub struct GalleryApp {
     pub recycled_notes: Arc<Vec<String>>,
     /// Stable indices of the form rows.
     pub recycled_form_rows: Arc<Vec<usize>>,
+    /// How often the user tried to change a control that stays as it is.
+    pub refused: usize,
+    /// A slider value the application keeps at or below 50.
+    pub capped: f32,
+    /// A field that only keeps digits.
+    pub digits: String,
+    /// The rows of the list in the rejected-input demo.
+    pub locked_rows: Arc<Vec<usize>>,
 }
 
 impl Default for GalleryApp {
@@ -139,6 +154,10 @@ impl Default for GalleryApp {
             recycled_items: Arc::new((1..=1000).map(|index| format!("Row {index}")).collect()),
             recycled_notes: Arc::new(vec![String::new(); 200]),
             recycled_form_rows: Arc::new((0..200).collect()),
+            refused: 0,
+            capped: 20.0,
+            digits: String::new(),
+            locked_rows: Arc::new((0..3).collect()),
             variable_items: Arc::new(
                 (1..=300)
                     .map(|index| {
@@ -191,6 +210,7 @@ impl GalleryApp {
                         Button::new("List (recycled, form)")
                             .on_click(Msg::Open(Demo::ListRecycledForm)),
                     )
+                    .child(Button::new("Rejected input").on_click(Msg::Open(Demo::Rejected)))
                     .child(caption(
                         "This list scrolls, so every demo stays reachable on small screens.",
                     )),
@@ -738,6 +758,82 @@ impl GalleryApp {
             .into()
     }
 
+    /// Controls whose new value the application does not accept. Each one
+    /// has to return to what the state says.
+    fn rejected(&self) -> Element<Msg> {
+        Column::new()
+            .padding(24)
+            .spacing(12)
+            .width_percent(1.0)
+            .height_percent(1.0)
+            .align_items(Align::Start)
+            .child(back_button())
+            .child(Text::new("Rejected input").size(26).bold())
+            .child(caption(
+                "The application overrules these controls; each returns to its state.",
+            ))
+            .child(Text::new(format!("Refused: {}", self.refused)).size(18))
+            .child(
+                Row::new()
+                    .width_percent(1.0)
+                    .spacing(12)
+                    .align_items(Align::Center)
+                    .child(Text::new("Locked").size(18))
+                    .child(Spacer::new())
+                    .child(
+                        Switch::new(false)
+                            .on_toggle(|_| Msg::Refused)
+                            .accessibility_label("Locked switch"),
+                    ),
+            )
+            .child(
+                TabBar::new(["First", "Second"])
+                    .selected(0)
+                    .on_select(|_| Msg::Refused)
+                    .accessibility_label("Locked tabs")
+                    .width_percent(1.0),
+            )
+            .child(Text::new(format!("Capped: {:.0}", self.capped)).size(18))
+            .child(
+                Slider::new(self.capped)
+                    .min(0.0)
+                    .max(100.0)
+                    .on_change(Msg::Capped)
+                    .accessibility_label("Capped")
+                    .width_percent(1.0),
+            )
+            .child(Text::new(format!("Digits: {}", self.digits)).size(18))
+            .child(
+                TextField::new(self.digits.clone())
+                    .placeholder("Digits only")
+                    .on_change(Msg::Digits)
+                    .accessibility_label("Digits only")
+                    .width_percent(1.0),
+            )
+            .child(
+                List::new(Arc::clone(&self.locked_rows))
+                    .item_height(56.0)
+                    .recycled()
+                    .key(|index| index.to_string())
+                    .row(|index| {
+                        Row::new()
+                            .width_percent(1.0)
+                            .padding_each(EdgeInsets::symmetric(12, 6))
+                            .spacing(12)
+                            .align_items(Align::Center)
+                            .child(Text::new(format!("Locked row {}", index + 1)).size(15))
+                            .child(Spacer::new())
+                            .child(
+                                Switch::new(false)
+                                    .on_toggle(|_| Msg::Refused)
+                                    .accessibility_label(format!("Row switch {}", index + 1)),
+                            )
+                            .into()
+                    }),
+            )
+            .into()
+    }
+
     fn controls(&self) -> Element<Msg> {
         let state = if self.notifications {
             "Notifications are on."
@@ -897,6 +993,7 @@ impl Component for GalleryApp {
             Demo::Media => self.media(),
             Demo::Styling => self.styling(),
             Demo::Controls => self.controls(),
+            Demo::Rejected => self.rejected(),
             Demo::List => self.list(),
             Demo::ListVariable => self.list_variable(),
             Demo::ListRecycled => self.list_recycled(),
@@ -962,6 +1059,12 @@ impl Component for GalleryApp {
                 if let Some(note) = Arc::make_mut(&mut self.recycled_notes).get_mut(index) {
                     *note = text;
                 }
+            }
+            // The state the control shows is deliberately left alone.
+            Msg::Refused => self.refused += 1,
+            Msg::Capped(value) => self.capped = value.min(50.0),
+            Msg::Digits(text) => {
+                self.digits = text.chars().filter(char::is_ascii_digit).collect();
             }
         }
     }
@@ -1104,6 +1207,17 @@ mod tests {
     }
 
     #[test]
+    fn rejected_input_keeps_the_state() {
+        let mut app = GalleryApp::new();
+        app.update(Msg::Refused);
+        assert_eq!(app.refused, 1);
+        app.update(Msg::Capped(80.0));
+        assert_eq!(app.capped, 50.0);
+        app.update(Msg::Digits("a1b2".into()));
+        assert_eq!(app.digits, "12");
+    }
+
+    #[test]
     fn view_produces_elements_for_all_screens() {
         let mut app = GalleryApp::new();
         for demo in [
@@ -1117,6 +1231,7 @@ mod tests {
             Demo::Media,
             Demo::Styling,
             Demo::Controls,
+            Demo::Rejected,
         ] {
             app.demo = demo;
             let element = app.view();

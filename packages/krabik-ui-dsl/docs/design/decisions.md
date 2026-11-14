@@ -118,6 +118,13 @@ hears. The rule for all of them is the same: record what the platform now shows,
 application its message, render, and if the application still says the thing should be visible,
 show it again.
 
+**Widgets follow the same rule.** A switch has flipped and a slider has moved by the time Rust
+hears. If `update` does not accept the value, the description is unchanged and a plain diff would
+send nothing, leaving the control showing a value the state does not hold. So after a value event
+the session has that one control updated from the state regardless (`Runtime::reapply`). The
+update functions compare against the live native value, so this costs nothing when the
+application did accept it.
+
 **Why chrome is not in the widget tree.** The app bar, tab bar, alert, sheet, floating button,
 drawer and snackbar are placed, sized and animated by the platform. They are described on the
 `Scaffold` (or by `dialog()` / `sheet()`), not as children of a `Column`, because Taffy has

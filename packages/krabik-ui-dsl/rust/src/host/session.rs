@@ -320,6 +320,21 @@ impl<P: Platform> Session<P> {
         }
 
         let message = actions_for::<P>(state, id).and_then(|actions| actions.message(&event));
+
+        // The control already shows the new value. Whatever the application
+        // makes of the message, the control is updated from the state. A
+        // control nobody listens to is left as the user set it.
+        let changes_value = matches!(
+            event,
+            NodeEvent::Toggle(_)
+                | NodeEvent::Text(_)
+                | NodeEvent::Slider(_)
+                | NodeEvent::Select(_)
+                | NodeEvent::Picker(_)
+        );
+        if changes_value && message.is_some() {
+            state.runtime_mut().reapply(id);
+        }
         match message {
             Some(message) => self.update(cx, message),
             None if engine_changed => self.render_all(cx),
@@ -445,6 +460,11 @@ impl<P: Platform> Session<P> {
         cx: &mut P::Cx<'_>,
         index: usize,
     ) -> Result<(), P::Error> {
+        // The bar already shows the destination the user picked; if the
+        // application keeps another one, the bar is told again.
+        if let Some(bar) = self.chrome.bottom_navigation.as_mut() {
+            bar.selected = index;
+        }
         let message = self
             .top_chrome()
             .bottom_navigation
@@ -521,11 +541,15 @@ mod tests {
     use crate::element::{Element, RawElement};
     use crate::engine::geometry::Size;
     use crate::engine::measure::ApproximateMeasure;
+    use crate::engine::render::Op;
     use crate::engine::runtime::Runtime;
-    use crate::navigation::Navigation;
+    use crate::engine::tree::NodeKind;
+    use crate::navigation::{BottomNavItem, BottomNavigation, Navigation};
     use crate::presentation::BottomSheet;
     use crate::scaffold::{AppBar, Drawer, DrawerItem, Fab, Scaffold};
-    use crate::ui::{Button, Column, Text};
+    use crate::style::Icon;
+    use crate::ui::{Button, Column, Switch, Text};
+    use crate::widgets::Widget;
 
     /// Records what the session asks the platform to do.
     type Log = Rc<RefCell<Vec<String>>>;
@@ -543,6 +567,8 @@ mod tests {
         kind: HostKind,
         runtime: Runtime,
         renders: usize,
+        /// The nodes the last render updated.
+        updated: Vec<NodeId>,
     }
 
     impl FakeHost {
@@ -551,6 +577,7 @@ mod tests {
                 kind,
                 runtime: Runtime::new(Box::new(ApproximateMeasure)),
                 renders: 0,
+                updated: Vec::new(),
             }
         }
     }
@@ -572,7 +599,15 @@ mod tests {
             None
         }
         fn render(&mut self, _cx: &mut (), element: &RawElement) -> Result<(), Infallible> {
-            self.runtime.update(element, Size::new(320.0, 640.0));
+            let update = self.runtime.update(element, Size::new(320.0, 640.0));
+            self.updated = update
+                .ops
+                .iter()
+                .filter_map(|op| match op {
+                    Op::Update(node) => Some(node.id),
+                    _ => None,
+                })
+                .collect();
             self.renders += 1;
             Ok(())
         }
@@ -616,6 +651,9 @@ mod tests {
             );
             if let Some(fab) = &chrome.floating_action_button {
                 line += &format!(" fab:{}", fab.label);
+            }
+            if let Some(bar) = &chrome.bottom_navigation {
+                line += &format!(" tab:{}", bar.selected);
             }
             if let Some(drawer) = &chrome.drawer {
                 line += if drawer.open {
@@ -675,6 +713,12 @@ mod tests {
         /// Keeps the snackbar up after the platform reports it gone.
         sticky_snackbar: bool,
         picked: Option<usize>,
+        /// A switch on every screen, and whether the application lets the
+        /// user change it.
+        on: bool,
+        locked: bool,
+        /// The selected bottom navigation destination, when there is a bar.
+        tab: Option<usize>,
     }
 
     /// An application whose state the test can also change from outside,
@@ -704,6 +748,8 @@ mod tests {
         DrawerClosed,
         Undo,
         SnackbarGone,
+        Switch(bool),
+        Tab(usize),
     }
 
     impl Component for TestApp {
@@ -736,6 +782,16 @@ mod tests {
                     state.snackbar = false;
                 }
                 Msg::SnackbarGone => state.snackbar = state.sticky_snackbar,
+                Msg::Switch(on) => {
+                    if !state.locked {
+                        state.on = on;
+                    }
+                }
+                Msg::Tab(index) => {
+                    if !state.locked {
+                        state.tab = Some(index);
+                    }
+                }
             }
         }
     }
@@ -758,8 +814,17 @@ mod tests {
                     .body(
                         Column::new()
                             .child(Text::new(format!("clicks {}", state.clicks)))
-                            .child(Button::new("Tap").on_click(Msg::Tap)),
+                            .child(Button::new("Tap").on_click(Msg::Tap))
+                            .child(Switch::new(state.on).on_toggle(Msg::Switch)),
                     )
+                    .bottom_navigation(state.tab.map(|tab| {
+                        BottomNavigation::new([
+                            BottomNavItem::new("Home", Icon::new().shared("home")),
+                            BottomNavItem::new("Search", Icon::new().shared("search")),
+                        ])
+                        .selected(tab)
+                        .on_select(Msg::Tab)
+                    }))
                     .floating_action_button(
                         (state.fab && top).then(|| Fab::new("Add").on_click(Msg::Fab)),
                     )
@@ -1152,5 +1217,84 @@ mod tests {
         app.state().stack.pop();
         session.render_all(&mut ()).unwrap();
         assert_eq!(take(&log)[2], "chrome HOME fab:Add");
+    }
+
+    /// The switch on the screen rendered by host `host`.
+    fn switch_of(session: &Session<Fake>, host: u64) -> NodeId {
+        tree::preorder(session.hosts[&host].runtime.tree())
+            .into_iter()
+            .find(|node| matches!(node.kind, NodeKind::Widget(Widget::Switch(_))))
+            .expect("the screen has a switch")
+            .id
+    }
+
+    #[test]
+    fn a_control_the_application_overrules_is_set_back() {
+        let (mut session, app, _log) = on_home(State {
+            locked: true,
+            ..State::default()
+        });
+        let switch = switch_of(&session, 1);
+
+        // The user flips the switch; the native view now shows "on", but the
+        // application keeps it off. The description did not change, and the
+        // switch is updated all the same.
+        session
+            .node_event(&mut (), 1, switch, NodeEvent::Toggle(true))
+            .unwrap();
+        assert!(!app.state().on);
+        assert_eq!(session.hosts[&1].updated, [switch]);
+
+        // An ordinary render afterwards leaves it alone.
+        session.render_all(&mut ()).unwrap();
+        assert!(session.hosts[&1].updated.is_empty());
+    }
+
+    #[test]
+    fn a_control_the_application_follows_is_updated_once() {
+        let (mut session, app, _log) = on_home(State::default());
+        let switch = switch_of(&session, 1);
+
+        session
+            .node_event(&mut (), 1, switch, NodeEvent::Toggle(true))
+            .unwrap();
+        assert!(app.state().on);
+        assert_eq!(session.hosts[&1].updated, [switch]);
+    }
+
+    #[test]
+    fn a_press_does_not_update_the_button() {
+        let (mut session, _app, _log) = on_home(State::default());
+        let button = tree::preorder(session.hosts[&1].runtime.tree())
+            .into_iter()
+            .find(|node| matches!(node.kind, NodeKind::Widget(Widget::Button(_))))
+            .unwrap()
+            .id;
+
+        session
+            .node_event(&mut (), 1, button, NodeEvent::Click)
+            .unwrap();
+        assert!(!session.hosts[&1].updated.contains(&button));
+    }
+
+    #[test]
+    fn a_destination_the_application_overrules_is_selected_again() {
+        let (mut session, app, log) = on_home(State {
+            tab: Some(0),
+            locked: true,
+            ..State::default()
+        });
+
+        // The bar already shows the second destination; the application
+        // stays on the first, so the bar is told.
+        session.bottom_navigation_selected(&mut (), 1).unwrap();
+        assert_eq!(app.state().tab, Some(0));
+        assert_eq!(take(&log), ["chrome HOME tab:0"]);
+
+        // When the application follows, the bar is already right.
+        app.state().locked = false;
+        session.bottom_navigation_selected(&mut (), 1).unwrap();
+        assert_eq!(app.state().tab, Some(1));
+        assert!(take(&log).is_empty());
     }
 }

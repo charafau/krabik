@@ -104,9 +104,18 @@ pub(crate) fn update_content(
                 } else {
                     props.selected.min(props.pages - 1)
                 };
-                if *selected != target {
+                // A swipe moves the pager without changing `selected`, so the
+                // page on screen is read from the scroll view. A gesture in
+                // progress is left alone.
+                let width = scroll.bounds().size.width;
+                let settled = !scroll.isDragging() && !scroll.isDecelerating();
+                let shown = if width > 0.0 && settled {
+                    (scroll.contentOffset().x / width).round().max(0.0) as usize
+                } else {
+                    *selected
+                };
+                if *selected != target || shown != target {
                     *selected = target;
-                    let width = scroll.bounds().size.width;
                     if width > 0.0 {
                         scroll.setContentOffset_animated(
                             CGPoint::new(width * target as f64, 0.0),

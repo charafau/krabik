@@ -133,14 +133,18 @@ pub(crate) fn apply_accessibility(view: &UIView, node: &RenderNode, mtm: MainThr
         let label = NSString::from_str(label);
         view.setAccessibilityLabel(Some(&label), mtm);
         // A radio group must stay a plain container so its options remain
-        // individually reachable by accessibility services.
-        view.setIsAccessibilityElement(
-            !matches!(
-                node.kind,
-                NodeKind::Widget(Widget::RadioGroup(_)) | NodeKind::Widget(Widget::TabBar(_))
-            ),
-            mtm,
-        );
+        // individually reachable by accessibility services. A text field is
+        // already exposed by UIKit as an editable element; forcing the flag
+        // would turn it into a plain labelled view.
+        if !matches!(node.kind, NodeKind::Widget(Widget::TextField(_))) {
+            view.setIsAccessibilityElement(
+                !matches!(
+                    node.kind,
+                    NodeKind::Widget(Widget::RadioGroup(_)) | NodeKind::Widget(Widget::TabBar(_))
+                ),
+                mtm,
+            );
+        }
     } else {
         view.setAccessibilityLabel(None, mtm);
     }
