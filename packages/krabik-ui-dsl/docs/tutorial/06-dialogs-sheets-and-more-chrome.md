@@ -185,11 +185,12 @@ Without a cancel button the dialog is modal in the strict sense: the user must p
 That follows from the pattern. A native dismissal has to become *some* message, or your state
 would be left saying "open".
 
-Two limits come from the platforms. The doc comment says "up to three buttons": on Android a
-dialog has three button slots, and `showDialog` in `KrabikHostController.kt` puts the cancel
-button in the negative slot, the first other button in the positive slot, the second in the
-neutral slot, and silently skips any further ones. On iOS only one button can have the cancel
-style, and a dialog with no buttons gets an "OK" so it can be closed.
+The platforms differ in how they lay the buttons out. An Android alert has three button slots:
+`showDialog` in `KrabikHostController.kt` puts the cancel button in the negative slot and up to
+two others in the positive and neutral slots. With more choices than fit, it shows all of them
+as a list under the message, in the order you gave them. iOS stacks its buttons by itself. On
+iOS only one button can have the cancel style, and a dialog with no buttons gets an "OK" so it
+can be closed.
 
 One more detail explains why buttons are matched by index. When the user presses a button, the
 platform has already closed the alert and reports "button 1". The session then asks your app for
@@ -239,6 +240,12 @@ so the list's scaffold gets it:
 
 Every scaffold slot accepts an `Option`, so state can decide in one expression
 (`impl Into<Option<Snackbar<M>>>` in `Scaffold::snackbar`).
+
+A snackbar is shown when it differs from the one that is up. Two snackbars with the same text
+and action are the same snackbar, so deleting two notes with the same text in a row would show
+the notice once and not restart its time on screen. When that matters, give each occasion its
+own number with `.id(n)`, for example a deletion counter kept in the state; a new id shows the
+snackbar anew.
 
 **Messages.**
 

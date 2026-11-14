@@ -310,9 +310,10 @@ than by order, so the roles are mapped: the cancel-role button takes the negativ
 other button the positive slot, the next the neutral slot. A destructive button is coloured with
 the theme's error colour after the dialog is shown.
 
-A known limit follows from the three slots: a fourth button, or a third non-cancel button, is
-skipped (`else -> continue`). A dismissal by back or an outside tap is allowed only when
-`cancelable` is true and reports `-1`.
+Three slots hold one cancel button and two others. When the application gives more than that,
+`showDialog` does not use the slots: it stacks every button as a list under the message, in the
+order given, with the destructive one in the error colour, so no choice is dropped. A dismissal
+by back or an outside tap is allowed only when `cancelable` is true and reports `-1`.
 
 ### Bottom sheet
 
@@ -618,7 +619,6 @@ supplies its own toolbar.
 - `closeDrawerForBack` returns a boolean nobody reads.
 - The identical comment in both fragments' `onDestroyView` talks about screens in the sheet
   fragment.
-- An alert shows at most three buttons.
 
 ## Where this lives
 

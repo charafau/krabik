@@ -72,6 +72,9 @@ pub struct Runtime {
     revision: u64,
     /// The appearance colours are resolved for.
     scheme: ColorScheme,
+    /// The height each list had in the last layout, which is what its window
+    /// has to cover.
+    list_heights: HashMap<NodeId, f32>,
     /// A control the user just changed, updated by the next render even when
     /// its description is unchanged.
     reapply: Option<NodeId>,
@@ -97,6 +100,7 @@ impl Runtime {
             viewport: Size::ZERO,
             revision: 0,
             scheme: ColorScheme::Light,
+            list_heights: HashMap::new(),
             reapply: None,
             row_reapply: None,
         }
@@ -142,6 +146,8 @@ impl Runtime {
         let unchanged =
             !suppress_animation && first_info.reset_scroll.is_empty() && first == self.tree;
 
+        // Lists whose content was replaced start again from the top.
+        let mut reset: Vec<NodeId> = Vec::new();
         let (mut next, info, layout) = if unchanged {
             (first, first_info, None)
         } else {
@@ -156,9 +162,13 @@ impl Runtime {
                 let (next, info) = built;
                 for id in &info.reset_scroll {
                     self.scroll_offsets.remove(id);
+                    if !reset.contains(id) {
+                        reset.push(*id);
+                    }
                 }
                 let layout = layout::compute(&next, viewport, self.measurer.as_ref());
-                let changed = self.record_heights(&info, &layout);
+                let changed =
+                    self.record_heights(&info, &layout) | self.record_list_heights(&info, &layout);
                 iteration += 1;
                 if !changed || iteration >= 3 {
                     break (next, info, Some(layout));
@@ -222,6 +232,13 @@ impl Runtime {
             ops.extend(layout_ops);
             self.layout = layout;
         }
+        // The engine forgot these offsets; the native scroll views are told
+        // last, once their content has its new size.
+        for id in reset {
+            if tree::find(&next, id).is_some_and(UiNode::is_renderable) {
+                ops.push(render::Op::ScrollTo { id, offset: 0.0 });
+            }
+        }
 
         let size = self
             .layout
@@ -243,6 +260,7 @@ impl Runtime {
             &mut self.measurements,
             &self.focused_rows,
             self.focused,
+            &self.list_heights,
         );
         tree::resolve_colors(&mut tree, self.scheme);
         (tree, info)
@@ -252,6 +270,36 @@ impl Runtime {
     ///
     /// Returns whether anything changed, which asks for another build so the
     /// prefix sums and the materialized window follow the new measurements.
+    /// Remembers how tall each list was laid out. Returns whether a list is
+    /// taller than the window it was built for, which leaves rows missing
+    /// at its end until it is built again.
+    fn record_list_heights(&mut self, info: &BuildInfo, layout: &LayoutResult) -> bool {
+        let mut grew = false;
+        self.list_heights
+            .retain(|id, _| info.lists.contains_key(id));
+        for id in info.lists.keys() {
+            let Some(frame) = layout.frames.get(id) else {
+                continue;
+            };
+            let height = frame.height.max(0.0);
+            if let Some(used) = info.window_heights.get(id)
+                && height > used + 0.5
+            {
+                grew = true;
+            }
+            self.list_heights.insert(*id, height);
+        }
+        grew
+    }
+
+    /// The height the window of list `id` has to cover.
+    fn list_height(&self, id: NodeId) -> f32 {
+        match self.list_heights.get(&id) {
+            Some(height) if *height > 0.5 => height.min(self.viewport.height),
+            _ => self.viewport.height,
+        }
+    }
+
     fn record_heights(&mut self, info: &BuildInfo, layout: &LayoutResult) -> bool {
         let mut changed = false;
 
@@ -373,6 +421,8 @@ impl Runtime {
     /// Sub-pixel and sub-row scrolls only update the stored offset: the
     /// materialized rows stay valid until the visible range actually moves.
     pub fn scroll(&mut self, id: NodeId, offset: f32) -> bool {
+        // A list scrolls within its own height, not the host's.
+        let viewport_height = self.list_height(id);
         let Some(extent) = self.lists.get(&id).copied() else {
             return false;
         };
@@ -382,7 +432,7 @@ impl Runtime {
                 return false;
             };
             let total = measurement.prefix.last().copied().unwrap_or(0.0);
-            let offset = offset.clamp(0.0, (total - self.viewport.height).max(0.0));
+            let offset = offset.clamp(0.0, (total - viewport_height).max(0.0));
             let previous = self.scroll_offsets.insert(id, offset).unwrap_or(0.0);
             if (previous - offset).abs() < f32::EPSILON {
                 return false;
@@ -392,7 +442,7 @@ impl Runtime {
             let before = measurement.window;
             let after = tree::variable_window(
                 &measurement.prefix,
-                self.viewport.height,
+                viewport_height,
                 offset,
                 extent.buffer,
                 pin,
@@ -402,7 +452,7 @@ impl Runtime {
 
         let offset = offset.clamp(
             0.0,
-            (extent.count as f32 * height - self.viewport.height).max(0.0),
+            (extent.count as f32 * height - viewport_height).max(0.0),
         );
         let previous = self.scroll_offsets.insert(id, offset).unwrap_or(0.0);
         if (previous - offset).abs() < f32::EPSILON {
@@ -410,8 +460,8 @@ impl Runtime {
         }
 
         let pin = self.focused_rows.get(&id).copied();
-        let before = tree::fixed_window(extent, self.viewport.height, previous, pin);
-        let after = tree::fixed_window(extent, self.viewport.height, offset, pin);
+        let before = tree::fixed_window(extent, viewport_height, previous, pin);
+        let after = tree::fixed_window(extent, viewport_height, offset, pin);
         before != after
     }
 
@@ -791,6 +841,96 @@ mod tests {
             scrolled.last().unwrap().style.height,
             Length::Points((100.0 - 13.0) * 50.0)
         );
+    }
+
+    #[test]
+    fn a_list_is_windowed_for_its_own_height() {
+        /// Some lines of text above a list that takes the rest.
+        fn screen(lines: usize) -> Element {
+            let items = Arc::new((0..500).collect::<Vec<usize>>());
+            let mut column = Column::new().height_percent(1.0);
+            for line in 0..lines {
+                column = column.child(Button::new(format!("header {line}")));
+            }
+            column
+                .child(
+                    List::new(items)
+                        .item_height(20.0)
+                        .buffer(0)
+                        .key(|index| index.to_string())
+                        .row(|index| Text::new(index.to_string()).into()),
+                )
+                .into()
+        }
+        /// How many rows the list has materialized, and how tall it is.
+        fn list(runtime: &Runtime) -> (usize, f32) {
+            let rows = tree::preorder(runtime.tree())
+                .into_iter()
+                .filter(|node| matches!(&node.kind, NodeKind::Widget(Widget::Text(_))))
+                .count();
+            let id = *runtime.lists.keys().next().expect("the screen has a list");
+            (rows, runtime.frames()[&id].height)
+        }
+
+        let viewport = Size::new(200.0, 400.0);
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+
+        // Nothing is known about the list yet, so the first build covers the
+        // whole viewport although the list is shorter.
+        runtime.update(&screen(6), viewport);
+        let (rows, height) = list(&runtime);
+        assert_eq!(rows, 20);
+        assert!(height < 300.0, "the headers take room: {height}");
+
+        // From then on the window is the list's own height.
+        runtime.update(&screen(6), viewport);
+        let (rows, height) = list(&runtime);
+        assert!(rows < 20);
+        assert!(rows as f32 * 20.0 >= height);
+
+        // Headers go away and the list grows: the same update builds the
+        // rows the taller list needs, without waiting for another render.
+        runtime.update(&screen(1), viewport);
+        let (more, taller) = list(&runtime);
+        assert!(taller > height);
+        assert!(more > rows);
+        assert!(more as f32 * 20.0 >= taller);
+    }
+
+    #[test]
+    fn a_replaced_list_tells_the_native_view_to_start_again() {
+        fn list(revision: u64) -> Element {
+            List::new(Arc::new(
+                (0..200)
+                    .map(|index| format!("row {index}"))
+                    .collect::<Vec<_>>(),
+            ))
+            .revision(revision)
+            .key(|item| item.clone())
+            .row(|item| Text::new(item.clone()).into())
+            .into()
+        }
+
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&list(1), Size::new(120.0, 200.0));
+        let id = runtime.tree().children[0].id;
+        runtime.scroll(id, 600.0);
+        assert_eq!(runtime.scroll_offset(id), 600.0);
+
+        // Same content: the offset stays and nothing is said about it.
+        let update = runtime.update(&list(1), Size::new(120.0, 200.0));
+        assert!(
+            !update
+                .ops
+                .iter()
+                .any(|op| matches!(op, Op::ScrollTo { .. }))
+        );
+
+        // Other content under the same list: the engine forgets the offset,
+        // and so must the native scroll view.
+        let update = runtime.update(&list(2), Size::new(120.0, 200.0));
+        assert_eq!(runtime.scroll_offset(id), 0.0);
+        assert_eq!(update.ops.last(), Some(&Op::ScrollTo { id, offset: 0.0 }));
     }
 
     #[test]

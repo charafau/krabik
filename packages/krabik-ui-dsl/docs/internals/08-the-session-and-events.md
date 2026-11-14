@@ -117,6 +117,7 @@ pub(crate) trait Controller<P: Platform> {
     fn dismiss_dialog(&self, cx: &mut P::Cx<'_>) -> Result<(), P::Error>;
     fn present_sheet(&self, cx: &mut P::Cx<'_>, host: u64) -> Result<(), P::Error>;
     fn dismiss_sheet(&self, cx: &mut P::Cx<'_>) -> Result<(), P::Error>;
+    fn sheet_resized(&self, cx: &mut P::Cx<'_>, height: f32) -> Result<(), P::Error>;
 }
 ```
 
@@ -431,8 +432,11 @@ showing is therefore closed and reopened.
 **Sheet.** Only presence is compared: `app.sheet().is_some()` against `has_sheet()`, which looks
 for a `Sheet` host or pending host. To show, the session allocates a host id, marks it pending and
 calls `present_sheet(id)`; the handshake above attaches the host, and from then on the sheet's
-content is rendered like any other host, so its content can change while it is open. To hide,
-`dismiss_sheet` and drop the host.
+content is rendered like any other host, so its content can change while it is open. When that
+changes the height the content needs, `sync_sheet_height` tells the controller with
+`sheet_resized(height)`: the iOS sheet is sized once at presentation and has to be resized by
+hand, while Android's wraps its content and ignores the call. To hide, `dismiss_sheet` and drop
+the host.
 
 **Back.** `App::back()` returns the message to send for the system back action, or `None`. The
 session only tells the controller *whether* there is one (`set_back_enabled`), and only when that

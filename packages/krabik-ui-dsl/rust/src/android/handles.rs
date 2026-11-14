@@ -268,6 +268,8 @@ pub(crate) struct Jni {
     pub(crate) set_on_click_listener: Method,
     pub(crate) request_focus: Method,
     pub(crate) is_focused: Method,
+    /// `View.scrollTo`, for a scroll container whose offset was reset.
+    pub(crate) scroll_to: Method,
     pub(crate) measure: Method,
     pub(crate) measured_width: Method,
     pub(crate) measured_height: Method,
@@ -406,6 +408,7 @@ impl Jni {
             request_focus: method!(env, &view, "requestFocus", "()Z", BOOLEAN),
 
             is_focused: method!(env, &view, "isFocused", "()Z", BOOLEAN),
+            scroll_to: method!(env, &view, "scrollTo", "(II)V", VOID),
 
             measure: method!(env, &view, "measure", "(II)V", VOID),
 

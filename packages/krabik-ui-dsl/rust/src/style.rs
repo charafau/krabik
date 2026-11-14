@@ -574,12 +574,18 @@ impl Style {
         Self::default()
     }
 
-    /// Whether the node needs a native view to draw its decoration.
+    /// Whether the node needs a native view of its own.
     ///
-    /// Native widgets always have a view of their own; this only matters for
-    /// layout nodes, which stay virtual unless they actually paint something.
+    /// Native widgets always have one; this only matters for layout nodes,
+    /// which stay virtual unless they paint something or carry something
+    /// only a view can: a name for accessibility services, or an animation
+    /// of their own frame, appearance or disappearance.
     pub fn needs_view(&self) -> bool {
-        self.background.is_some()
+        self.accessibility_label.is_some()
+            || self.animation.is_some()
+            || self.enter.is_some()
+            || self.exit.is_some()
+            || self.background.is_some()
             || self.gradient.is_some()
             || self.corner_radius > 0.0
             || self.corner_radii.is_some()

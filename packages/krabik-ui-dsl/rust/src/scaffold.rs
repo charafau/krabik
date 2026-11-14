@@ -387,6 +387,8 @@ pub struct Snackbar<M = ()> {
     pub message: String,
     /// The label of the action button, if there is one.
     pub action: Option<String>,
+    /// Tells two snackbars with the same text apart; see [`Snackbar::id`].
+    pub id: u64,
     /// What to tell the application when the action is pressed.
     pub on_action: Handler<()>,
     /// What to tell the application when the snackbar goes away by itself or
@@ -401,6 +403,7 @@ impl<M> Snackbar<M> {
         Self {
             message: message.into(),
             action: None,
+            id: 0,
             on_action: Handler::none(),
             on_dismiss: Handler::none(),
             marker: PhantomData,
@@ -417,6 +420,18 @@ impl<M> Snackbar<M> {
         self
     }
 
+    /// Identifies this snackbar among ones with the same text.
+    ///
+    /// A snackbar is shown when it differs from the one that is up. Two
+    /// with the same message and action are the same snackbar, so "Saved"
+    /// returned again while "Saved" is showing does nothing. Give each
+    /// occasion its own id (a counter in the state) and the second one is
+    /// shown anew, with its full time on screen.
+    pub fn id(mut self, id: u64) -> Self {
+        self.id = id;
+        self
+    }
+
     /// Sends `message` when the snackbar times out or is swiped away.
     pub fn on_dismiss(mut self, message: M) -> Self
     where
@@ -430,6 +445,7 @@ impl<M> Snackbar<M> {
         Snackbar {
             message: self.message,
             action: self.action,
+            id: self.id,
             on_action: self.on_action,
             on_dismiss: self.on_dismiss,
             marker: PhantomData,

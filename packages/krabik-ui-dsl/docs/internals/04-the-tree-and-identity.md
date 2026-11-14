@@ -211,7 +211,8 @@ tree itself":
 |---|---|---|
 | `lists` | every windowed list | `Runtime::scroll` decides whether a scroll changes the window |
 | `rows` | variable-height lists only | `Runtime::record_heights` stores measured row heights |
-| `reset_scroll` | variable-height lists whose items changed | the runtime forgets the scroll offset |
+| `reset_scroll` | variable-height lists whose items changed | the runtime forgets the scroll offset and tells the native view |
+| `window_heights` | the height each list was windowed for | the runtime rebuilds when a list turns out taller |
 | `recycled` | recycled lists | the platform asks the runtime to build a row on demand |
 | `focused_rows` | any windowed list whose row holds the focused node | the next build pins that row |
 
@@ -236,7 +237,11 @@ and in `rust/src/style.rs`:
 
 ```rust,ignore
 pub fn needs_view(&self) -> bool {
-    self.background.is_some()
+    self.accessibility_label.is_some()
+        || self.animation.is_some()
+        || self.enter.is_some()
+        || self.exit.is_some()
+        || self.background.is_some()
         || self.gradient.is_some()
         || self.corner_radius > 0.0
         || self.corner_radii.is_some()
@@ -247,7 +252,7 @@ pub fn needs_view(&self) -> bool {
 ```
 
 A widget, pager, scroll container or recycler always has a native view. A `Column`, `Row` or
-`Spacer` has one only if it paints something. A plain `Column` used for arranging children exists
+`Spacer` has one only if it paints something or carries a label or an animation of its own. A plain `Column` used for arranging children exists
 for layout and nowhere else: Taffy computes its frame, its children are positioned accordingly,
 and no native view is created for it. The children's native views are attached to the nearest
 ancestor that does have a view.
@@ -259,12 +264,16 @@ function.
 
 **The price.** A node can switch between virtual and real when its style changes (a column gains a
 background). The diff has to handle that: create the view, then reparent the children into it
-(chapter 6). And some style properties only make sense on a view. The list in `needs_view` does not
-include `enabled`, `accessibility_label`, `animation`, `enter` or `exit`. Setting only those on an
-undecorated `Column` leaves it virtual, so there is no view to disable, label or fade. For example
-`.enabled(false)` on a plain `Column` does not disable its children. This is a rough edge an
-application author can trip over; the fix on the application side is to set the property on the
-widgets or give the container a background.
+(chapter 6).
+
+**Properties that are not about painting.** An accessibility label and the three animation
+properties (`animation`, `enter`, `exit`) only mean something on a view, so setting one of them
+makes the container real, just as a background does. `enabled` is handled differently, because
+a native container does not pass its disabled state on to its children anyway. The tree carries
+it down instead: `build_node` builds every descendant of a disabled node with
+`enabled = Some(false)`, whatever the descendant says itself (`a_disabled_container_disables_everything_in_it`
+in `rust/src/engine/tree.rs`). The one place this does not reach is the rows of a recycled list,
+which are built on demand outside the tree.
 
 `renderable_parents` computes the mapping the diff needs:
 
@@ -448,9 +457,13 @@ a small scroll does not immediately need new rows. The spacers are `start * h` a
 `(count - end) * h`. No per-row state is kept, and the key closure is called only for the rows in
 the window.
 
-**Rough edge.** `viewport` here is the height of the whole host viewport (`cx.viewport.height`),
-not the height of the list itself, which is not known until layout. A list that occupies half the
-screen materializes about twice the rows it needs. It is correct, only generous.
+**Which height.** The window is computed for the list's own height, taken from the last layout
+(`BuildContext::window_height`). A list that has never been laid out is windowed for the whole
+host viewport, which is never too little: on its first render a list that occupies half the
+screen materializes about twice the rows it needs, and from the second render on only its own.
+If a list turns out taller than the window it was built for (a header above it disappeared, the
+device rotated), the runtime notices after layout and builds again in the same update
+(chapter 7), so there is never a render with rows missing at the end.
 
 #### Variable row height
 
@@ -564,8 +577,8 @@ heights. The runtime test `a_different_list_on_the_same_node_resets_the_scroll` 
   looks at `revision`, so a different *fixed-height* list at the same node keeps the previous
   offset. The doc on `List::revision` ("it must also change when a different list takes over the
   same position in the tree") has no effect for fixed-height lists.
-- `reset_scroll` makes Rust forget its recorded offset. It does not produce an operation, so
-  nothing tells the native scroll view to return to the top.
+- `reset_scroll` makes Rust forget its recorded offset, and the runtime then emits
+  `Op::ScrollTo` so the native scroll view returns to the top as well (chapter 7).
 - `measurement.width` is documented as "the layout width the measurements belong to", but it is
   compared with the viewport width, not the list's own width.
 - Two conditions in the function are always true or have no effect: in the no-revision branch the

@@ -87,6 +87,9 @@ pub(crate) trait Controller<P: Platform> {
     fn present_sheet(&self, cx: &mut P::Cx<'_>, host: u64) -> Result<(), P::Error>;
     /// Dismisses the bottom sheet without reporting back.
     fn dismiss_sheet(&self, cx: &mut P::Cx<'_>) -> Result<(), P::Error>;
+    /// The content of the presented sheet now needs `height` logical points.
+    /// A platform whose sheet sizes itself to its content ignores this.
+    fn sheet_resized(&self, cx: &mut P::Cx<'_>, height: f32) -> Result<(), P::Error>;
 }
 
 /// Something the user did to the native chrome of the top screen.

@@ -275,6 +275,17 @@ impl AndroidState {
                 }
                 views.remove(&id);
             }
+            Op::ScrollTo { id, offset } => {
+                if let Some(handle) = views.get(&id) {
+                    // Lists scroll vertically.
+                    let pixels = (offset * self.density).round() as jint;
+                    jni_handles(env)?.scroll_to.call_void(
+                        env,
+                        handle.view.as_obj(),
+                        &[JValue::Int(0), JValue::Int(pixels)],
+                    )?;
+                }
+            }
             Op::Layout {
                 id,
                 frame,

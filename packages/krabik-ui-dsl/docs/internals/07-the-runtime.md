@@ -181,9 +181,11 @@ let (mut next, info, layout) = if unchanged {
         let (next, info) = built;
         for id in &info.reset_scroll {
             self.scroll_offsets.remove(id);
+            // ... remember the id; it gets an `Op::ScrollTo` below
         }
         let layout = layout::compute(&next, viewport, self.measurer.as_ref());
-        let changed = self.record_heights(&info, &layout);
+        let changed = self.record_heights(&info, &layout)
+            | self.record_list_heights(&info, &layout);
         iteration += 1;
         if !changed || iteration >= 3 {
             break (next, info, Some(layout));
@@ -192,6 +194,15 @@ let (mut next, info, layout) = if unchanged {
     }
 };
 ```
+
+`record_list_heights` stores how tall each list was laid out, which is the height the next
+build windows it for, and reports a list that came out taller than the window it was just built
+for. That is a second reason to go round the loop: without it the list would show a gap at its
+end until the next render.
+
+A list in `reset_scroll` shows other content than before, so its stored offset is dropped. After
+the layout operations the update ends with `Op::ScrollTo { id, offset: 0.0 }` for each such
+list, so the native scroll view goes back to the top too.
 
 In the common case (no variable-height list) this is: lay out once, `record_heights` finds no rows
 and returns `false`, leave the loop.
@@ -418,7 +429,7 @@ order:
 1. **Is this node a windowed list?** `self.lists` holds only the lists of the last build. A plain
    `ScrollView`, a recycler or an unknown id returns `false` immediately; their offsets are not
    stored.
-2. **Clamp** the offset to the list's range (`0 ..= total height - viewport height`), so an
+2. **Clamp** the offset to the list's range (`0 ..= total height - the list's own height`), so an
    overscroll reported by the platform cannot produce a window outside the list.
 3. **Store** it in `scroll_offsets`. If it equals the stored value, return `false`.
 4. **Compare windows.** Compute the window for the old and the new offset and return whether they

@@ -271,11 +271,9 @@ drawable resource in the app's `res/drawable`; `.sf("square.and.arrow.up")` is a
 or asset-catalog image; `.shared("name")` is used on a platform that has no name of its own.
 Icons are looked up by name at run time, so a misspelt name gives no icon and no error.
 
-`back_title` deserves a caveat. On Android it becomes the accessibility description of the back
-arrow. On iOS the framework replaces the system back button with its own chevron (see the next
-section), and that button's accessibility label is fixed to "Back" in `krabikPush` in
-`shared/ios/KrabikHostController.swift`. As far as the source shows, `back_title` therefore has
-no visible effect on iOS today.
+`back_title` is the label of the back button. On iOS it is shown next to the chevron, the way
+the system's own back button shows the previous screen's title; on Android, where the back
+arrow has no text, it becomes the arrow's accessibility description.
 
 Actions are found again when tapped, not stored natively. The native bar reports "action number
 1 was tapped", and the session asks your app for the top screen's scaffold *now* and takes the

@@ -16,6 +16,7 @@ import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.FragmentActivity
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
@@ -449,12 +450,56 @@ class KrabikHostController(
             builder.setMessage(message)
         }
 
+        // An alert has three button slots: one cancel and two others. More
+        // choices than that are stacked as a list under the message, in the
+        // order the application gave them, so none is dropped.
+        val cancels = roles.count { it == ROLE_CANCEL }
+        val stacked = cancels > 1 || labels.size - cancels > 2
+        if (stacked) {
+            val error = MaterialColors.getColor(
+                activity,
+                com.google.android.material.R.attr.colorError,
+                Color.RED,
+            )
+            val stack = LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(16), dp(8), dp(16), 0)
+            }
+            for (index in labels.indices) {
+                val button = MaterialButton(
+                    activity,
+                    null,
+                    com.google.android.material.R.attr.borderlessButtonStyle,
+                ).apply {
+                    text = labels[index]
+                    gravity = Gravity.CENTER_VERTICAL or Gravity.END
+                    if (roles[index] == ROLE_DESTRUCTIVE) {
+                        setTextColor(error)
+                    }
+                    setOnClickListener {
+                        val shown = dialog
+                        dialog = null
+                        shown?.dismiss()
+                        main.onDialogAction(index)
+                    }
+                }
+                stack.addView(
+                    button,
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
+            }
+            builder.setView(stack)
+        }
+
         // Android places buttons by slot, not by order: the cancel button is
         // the negative one, the first other choice the positive one.
         var destructiveSlot = 0
         var positiveUsed = false
         var neutralUsed = false
-        for (index in labels.indices) {
+        for (index in if (stacked) IntRange.EMPTY else labels.indices) {
             val listener = DialogInterface.OnClickListener { _, _ ->
                 dialog = null
                 main.onDialogAction(index)

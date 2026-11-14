@@ -20,8 +20,8 @@ dispatch2 = "0.3"
 objc2 = { version = "0.6", features = ["exception"] }
 objc2-core-foundation = "0.3"
 objc2-core-graphics = "0.3"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSCalendar", "NSData", "NSDate", "NSError", "NSGeometry", "NSIndexPath", "NSObject", "NSString", "NSURL", "NSURLResponse", "NSURLSession"] }
-objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAGradientLayer", "CADisplayLink", "objc2-core-foundation", "objc2-core-graphics"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSAttributedString", "NSBundle", "NSCalendar", "NSData", "NSDate", "NSDictionary", "NSError", "NSGeometry", "NSIndexPath", "NSObject", "NSString", "NSURL", "NSURLResponse", "NSURLSession"] }
+objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAGradientLayer", "CAShapeLayer", "CADisplayLink", "objc2-core-foundation", "objc2-core-graphics"] }
 objc2-ui-kit = { version = "0.3", features = [
     "block2",
     "NSParagraphStyle",
@@ -46,6 +46,8 @@ objc2-ui-kit = { version = "0.3", features = [
     "UIResponder",
     "UIProgressView",
     "UIScrollView",
+    "UISegmentedControl",
+    "NSAttributedString",
     "UISlider",
     "UISwitch",
     "UITextField",

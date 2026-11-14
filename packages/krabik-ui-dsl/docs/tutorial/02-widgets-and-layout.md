@@ -138,11 +138,15 @@ example because something at the bottom should grow, says so with `.height_perce
 A `Column` or `Row` that only arranges its children does not become a native view. The layout
 engine computes frames for its children and the children are attached directly to the nearest
 ancestor that has a view. A container gets a native view of its own only when it has something to
-draw. This is `Style::needs_view` in `rust/src/style.rs`:
+draw, or carries something only a view can: an accessibility label, or an animation of its own. This is `Style::needs_view` in `rust/src/style.rs`:
 
 ```rust,ignore
 pub fn needs_view(&self) -> bool {
-    self.background.is_some()
+    self.accessibility_label.is_some()
+        || self.animation.is_some()
+        || self.enter.is_some()
+        || self.exit.is_some()
+        || self.background.is_some()
         || self.gradient.is_some()
         || self.corner_radius > 0.0
         || self.corner_radii.is_some()

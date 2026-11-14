@@ -77,6 +77,13 @@ pub enum Msg {
     CloseDialog,
     OpenSheet,
     CloseSheet,
+    /// Shows or hides the extra rows of the sheet, which changes its height.
+    SheetMore,
+    /// Opens the alert with more choices than an alert has button slots.
+    OpenChoices,
+    /// One of those choices was made.
+    Choose(&'static str),
+    CloseChoices,
 
     Notifications(bool),
     Wifi(bool),
@@ -135,6 +142,11 @@ pub struct ShowcaseApp {
     recycled_alt: bool,
     dialog_open: bool,
     sheet_open: bool,
+    /// Whether the sheet shows its extra rows.
+    sheet_more: bool,
+    /// The alert with four choices, and the one that was picked.
+    choices_open: bool,
+    label: Option<&'static str>,
     /// The Scaffold page: items added with the floating action button.
     scaffold_items: u32,
     scaffold_snackbar: bool,
@@ -195,6 +207,9 @@ impl ShowcaseApp {
             recycled_alt: false,
             dialog_open: false,
             sheet_open: false,
+            sheet_more: false,
+            choices_open: false,
+            label: None,
             scaffold_items: 0,
             scaffold_snackbar: false,
             loading: false,
@@ -240,7 +255,9 @@ impl Component for ShowcaseApp {
             }
             // Back closes whatever is on top: the dialog, the sheet, a screen.
             Msg::Back => {
-                if self.dialog_open {
+                if self.choices_open {
+                    self.choices_open = false;
+                } else if self.dialog_open {
                     self.dialog_open = false;
                 } else if self.sheet_open {
                     self.sheet_open = false;
@@ -309,7 +326,17 @@ impl Component for ShowcaseApp {
                 self.drawer_open = false;
             }
             Msg::OpenSheet => self.sheet_open = true,
-            Msg::CloseSheet => self.sheet_open = false,
+            Msg::CloseSheet => {
+                self.sheet_open = false;
+                self.sheet_more = false;
+            }
+            Msg::SheetMore => self.sheet_more = !self.sheet_more,
+            Msg::OpenChoices => self.choices_open = true,
+            Msg::Choose(label) => {
+                self.label = Some(label);
+                self.choices_open = false;
+            }
+            Msg::CloseChoices => self.choices_open = false,
 
             Msg::Notifications(on) => self.notifications = on,
             Msg::Wifi(on) => self.wifi = on,
@@ -385,17 +412,20 @@ impl App for ShowcaseApp {
     }
 
     fn dialog(&self) -> Option<Dialog<Msg>> {
+        if self.choices_open {
+            return Some(pages::choices());
+        }
         self.dialog_open.then(pages::dialog)
     }
 
     fn sheet(&self) -> Option<BottomSheet<Msg>> {
-        self.sheet_open.then(pages::sheet)
+        self.sheet_open.then(|| pages::sheet(self))
     }
 
     /// Back first closes whatever is open on top of the screen, also on the
     /// catalog. Leaving a screen is `Navigation::on_back`.
     fn back(&self) -> Option<Msg> {
-        (self.dialog_open || self.sheet_open).then_some(Msg::Back)
+        (self.choices_open || self.dialog_open || self.sheet_open).then_some(Msg::Back)
     }
 }
 

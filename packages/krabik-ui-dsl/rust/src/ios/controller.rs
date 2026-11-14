@@ -193,6 +193,12 @@ impl Controller<Ios> for IosController {
         controller_dismiss_sheet(&self.0);
         Ok(())
     }
+
+    fn sheet_resized(&self, _: &mut MainThreadMarker, height: f32) -> Result<(), Infallible> {
+        // SAFETY: see `controller_push`.
+        let _: () = unsafe { objc2::msg_send![&*self.0, krabikSetSheetHeight: f64::from(height)] };
+        Ok(())
+    }
 }
 
 pub(crate) fn controller_push(controller: &NSObject, host: u64, transition: i32) {

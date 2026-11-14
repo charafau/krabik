@@ -70,6 +70,15 @@ pub enum Op {
         /// Implicit animation to apply, when the node already had a frame.
         animation: Option<Animation>,
     },
+    /// Move a scroll container to an offset along its axis, without
+    /// animation. Sent when the engine discards the offset it had recorded,
+    /// so the native view does not stay where the old content left it.
+    ScrollTo {
+        /// The scroll container.
+        id: NodeId,
+        /// The offset in logical points.
+        offset: f32,
+    },
 }
 
 /// Applies batches of operations to a platform.

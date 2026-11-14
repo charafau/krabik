@@ -179,6 +179,8 @@ pub struct BuildInfo {
     /// The item index that holds the focused node, per list. The next build
     /// keeps that row materialized even if it would otherwise leave the window.
     pub focused_rows: HashMap<NodeId, usize>,
+    /// The height each list was windowed for.
+    pub window_heights: HashMap<NodeId, f32>,
 }
 
 /// Converts a declarative element into the internal tree.
@@ -217,6 +219,8 @@ pub fn build_at(element: &RawElement, root: NodeId) -> (UiNode, BuildInfo) {
         pins: &HashMap::new(),
         focused: None,
         info: &mut info,
+        disabled: false,
+        list_heights: &HashMap::new(),
     };
     tree_root
         .children
@@ -284,7 +288,15 @@ pub fn build_with_measurements(
     measurements: &mut HashMap<NodeId, ListMeasurements>,
 ) -> (UiNode, BuildInfo) {
     let empty = HashMap::new();
-    build_with_focus(element, offsets, viewport, measurements, &empty, None)
+    build_with_focus(
+        element,
+        offsets,
+        viewport,
+        measurements,
+        &empty,
+        None,
+        &HashMap::new(),
+    )
 }
 
 /// Converts a declarative element into the internal tree, keeping the row that
@@ -296,6 +308,7 @@ pub fn build_with_focus(
     measurements: &mut HashMap<NodeId, ListMeasurements>,
     pins: &HashMap<NodeId, usize>,
     focused: Option<NodeId>,
+    list_heights: &HashMap<NodeId, f32>,
 ) -> (UiNode, BuildInfo) {
     let mut info = BuildInfo::default();
     let mut root = UiNode::empty();
@@ -306,6 +319,8 @@ pub fn build_with_focus(
         pins,
         focused,
         info: &mut info,
+        disabled: false,
+        list_heights,
     };
     root.children
         .push(build_node(element, ROOT_ID, 0, &mut context));
@@ -320,6 +335,27 @@ struct BuildContext<'a> {
     pins: &'a HashMap<NodeId, usize>,
     focused: Option<NodeId>,
     info: &'a mut BuildInfo,
+    /// An ancestor of the node being built is disabled.
+    disabled: bool,
+    /// The height each list had in the last layout. A list is windowed for
+    /// its own height, not for the whole viewport.
+    list_heights: &'a HashMap<NodeId, f32>,
+}
+
+impl BuildContext<'_> {
+    /// The height a list's window has to cover, and records that it was
+    /// used so the runtime can tell when the list turned out taller.
+    ///
+    /// A list that has not been laid out yet is windowed for the whole
+    /// viewport, which is never too little.
+    fn window_height(&mut self, id: NodeId) -> f32 {
+        let height = match self.list_heights.get(&id) {
+            Some(height) if *height > 0.5 => height.min(self.viewport.height),
+            _ => self.viewport.height,
+        };
+        self.info.window_heights.insert(id, height);
+        height
+    }
 }
 
 /// The half-open range of items a fixed-height list materializes.
@@ -400,6 +436,21 @@ fn root_style() -> Style {
 fn build_node(element: &RawElement, parent: NodeId, index: usize, cx: &mut BuildContext) -> UiNode {
     let id = node_id(parent, index, element.key(), element.kind.tag());
 
+    // A disabled container disables everything in it. Most containers have
+    // no native view of their own to disable, and a native container does
+    // not pass the state on to its children, so the tree carries it down:
+    // every descendant is built disabled, whatever it says itself.
+    let disabled = cx.disabled || element.style.enabled == Some(false);
+    let inherited = std::mem::replace(&mut cx.disabled, disabled);
+    let mut node = build_node_in(element, id, cx);
+    cx.disabled = inherited;
+    if disabled {
+        node.style.enabled = Some(false);
+    }
+    node
+}
+
+fn build_node_in(element: &RawElement, id: NodeId, cx: &mut BuildContext) -> UiNode {
     if let ElementKind::List(props) = &element.kind {
         return build_list(element, id, props, cx);
     }
@@ -551,13 +602,14 @@ fn build_fixed_rows(
     cx: &mut BuildContext,
 ) -> (UiNode, Vec<(NodeId, u64, usize)>) {
     let offset = cx.offsets.get(&id).copied().unwrap_or(0.0);
+    let window_height = cx.window_height(id);
     let (start, end) = fixed_window(
         ListExtent {
             count: props.item_count,
             item_height: Some(height),
             buffer: props.buffer,
         },
-        cx.viewport.height,
+        window_height,
         offset,
         cx.pins.get(&id).copied(),
     );
@@ -708,9 +760,10 @@ fn build_variable_rows(
     } else {
         cx.offsets.get(&id).copied().unwrap_or(0.0)
     };
+    let window_height = cx.window_height(id);
     let (start, end) = variable_window(
         &prefix,
-        cx.viewport.height,
+        window_height,
         offset,
         props.buffer,
         cx.pins.get(&id).copied(),
@@ -1264,6 +1317,42 @@ mod tests {
                 .row(|item| Text::new(*item).into())
                 .into(),
         );
+    }
+
+    #[test]
+    fn a_disabled_container_disables_everything_in_it() {
+        let tree = build(
+            &Column::new()
+                .child(
+                    Column::new()
+                        .enabled(false)
+                        // Saying otherwise inside a disabled container
+                        // changes nothing.
+                        .child(Button::new("inside").enabled(true))
+                        .child(Column::new().child(Switch::new(false))),
+                )
+                .child(Button::new("outside"))
+                .into(),
+        );
+        let disabled = &tree.children[0].children[0];
+        assert_eq!(disabled.style.enabled, Some(false));
+        assert_eq!(disabled.children[0].style.enabled, Some(false));
+        assert_eq!(disabled.children[1].children[0].style.enabled, Some(false));
+        // A sibling of the disabled container is untouched.
+        assert_eq!(tree.children[0].children[1].style.enabled, None);
+    }
+
+    #[test]
+    fn a_named_or_animated_container_gets_a_view() {
+        let plain = build(&Column::new().child(Column::new()).into());
+        assert!(!plain.children[0].children[0].is_renderable());
+
+        let named = build(
+            &Column::new()
+                .child(Column::new().accessibility_label("Totals"))
+                .into(),
+        );
+        assert!(named.children[0].children[0].is_renderable());
     }
 
     #[test]
