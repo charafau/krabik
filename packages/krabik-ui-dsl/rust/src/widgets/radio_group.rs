@@ -1,120 +1,46 @@
 //! The `radio_group` widget: properties and builder.
 
-use std::marker::PhantomData;
+use krabik_ui_dsl_macros::Widget;
 
-use crate::element::{Element, ElementKind, RawElement, style_builder, text_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
-use crate::message::Wrap;
 use crate::style::{FontWeight, IntoPoints};
-use crate::widgets::TextStyleMut;
-use crate::widgets::Widget;
-use crate::widgets::WidgetProps;
+use crate::widgets::IntrinsicSize;
 use crate::widgets::{CHECK_GAP, CHECK_HEIGHT, CHECK_INDICATOR, TextProps};
 
 /// Platform-independent properties of a group of mutually exclusive radio buttons.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Widget)]
+#[widget(
+    name = RadioGroup,
+    text,
+    about = "A native group of mutually exclusive radio buttons.\n\nUnlike individual `RadioButton`s, the group owns the selection: tapping an option reports the chosen index through `on_select`.",
+    new = "Creates a radio group with the given option labels."
+)]
 pub struct RadioGroupProps {
     /// The labels of the options, in display order.
+    #[widget(arg)]
     pub options: Vec<String>,
-    /// The index of the selected option, or `None` when nothing is selected.
+    /// The index of the selected option; nothing is selected when `None`.
+    #[widget(set(some))]
     pub selected: Option<usize>,
-    /// Reported with the index of the option the user picked.
+    /// Reports the index of the option the user picked.
     pub on_select: Handler<usize>,
     /// Font size of the labels in logical points.
+    #[widget(default = 16.0)]
     pub size: f32,
     /// ARGB color of the labels and indicators.
+    #[widget(default = 0xFF00_0000)]
     pub color: u32,
     /// Font weight of the labels.
+    #[widget(default = FontWeight::Normal)]
     pub weight: FontWeight,
-    /// Space between two options in logical points.
+    /// The space between two options in logical points.
+    #[widget(default = 8.0, set(with = IntoPoints::into_points, from = impl IntoPoints))]
     pub spacing: f32,
 }
 
-impl RadioGroupProps {
-    /// Creates a radio group with the given option labels.
-    pub fn new(options: Vec<String>) -> Self {
-        Self {
-            options,
-            selected: None,
-            on_select: Handler::none(),
-            size: 16.0,
-            color: 0xFF00_0000,
-            weight: FontWeight::Normal,
-            spacing: 8.0,
-        }
-    }
-}
-
-/// A native group of mutually exclusive radio buttons.
-///
-/// Unlike individual [`RadioButton`](crate::ui::RadioButton)s, the group owns the selection: tapping an
-/// option reports the chosen index through [`RadioGroup::on_select`].
-pub struct RadioGroup<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
-
-impl<M> RadioGroup<M> {
-    /// Creates a radio group with the given option labels.
-    pub fn new(options: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        let options: Vec<String> = options.into_iter().map(Into::into).collect();
-        Self(
-            RawElement::leaf(ElementKind::Widget(Widget::RadioGroup(
-                RadioGroupProps::new(options),
-            ))),
-            PhantomData,
-        )
-    }
-
-    /// Sets the index of the selected option.
-    pub fn selected(mut self, index: usize) -> Self {
-        if let ElementKind::Widget(Widget::RadioGroup(props)) = &mut self.0.kind {
-            props.selected = Some(index);
-        }
-        self
-    }
-
-    /// Reports the index of the option the user picked.
-    pub fn on_select(mut self, message: impl Fn(usize) -> M + Send + Sync + 'static) -> Self
-    where
-        M: 'static,
-    {
-        if let ElementKind::Widget(Widget::RadioGroup(props)) = &mut self.0.kind {
-            props.on_select = Handler::new(message);
-        }
-        self
-    }
-
-    /// Sets the space between two options in logical points.
-    pub fn spacing(mut self, spacing: impl IntoPoints) -> Self {
-        if let ElementKind::Widget(Widget::RadioGroup(props)) = &mut self.0.kind {
-            props.spacing = spacing.into_points();
-        }
-        self
-    }
-}
-
-impl<M> From<RadioGroup<M>> for Element<M> {
-    fn from(component: RadioGroup<M>) -> Self {
-        Element::from_raw(component.0)
-    }
-}
-
-style_builder!(RadioGroup);
-text_builder!(RadioGroup);
-
-impl WidgetProps for RadioGroupProps {
-    fn map_messages(&mut self, wrap: &Wrap) {
-        self.on_select.map(wrap);
-    }
-
-    fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
-        Some(TextStyleMut {
-            size: &mut self.size,
-            color: &mut self.color,
-            weight: &mut self.weight,
-        })
-    }
-
+impl IntrinsicSize for RadioGroupProps {
     /// The options stacked vertically, as wide as the widest one.
     fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
         if self.options.is_empty() {

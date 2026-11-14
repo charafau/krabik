@@ -3,6 +3,9 @@
 //! It keeps only the core todo flow — add, complete, delete and clear — and
 //! renders the list with a `List::recycled()` on both platforms. The fuller
 //! widget showcase lives in the sibling `example-todo` app.
+//!
+//! The views are written with the `view!` macro. It is only syntax for the
+//! builder calls the other examples write by hand.
 
 use std::sync::Arc;
 
@@ -12,6 +15,7 @@ use krabik_ui_dsl::app::{App, Component, set_app_factory};
 use krabik_ui_dsl::ui::{
     Align, Button, Checkbox, Column, EdgeInsets, Element, List, Row, Spacer, Text, TextField,
 };
+use krabik_ui_dsl::view;
 
 const COLOR_TEXT: u32 = 0xFF20_2125;
 const COLOR_MUTED: u32 = 0xFF66_6666;
@@ -180,54 +184,43 @@ impl Component for MinimalTodoApp {
         let rows = self.visible_rows();
         let done = self.todos.iter().filter(|todo| todo.done).count();
 
-        let mut column = Column::new()
-            .padding(24)
-            .spacing(12)
-            .width_percent(1.0)
-            .height_percent(1.0)
-            .align_items(Align::Start)
-            .child(Text::new("Todo").size(30).bold().color(COLOR_TEXT))
-            .child(caption(&self.summary()))
-            .child(
-                Row::new()
-                    .width_percent(1.0)
-                    .spacing(8)
-                    .align_items(Align::Center)
-                    .child(
-                        TextField::new(self.draft.clone())
-                            .placeholder("What needs doing?")
-                            .on_change(Msg::Draft)
-                            .on_submit(Msg::Add)
-                            .grow(1.0),
+        view! {
+            Column(
+                padding: 24,
+                spacing: 12,
+                width_percent: 1.0,
+                height_percent: 1.0,
+                align_items: Align::Start,
+            ) {
+                Text("Todo", size: 30, color: COLOR_TEXT, bold)
+                caption(&self.summary())
+                Row(width_percent: 1.0, spacing: 8, align_items: Align::Center) {
+                    TextField(
+                        self.draft.clone(),
+                        placeholder: "What needs doing?",
+                        on_change: Msg::Draft,
+                        on_submit: Msg::Add,
+                        grow: 1.0,
                     )
-                    .child(Button::new("Add").on_click(Msg::Add)),
-            )
-            .child(
-                Row::new()
-                    .width_percent(1.0)
-                    .align_items(Align::Center)
-                    .child(Spacer::new())
-                    .child(
-                        Button::new("Clear completed")
-                            .on_click(Msg::ClearCompleted)
-                            .enabled(done > 0),
-                    ),
-            );
-
-        if rows.is_empty() {
-            column = column.child(caption("Nothing here yet."));
+                    Button("Add", on_click: Msg::Add)
+                }
+                Row(width_percent: 1.0, align_items: Align::Center) {
+                    Spacer
+                    Button("Clear completed", on_click: Msg::ClearCompleted, enabled: done > 0)
+                }
+                if rows.is_empty() {
+                    caption("Nothing here yet.")
+                }
+                List(
+                    rows,
+                    item_height: ROW_HEIGHT,
+                    buffer: 2,
+                    key: |row| row.id.to_string(),
+                    row: todo_row,
+                    recycled,
+                )
+            }
         }
-
-        column
-            .child(
-                List::new(rows)
-                    .item_height(ROW_HEIGHT)
-                    .buffer(2)
-                    .recycled()
-                    .key(|row| row.id.to_string())
-                    .row(todo_row),
-            )
-            .into()
     }
 }
 
@@ -235,26 +228,30 @@ impl App for MinimalTodoApp {}
 
 fn todo_row(row: &TodoRow) -> Element<Msg> {
     let id = row.id;
-    Row::new()
-        .width_percent(1.0)
-        .height(ROW_HEIGHT)
-        .padding_each(EdgeInsets::symmetric(10, 6))
-        .spacing(8)
-        .align_items(Align::Center)
-        .background(if row.done { COLOR_DONE } else { COLOR_SURFACE })
-        .corner_radius(10)
-        .child(
-            Checkbox::new(row.title.clone(), row.done)
-                .on_toggle(move |done| Msg::SetDone(id, done))
-                .size(15)
-                .grow(1.0),
-        )
-        .child(
-            Button::new("Delete")
-                .on_click(Msg::Delete(id))
-                .accessibility_label(format!("Delete {}", row.title)),
-        )
-        .into()
+    view! {
+        Row(
+            width_percent: 1.0,
+            height: ROW_HEIGHT,
+            padding_each: EdgeInsets::symmetric(10, 6),
+            spacing: 8,
+            align_items: Align::Center,
+            background: if row.done { COLOR_DONE } else { COLOR_SURFACE },
+            corner_radius: 10,
+        ) {
+            Checkbox(
+                row.title.clone(),
+                row.done,
+                on_toggle: move |done| Msg::SetDone(id, done),
+                size: 15,
+                grow: 1.0,
+            )
+            Button(
+                "Delete",
+                on_click: Msg::Delete(id),
+                accessibility_label: format!("Delete {}", row.title),
+            )
+        }
+    }
 }
 
 fn caption(content: &str) -> Text<Msg> {

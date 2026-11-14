@@ -10,6 +10,7 @@ use crate::message::Wrap;
 use crate::style::FontWeight;
 use crate::widgets::CONTROL_WIDTH;
 use crate::widgets::Column;
+use crate::widgets::IntrinsicSize;
 use crate::widgets::TextStyleMut;
 use crate::widgets::Widget;
 use crate::widgets::WidgetProps;
@@ -155,7 +156,9 @@ impl WidgetProps for TabBarProps {
             weight: &mut self.weight,
         })
     }
+}
 
+impl IntrinsicSize for TabBarProps {
     /// A tab bar fills the available width and has a fixed touch height.
     fn intrinsic_size(&self, max_width: Option<f32>, _measurer: &dyn Measure) -> Size {
         Size::new(max_width.unwrap_or(CONTROL_WIDTH), TAB_BAR_HEIGHT)

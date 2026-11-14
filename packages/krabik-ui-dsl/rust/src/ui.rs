@@ -365,4 +365,58 @@ mod tests {
         assert_eq!(props.mode, DatePickerMode::Inline);
         assert!(props.on_change.is_set());
     }
+
+    #[test]
+    fn the_view_macro_builds_the_same_tree_as_the_builders() {
+        #[derive(Clone, Debug, PartialEq)]
+        enum Msg {
+            Add,
+            Name(String),
+        }
+        let items = ["a", "b"];
+        let show_hint = true;
+
+        let from_macro: Element<Msg> = crate::view! {
+            Column(padding: 16, spacing: 8) {
+                Text("Title", size: 20, bold)
+                Row {
+                    TextField("", placeholder: "Name", on_change: Msg::Name)
+                    Button("Add", on_click: Msg::Add).enabled(false)
+                }
+                if show_hint {
+                    Text("Hint")
+                } else {
+                    Spacer
+                }
+                for item in items {
+                    Text(item, key: item)
+                }
+                match items.len() {
+                    0 => Text("Empty"),
+                    _ => {}
+                }
+                footer()
+            }
+        };
+
+        fn footer() -> Text<Msg> {
+            Text::new("Footer")
+        }
+        let by_hand: Element<Msg> = Column::new()
+            .padding(16)
+            .spacing(8)
+            .child(Text::new("Title").size(20).bold())
+            .child(
+                Row::new()
+                    .child(TextField::new("").placeholder("Name").on_change(Msg::Name))
+                    .child(Button::new("Add").on_click(Msg::Add).enabled(false)),
+            )
+            .child(Text::new("Hint"))
+            .child(Text::new("a").key("a"))
+            .child(Text::new("b").key("b"))
+            .child(footer())
+            .into();
+
+        assert_eq!(from_macro.into_raw(), by_hand.into_raw());
+    }
 }

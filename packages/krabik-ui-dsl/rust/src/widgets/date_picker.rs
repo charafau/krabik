@@ -8,6 +8,7 @@ use crate::engine::measure::Measure;
 use crate::message::Handler;
 use crate::message::Wrap;
 use crate::style::FontWeight;
+use crate::widgets::IntrinsicSize;
 use crate::widgets::TextStyleMut;
 use crate::widgets::Widget;
 use crate::widgets::WidgetProps;
@@ -310,7 +311,9 @@ impl WidgetProps for DatePickerProps {
             weight: &mut self.weight,
         })
     }
+}
 
+impl IntrinsicSize for DatePickerProps {
     /// A compact field has a fixed size; an inline picker fits the available
     /// width up to its natural size.
     fn intrinsic_size(&self, max_width: Option<f32>, _measurer: &dyn Measure) -> Size {
