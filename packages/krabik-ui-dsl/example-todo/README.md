@@ -88,7 +88,7 @@ command line:
 ```bash
 cd ios
 xcodebuild test -project KrabikUiDslTodo.xcodeproj -scheme KrabikUiDslTodo \
-    -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
+    -destination 'platform=iOS Simulator,name=iPhone 17'
 ```
 
 If you edit `project.yml`, regenerate the project with `xcodegen generate` from `ios/`.
