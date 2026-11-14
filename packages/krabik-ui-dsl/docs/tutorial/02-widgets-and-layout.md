@@ -362,7 +362,7 @@ with padding, a fill and rounded corners; a leaf widget can be decorated like a 
 `update` is short. `Msg::Add` ignores a draft that is empty after trimming:
 
 ```rust,ignore
-fn update(&mut self, msg: Msg) {
+fn update(&mut self, msg: Msg) -> Command<Msg> {
     match msg {
         Msg::Draft(text) => self.draft = text,
         Msg::Add => {
@@ -373,6 +373,7 @@ fn update(&mut self, msg: Msg) {
             }
         }
     }
+    Command::none()
 }
 ```
 
@@ -385,6 +386,7 @@ diff sees that the field's value changed, and the native field is updated.
 
 ```rust
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
+use krabik_ui_dsl::command::Command;
 use krabik_ui_dsl::ui::{Align, Button, Color, Column, Element, Row, ScrollView, Text, TextField};
 
 /// Everything the user can do in the app.
@@ -427,7 +429,7 @@ impl NotesApp {
 impl Component for NotesApp {
     type Msg = Msg;
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             Msg::Draft(text) => self.draft = text,
             Msg::Add => {
@@ -438,6 +440,7 @@ impl Component for NotesApp {
                 }
             }
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<Msg> {

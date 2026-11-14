@@ -243,6 +243,16 @@ abstract class KrabikActivity : FragmentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        root.setActive(true)
+    }
+
+    override fun onStop() {
+        root.setActive(false)
+        super.onStop()
+    }
+
     override fun onDestroy() {
         // A configuration change the manifest does not handle, such as a
         // switch between light and dark, recreates the activity so every

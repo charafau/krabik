@@ -34,6 +34,7 @@ final class KrabikHostController: UIViewController {
     private var drawerPresent = false
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         // Releases the Rust session and every native view it created.
         if session != 0 {
             krabik_ios_destroy(session)
@@ -98,6 +99,25 @@ final class KrabikHostController: UIViewController {
         installDrawer()
 
         krabik_ios_set_controller(session, Unmanaged.passUnretained(self).toOpaque())
+
+        // Subscriptions such as timers only run while the app is in front.
+        let center = NotificationCenter.default
+        center.addObserver(
+            self, selector: #selector(becameActive),
+            name: UIApplication.willEnterForegroundNotification, object: nil
+        )
+        center.addObserver(
+            self, selector: #selector(becameInactive),
+            name: UIApplication.didEnterBackgroundNotification, object: nil
+        )
+    }
+
+    @objc private func becameActive() {
+        if session != 0 { krabik_ios_set_active(session, true) }
+    }
+
+    @objc private func becameInactive() {
+        if session != 0 { krabik_ios_set_active(session, false) }
     }
 
     @objc func krabikPush(_ host: Int64, transition: Int) {

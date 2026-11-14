@@ -12,6 +12,7 @@ use std::sync::Arc;
 use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
+use krabik_ui_dsl::command::Command;
 use krabik_ui_dsl::scaffold::{AppBar, Scaffold};
 use krabik_ui_dsl::ui::{
     Align, Button, Checkbox, Color, Column, EdgeInsets, Element, List, Row, Spacer, Text, TextField,
@@ -162,7 +163,7 @@ impl Default for MinimalTodoApp {
 impl Component for MinimalTodoApp {
     type Msg = Msg;
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             Msg::Draft(text) => self.draft = text,
             Msg::Add => {
@@ -178,6 +179,7 @@ impl Component for MinimalTodoApp {
                 self.clear_completed();
             }
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<Msg> {

@@ -113,7 +113,7 @@ For a widget with no handler set, such as the "Disabled" button, `Actions::of` r
 ```rust,ignore
 // rust/src/host/session.rs
 fn update(&mut self, cx: &mut P::Cx<'_>, message: Message) -> Result<(), P::Error> {
-    self.app.update(message);
+    self.apply(message);
     self.render_all(cx)
 }
 ```

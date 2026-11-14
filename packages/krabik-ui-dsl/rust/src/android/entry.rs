@@ -4,7 +4,7 @@ use crate::android::controller::{Android, AndroidController};
 use crate::android::handles::get as jni_handles;
 use crate::android::host::AndroidState;
 use crate::android::run;
-use crate::app::AnyApp;
+use crate::app::Running;
 use crate::geometry::Size;
 use crate::host::ChromeEvent;
 use crate::host::{HostKind, NodeEvent, Session};
@@ -18,7 +18,7 @@ use jni::sys::{jboolean, jfloat, jint, jlong};
 use jni::{Env, EnvUnowned, JValue};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 /// One Activity's session plus what Android needs to create more hosts.
 pub(crate) struct AndroidSession {
@@ -31,9 +31,9 @@ pub(crate) static STATES: OnceLock<Mutex<HashMap<jlong, AndroidSession>>> = Once
 pub(crate) static NEXT_HANDLE: AtomicI64 = AtomicI64::new(1);
 
 /// Applications waiting for the activity that replaces the one they ran in.
-static RETAINED_APPS: OnceLock<Mutex<HashMap<jlong, Box<dyn AnyApp>>>> = OnceLock::new();
+static RETAINED_APPS: OnceLock<Mutex<HashMap<jlong, Running>>> = OnceLock::new();
 
-fn retained_apps() -> &'static Mutex<HashMap<jlong, Box<dyn AnyApp>>> {
+fn retained_apps() -> &'static Mutex<HashMap<jlong, Running>> {
     RETAINED_APPS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -86,12 +86,26 @@ pub extern "system" fn native_create<'caller>(
         } else {
             ColorScheme::Light
         });
+        let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
+        // Background work finishes on its own thread. It asks the main
+        // thread, through Kotlin's main-looper handler, to come and collect
+        // the result with `nativeOnWake`.
+        let vm = env.get_java_vm()?;
+        core.set_waker(Arc::new(move || {
+            let posted = vm.attach_current_thread(|env| -> JniResult<()> {
+                let ids = jni_handles(env)?;
+                ids.post_wake
+                    .call_void(env, &ids.rust_root_view, &[JValue::Long(handle)])
+            });
+            if let Err(error) = posted {
+                crate::log::error(&format!("could not wake the main thread: {error}"));
+            }
+        }));
         let session = AndroidSession {
             core,
             context: env.new_global_ref(&context)?,
             density,
         };
-        let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
         states()
             .lock()
             .expect("android states")
@@ -638,6 +652,49 @@ pub extern "system" fn native_destroy<'caller>(
             .insert(id, session.core.into_app());
         Ok(id)
     })
+}
+
+/// Collects the messages background work has delivered. Posted to the main
+/// thread by `RustRootView.postWake`.
+#[unsafe(export_name = native_name!("nativeOnWake"))]
+pub extern "system" fn native_on_wake<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _class: jni::objects::JClass<'caller>,
+    handle: jlong,
+) {
+    run(&mut unenv, "nativeOnWake", |env| {
+        let Some(mut states) = lock_states_for_event() else {
+            // Only reachable if a render caused this call synchronously.
+            // The messages must not be lost, so ask again.
+            let ids = jni_handles(env)?;
+            return ids
+                .post_wake
+                .call_void(env, &ids.rust_root_view, &[JValue::Long(handle)]);
+        };
+        match states.get_mut(&handle) {
+            // A session that is gone left its messages in the mailbox for
+            // the next one.
+            Some(session) => session.core.drain(env),
+            None => Ok(()),
+        }
+    });
+}
+
+/// The activity came to the foreground or left it. Subscriptions only run
+/// in the foreground.
+#[unsafe(export_name = native_name!("nativeSetActive"))]
+pub extern "system" fn native_set_active<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    active: jboolean,
+) {
+    run(&mut unenv, "nativeSetActive", |_env| {
+        if let Some(session) = states().lock().expect("android states").get_mut(&handle) {
+            session.core.set_active(active);
+        }
+        Ok(())
+    });
 }
 
 /// Drops an application that was retained but never picked up again.

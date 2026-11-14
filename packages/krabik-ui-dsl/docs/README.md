@@ -19,7 +19,7 @@ If you are new to the codebase and want the whole picture:
 1. [Tutorial 1: Your first app](tutorial/01-your-first-app.md), to see what an app looks like.
 2. [The big picture](internals/01-the-big-picture.md), one page on how a description becomes
    native views and how an event comes back.
-3. [Why it is built this way](design/decisions.md), ten decisions with their reasons.
+3. [Why it is built this way](design/decisions.md), eleven decisions with their reasons.
 4. [One tap, end to end](internals/10-one-tap-end-to-end.md) and
    [One tap on each platform](platforms/08-one-tap-on-each-platform.md), which follow a single
    tap through every function.
@@ -30,14 +30,15 @@ If you are new to the codebase and want the whole picture:
 
 Builds one small Notes app from an empty folder: a counter, widgets and layout, lists,
 components, navigation and the scaffold, dialogs and sheets, colours and dark mode, the `view!`
-macro, testing, and running on both platforms. Every chapter ends with the complete code so far.
+macro, testing, running on both platforms, and background work and timers. Every chapter ends with the complete code so far.
 [Start here](tutorial/README.md).
 
 ## Part 2a: How the engine works
 
 A tour of everything under `rust/src/` that is not platform code: elements and typed messages,
 widgets, the node tree and stable identity, layout with Taffy, diffing into operations, the
-runtime, and the session that both platforms share. [Index](internals/README.md).
+runtime, the session that both platforms share, and the commands and mailbox behind background
+work. [Index](internals/README.md).
 
 ## Part 2b: How the platforms work
 

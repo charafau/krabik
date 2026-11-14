@@ -97,6 +97,49 @@ final class ShowcaseUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Krabik UI DSL"].waitForExistence(timeout: 5))
     }
 
+    /// Slow work runs off the main thread and reports back as a message; a
+    /// timer runs while the application asks for it.
+    func testBackgroundWorkAndTheClock() throws {
+        open("Async")
+        XCTAssertTrue(app.staticTexts["Nothing loaded yet"].waitForExistence(timeout: 5))
+
+        tapButton("Load")
+        XCTAssertTrue(app.staticTexts["Loading…"].waitForExistence(timeout: 2))
+        // The screen stays usable while the request runs.
+        tapButton("Tap")
+        XCTAssertTrue(app.staticTexts["Taps: 1"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Loaded 3 items"].waitForExistence(timeout: 8))
+
+        let clock = app.switches["Clock"]
+        XCTAssertTrue(clock.waitForExistence(timeout: 5))
+        clock.tap()
+        XCTAssertTrue(app.staticTexts["Ticks: 2"].waitForExistence(timeout: 8))
+
+        // In the background the clock stands still.
+        XCUIDevice.shared.press(.home)
+        sleep(4)
+        app.activate()
+        XCTAssertTrue(clock.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(ticks(), 4, "the clock ran in the background")
+
+        // Switched off, it stops.
+        clock.tap()
+        usleep(500_000)
+        let stopped = ticks()
+        sleep(3)
+        XCTAssertEqual(ticks(), stopped)
+
+        backToCatalog()
+    }
+
+    /// The number the Async page shows after "Ticks: ".
+    private func ticks() -> Int {
+        let label = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Ticks: ")
+        ).firstMatch.label
+        return Int(label.dropFirst("Ticks: ".count)) ?? -1
+    }
+
     /// The native chrome a Scaffold adds around a screen's content.
     func testScaffoldFloatingButtonSnackbarAndDrawer() throws {
         open("Scaffold")

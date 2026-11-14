@@ -184,6 +184,43 @@ shrank to a list of routes.
 Android uses the Material controls for all three. iOS has a filled capsule button for the first
 and small custom views for the other two, because UIKit has neither a snackbar nor a drawer.
 
+## After the documentation: state, navigation, background work
+
+Writing the documentation produced a list of rough edges. The next round worked through it,
+starting with the ones an application would hit first.
+
+### `7dff7dc` A control the application overrules returns to its state
+
+A switch flips and a slider moves before Rust hears of it. If `update` did not accept the value,
+the description was unchanged, nothing was sent, and the control went on showing something the
+state did not hold. After a value event the session now has that one control updated regardless.
+
+The new tests found two bugs that had nothing to do with the change. Neighbouring rows of a
+recycled list shared a root id (`row_root` forced the lowest bit, so rows 0 and 1 collided), and
+an event in one row was delivered to the row beside it. The old behaviour had hidden it: the
+wrong row's state changed, the right row's field kept what was typed, and the screen looked
+correct. And on iOS a text field with an accessibility label was no longer exposed as a text
+field.
+
+### `fce62ff` Back in one line, swipe-back, chrome without a stack
+
+`Navigation::on_back` names the back message so an app with a stack does not have to implement
+`App::back`. The iOS swipe-back gesture, which had been switched off because UIKit completes it
+by itself, is enabled while the application handles back and reconciled afterwards with the same
+rule as a dismissed dialog. `App::scaffold` gives a single-screen app native chrome. A stack with
+a repeated key is refused.
+
+### Background work
+
+`update` returns a `Command`; results come back as messages through a mailbox owned by the
+application; `App::subscriptions` declares timers. See decision 11 and
+[Commands and the mailbox](../internals/11-commands-and-the-mailbox.md). Every `update` in the
+four apps and in this documentation gained a return type.
+
+One failure during this work was the test's, not the framework's: right after an activity
+returns to the foreground, a tap can still go to the window that covered it. The test repeats
+the tap until the switch has taken it.
+
 ## What is still open
 
 - Run the CI workflow for the first time and fix whatever the runner disagrees with.

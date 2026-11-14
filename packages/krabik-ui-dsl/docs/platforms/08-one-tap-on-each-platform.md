@@ -19,10 +19,11 @@ A counter: a text that shows a number and a button that increases it.
 impl Component for Counter {
     type Msg = Msg;
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             Msg::Add => self.count += 1,
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<Msg> {

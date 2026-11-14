@@ -278,10 +278,11 @@ Later, the user presses the native button. The steps on the core side (chapter 8
 
    ```rust,ignore
    // rust/src/app.rs
-   fn update(&mut self, message: Message) {
+   fn update(&mut self, message: Message) -> Jobs {
        // Every handler in this app's tree was built from `A::Msg`.
-       if let Ok(message) = message.downcast::<A::Msg>() {
-           Component::update(self, *message);
+       match message.downcast::<A::Msg>() {
+           Ok(message) => Component::update(self, *message).into_jobs(),
+           Err(_) => Jobs::none(),
        }
    }
    ```

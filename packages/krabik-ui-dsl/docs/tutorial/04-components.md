@@ -78,13 +78,14 @@ and its own `Component` implementation:
 impl Component for Composer {
     type Msg = ComposerMsg;
 
-    fn update(&mut self, msg: ComposerMsg) {
+    fn update(&mut self, msg: ComposerMsg) -> Command<ComposerMsg> {
         match msg {
             ComposerMsg::Draft(text) => self.draft = text,
             // What a submitted draft becomes is the parent's decision;
             // see `NotesApp::update`.
             ComposerMsg::Submit => {}
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<ComposerMsg> {
@@ -195,7 +196,7 @@ Messages from the composer now arrive in the app's `update` wrapped in `Msg::Com
 move is to unwrap and pass them on:
 
 ```rust,ignore
-Msg::Composer(msg) => self.composer.update(msg),
+Msg::Composer(msg) => return self.composer.update(msg).map(Msg::Composer),
 ```
 
 That one line is the whole "protocol" between a parent and a child. The framework is not involved:
@@ -203,17 +204,18 @@ it calls the root's `update`, and the root calls its children's. The app's doc c
 `rust/src/app.rs` describes the pattern in one sentence: "the parent keeps the child in its
 state, shows `child.view().map(Msg::Child)` and forwards `Msg::Child(msg)` to
 `child.update(msg)`." The showcase does exactly this for its checklist page:
-`Msg::Checklist(msg) => self.checklist.update(msg)` in `example/rust/src/lib.rs`.
+`Msg::Checklist(msg) => return self.checklist.update(msg).map(Msg::Checklist)` in
+`example/rust/src/lib.rs`.
 
 ### When the parent needs to hear something
 
 The composer has one event the app cares about: the user submitted a draft. `Component::update`
-returns nothing, so a child cannot hand a result back through it. This is a real limit of the
-trait as it stands; there is no "output event" mechanism. But the parent sees every child message
+returns a `Command` (work to run in the background, chapter 11), not a value for the parent, so a
+child cannot hand a result back through it. There is no "output event" mechanism. But the parent sees every child message
 before the child does, and it can match on the ones it cares about:
 
 ```rust,ignore
-fn update(&mut self, msg: Msg) {
+fn update(&mut self, msg: Msg) -> Command<Msg> {
     match msg {
         Msg::Composer(ComposerMsg::Submit) => {
             if let Some(text) = self.composer.take() {
@@ -222,9 +224,10 @@ fn update(&mut self, msg: Msg) {
                 Arc::make_mut(&mut self.notes).push(Note { id, text });
             }
         }
-        Msg::Composer(msg) => self.composer.update(msg),
+        Msg::Composer(msg) => return self.composer.update(msg).map(Msg::Composer),
         Msg::Delete(id) => Arc::make_mut(&mut self.notes).retain(|note| note.id != id),
     }
+    Command::none()
 }
 ```
 
@@ -301,6 +304,7 @@ model, with `mod checklist;` and `use checklist::Checklist;` in `lib.rs` and a m
 use std::sync::Arc;
 
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
+use krabik_ui_dsl::command::Command;
 use krabik_ui_dsl::ui::{
     Align, Button, Color, Column, EdgeInsets, Element, List, Row, Text, TextField,
 };
@@ -352,13 +356,14 @@ impl Composer {
 impl Component for Composer {
     type Msg = ComposerMsg;
 
-    fn update(&mut self, msg: ComposerMsg) {
+    fn update(&mut self, msg: ComposerMsg) -> Command<ComposerMsg> {
         match msg {
             ComposerMsg::Draft(text) => self.draft = text,
             // What a submitted draft becomes is the parent's decision;
             // see `NotesApp::update`.
             ComposerMsg::Submit => {}
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<ComposerMsg> {
@@ -436,7 +441,7 @@ impl NotesApp {
 impl Component for NotesApp {
     type Msg = Msg;
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             // The composer says when; the app decides what a note is.
             Msg::Composer(ComposerMsg::Submit) => {
@@ -446,9 +451,10 @@ impl Component for NotesApp {
                     Arc::make_mut(&mut self.notes).push(Note { id, text });
                 }
             }
-            Msg::Composer(msg) => self.composer.update(msg),
+            Msg::Composer(msg) => return self.composer.update(msg).map(Msg::Composer),
             Msg::Delete(id) => Arc::make_mut(&mut self.notes).retain(|note| note.id != id),
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<Msg> {

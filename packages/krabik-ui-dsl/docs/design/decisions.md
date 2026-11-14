@@ -133,8 +133,8 @@ nothing to say about them.
 
 ## 7. Always re-run `view`, and make that cheap
 
-**Decision.** After every message, `view()` runs again for every host. `update` returns nothing;
-there is no way to say "nothing changed".
+**Decision.** After every message, `view()` runs again for every host. `update` has no way to
+say "nothing changed".
 
 **Why.** Any such signal becomes one more thing an application can get wrong, and the wrong
 answer is a stale screen. The cost belongs in the engine, where it can be handled once: when the
@@ -192,6 +192,42 @@ and the Kotlin package name was written into 26 exported function names.
 
 **Why.** A fix in a shell file had to be made four times. The package name now appears in one
 Rust macro, and an app's Gradle file is about 45 lines.
+
+## 11. Slow work is a value returned from `update`; its result is a message
+
+**Decision.** `update` returns a `Command`. The framework runs it on another thread and delivers
+what it produces as an ordinary message. Things that keep happening (a clock) are a
+`Subscription` the application returns from its state, compared by key after every message.
+
+**Before.** `update` returned nothing and nothing could send a message into a running app, so an
+application could not load data or run a timer without blocking the UI thread.
+
+**Why a return value.** Three shapes were on the table. A context argument (`cx.spawn(..)`)
+avoids writing `Command::none()` but makes forwarding to a child component awkward, because the
+child needs a context of its own message type. A dispatcher handed to the app once at start is
+the least framework, but every app then manages threads itself and `update` stops being a pure
+function of state and message. Returning a value keeps the state change and the request it
+starts in one match arm, composes with `.map` exactly like a child's view does, and leaves
+`update` testable without starting anything: a command is only a description until the
+framework runs it. A dispatcher still exists (`Command::dispatcher`) for work that reports more
+than once or runs on the app's own async runtime.
+
+**Why results are messages.** The state lives on the UI thread and the screen is redrawn after a
+message. Making a result a message means there is one way state changes, one place to test it,
+and no locking in application code.
+
+**Why the mailbox belongs to the app.** A session can end while work runs (Android recreates the
+activity on a theme change). The queue of results is kept with the application object, so the
+next session finds them.
+
+**Why subscriptions are declared, not started.** "Start the timer" and "stop the timer" are the
+kind of paired calls that get out of step. Returning what should run from the current state is
+the same idea as `view()`, and the framework does the comparison. They pause in the background
+because a timer for a screen nobody sees costs battery for nothing.
+
+**What it costs.** `update` ends with `Command::none()` in the common case. Messages that cross
+threads must be `Send`. There is no cancellation, no thread pool and no HTTP client; see
+[Commands and the mailbox](../internals/11-commands-and-the-mailbox.md).
 
 ## Limits to keep in mind
 

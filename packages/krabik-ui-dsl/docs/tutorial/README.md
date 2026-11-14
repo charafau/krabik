@@ -34,6 +34,10 @@ development machine. Chapter 10 puts it on an emulator and a simulator.
    with Espresso and XCUITest, and the pitfalls the existing suites record.
 10. [Running on Android and iOS](10-running-on-android-and-ios.md): the layout of an app, the
     install functions, the two host projects and how they build the Rust code, and device builds.
+11. [Background work and timers](11-background-work-and-timers.md): why `update` returns a
+    `Command`, how a result comes back from another thread as a message, subscriptions, and how
+    to test both. It does not depend on chapters 5 to 10; read it whenever the app needs to wait
+    for something.
 
 ## How the code blocks are marked
 
@@ -69,6 +73,3 @@ The tutorial stays at the level of "how do I build an app and what does the fram
 me". The mechanisms underneath (the tree, layout, the diff, the session, the two renderers, the
 macros) are described in [`../internals/`](../internals/).
 
-The files `../01-your-first-app.md` to `../08-project-layout.md` are an older guide. Parts of it
-describe an earlier API (`Screen`, `Toolbar`, `Navigation<Msg>`); where it and this tutorial
-disagree, this tutorial and the source are current.

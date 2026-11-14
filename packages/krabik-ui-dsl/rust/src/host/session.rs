@@ -2,7 +2,12 @@
 
 use std::collections::HashMap;
 
-use crate::app::AnyApp;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+use crate::app::{AnyApp, Running};
+use crate::command::{self, Executor, Mailbox, Threads};
 use crate::engine::tree::{self, NodeId};
 use crate::message::Message;
 use crate::navigation::{Route, ScreenTransition};
@@ -19,6 +24,14 @@ pub(crate) const MAIN_HOST: u64 = 0;
 /// scene.
 pub(crate) struct Session<P: Platform> {
     app: Box<dyn AnyApp>,
+    /// Where the application's background work delivers its messages.
+    mailbox: Link,
+    /// Runs commands and timers.
+    executor: Arc<dyn Executor>,
+    /// The running subscriptions by key.
+    timers: Timers,
+    /// Whether the application is in the foreground. Timers run only then.
+    active: bool,
     hosts: HashMap<u64, P::Host>,
     /// Hosts the controller was asked to create but has not attached yet.
     pending: HashMap<u64, HostKind>,
@@ -47,11 +60,24 @@ pub(crate) struct Session<P: Platform> {
 
 impl<P: Platform> Session<P> {
     /// Creates a session around the main host.
-    pub(crate) fn new(app: Box<dyn AnyApp>, main: P::Host) -> Self {
+    pub(crate) fn new(running: Running, main: P::Host) -> Self {
+        Self::with_executor(running, main, Arc::new(Threads))
+    }
+
+    /// Creates a session whose commands and timers run on `executor`.
+    pub(crate) fn with_executor(
+        running: Running,
+        main: P::Host,
+        executor: Arc<dyn Executor>,
+    ) -> Self {
         let mut hosts = HashMap::new();
         hosts.insert(MAIN_HOST, main);
         Self {
-            app,
+            app: running.app,
+            mailbox: Link(running.mailbox),
+            executor,
+            timers: Timers::default(),
+            active: true,
             hosts,
             pending: HashMap::new(),
             next_host: MAIN_HOST + 1,
@@ -70,8 +96,88 @@ impl<P: Platform> Session<P> {
     /// Ends the session and hands the application back, so another session
     /// can continue with its state.
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
-    pub(crate) fn into_app(self) -> Box<dyn AnyApp> {
-        self.app
+    pub(crate) fn into_app(self) -> Running {
+        let Self { app, mailbox, .. } = self;
+        Running {
+            app,
+            // Dropping the rest of the session stops its timers and its
+            // wake-ups. Work already started keeps delivering here.
+            mailbox: mailbox.0.clone(),
+        }
+    }
+
+    /// Gives the mailbox the way to reach this session on the UI thread:
+    /// `wake` must arrange a call to [`Session::drain`] there. Messages that
+    /// arrived while no session was connected ask for it at once.
+    pub(crate) fn set_waker(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
+        self.mailbox.0.set_waker(Some(wake));
+    }
+
+    /// Applies every message background work has delivered, then renders
+    /// once.
+    pub(crate) fn drain(&mut self, cx: &mut P::Cx<'_>) -> Result<(), P::Error> {
+        let parcels = self.mailbox.0.take();
+        if parcels.is_empty() {
+            return Ok(());
+        }
+        for parcel in parcels {
+            self.apply(parcel);
+        }
+        self.render_all(cx)
+    }
+
+    /// The application moved to the foreground or the background.
+    /// Subscriptions run only in the foreground; commands are not affected.
+    pub(crate) fn set_active(&mut self, active: bool) {
+        self.active = active;
+        self.sync_subscriptions();
+    }
+
+    /// Applies one message and starts the work it asks for.
+    fn apply(&mut self, message: Message) {
+        let jobs = self.app.update(message);
+        command::run(jobs, &self.mailbox.0, self.executor.as_ref());
+    }
+
+    /// Starts the subscriptions the application now returns and stops the
+    /// ones it no longer does.
+    fn sync_subscriptions(&mut self) {
+        let wanted = if self.active {
+            self.app.subscriptions()
+        } else {
+            Vec::new()
+        };
+        self.timers.0.retain(|key, (interval, stopped)| {
+            let keep = wanted
+                .iter()
+                .any(|subscription| subscription.key == *key && subscription.interval == *interval);
+            if !keep {
+                stopped.store(true, Ordering::Relaxed);
+            }
+            keep
+        });
+        for subscription in wanted {
+            if self.timers.0.contains_key(&subscription.key) {
+                continue;
+            }
+            let stopped = Arc::new(AtomicBool::new(false));
+            let mailbox = self.mailbox.0.clone();
+            let tick = subscription.tick;
+            let running = stopped.clone();
+            self.executor.every(
+                subscription.interval,
+                stopped.clone(),
+                Box::new(move || {
+                    // A tick that was already due when the timer stopped.
+                    if !running.load(Ordering::Relaxed) {
+                        mailbox.post(tick());
+                    }
+                }),
+            );
+            self.timers
+                .0
+                .insert(subscription.key, (subscription.interval, stopped));
+        }
     }
 
     /// Records whether the device shows its light or dark appearance. The
@@ -147,6 +253,7 @@ impl<P: Platform> Session<P> {
                 host.render(cx, &element)?;
             }
         }
+        self.sync_subscriptions();
         self.sync(cx)
     }
 
@@ -359,7 +466,7 @@ impl<P: Platform> Session<P> {
 
     /// Applies a message to the application and shows the result.
     fn update(&mut self, cx: &mut P::Cx<'_>, message: Message) -> Result<(), P::Error> {
-        self.app.update(message);
+        self.apply(message);
         self.render_all(cx)
     }
 
@@ -389,7 +496,7 @@ impl<P: Platform> Session<P> {
         }
         self.native_pop = true;
         if let Some(message) = self.app.back() {
-            self.app.update(message);
+            self.apply(message);
         }
         self.render_all(cx)
     }
@@ -431,7 +538,7 @@ impl<P: Platform> Session<P> {
             button?.on_tap.message(())
         });
         if let Some(message) = message {
-            self.app.update(message);
+            self.apply(message);
         }
         self.render_all(cx)
     }
@@ -484,7 +591,7 @@ impl<P: Platform> Session<P> {
             }
         };
         if let Some(message) = message {
-            self.app.update(message);
+            self.apply(message);
         }
         self.render_all(cx)
     }
@@ -521,9 +628,32 @@ impl<P: Platform> Session<P> {
             .sheet()
             .and_then(|sheet| sheet.on_dismiss.message(()));
         if let Some(message) = message {
-            self.app.update(message);
+            self.apply(message);
         }
         self.render_all(cx)
+    }
+}
+
+/// The session's connection to the application's mailbox. When the session
+/// goes away the mailbox stops waking it; messages wait for the next one.
+struct Link(Arc<Mailbox>);
+
+impl Drop for Link {
+    fn drop(&mut self) {
+        self.0.set_waker(None);
+    }
+}
+
+/// The running subscriptions by key: their interval and the flag that stops
+/// them. They stop with the session.
+#[derive(Default)]
+struct Timers(HashMap<String, (Duration, Arc<AtomicBool>)>);
+
+impl Drop for Timers {
+    fn drop(&mut self) {
+        for (_, stopped) in self.0.values() {
+            stopped.store(true, Ordering::Relaxed);
+        }
     }
 }
 
@@ -573,6 +703,8 @@ mod tests {
 
     use super::*;
     use crate::app::{App, Component};
+    use crate::command::testing::Inline;
+    use crate::command::{Command, Subscription};
     use crate::element::{Element, RawElement};
     use crate::engine::geometry::Size;
     use crate::engine::measure::ApproximateMeasure;
@@ -758,6 +890,8 @@ mod tests {
         on_back: bool,
         /// Keeps the top screen when asked to go back.
         stay: bool,
+        /// The interval of the clock, while it runs. Each tick is a `Tap`.
+        clock: Option<Duration>,
     }
 
     /// An application whose state the test can also change from outside,
@@ -789,6 +923,9 @@ mod tests {
         SnackbarGone,
         Switch(bool),
         Tab(usize),
+        /// Starts background work that reports `Loaded`.
+        Load,
+        Loaded(usize),
     }
 
     impl Component for TestApp {
@@ -800,9 +937,11 @@ mod tests {
                 .into()
         }
 
-        fn update(&mut self, msg: Msg) {
+        fn update(&mut self, msg: Msg) -> Command<Msg> {
             let mut state = self.state();
             match msg {
+                Msg::Load => return Command::perform(|| Msg::Loaded(100)),
+                Msg::Loaded(count) => state.clicks += count,
                 Msg::Tap => state.clicks += 1,
                 Msg::CloseDialog => state.dialog = state.sticky_dialog,
                 Msg::CloseSheet => state.sheet = false,
@@ -834,6 +973,7 @@ mod tests {
                     }
                 }
             }
+            Command::none()
         }
     }
 
@@ -890,6 +1030,14 @@ mod tests {
             )
         }
 
+        fn subscriptions(&self) -> Vec<Subscription<Msg>> {
+            self.state()
+                .clock
+                .map(|interval| Subscription::every("clock", interval, || Msg::Tap))
+                .into_iter()
+                .collect()
+        }
+
         fn dialog(&self) -> Option<Dialog<Msg>> {
             self.state()
                 .dialog
@@ -912,8 +1060,11 @@ mod tests {
     fn session(state: State) -> (Session<Fake>, TestApp, Log) {
         let log = Log::default();
         let app = TestApp::new(state);
-        let mut session =
-            Session::<Fake>::new(Box::new(app.clone()), FakeHost::new(HostKind::Main));
+        let mut session = Session::<Fake>::with_executor(
+            Running::new(Box::new(app.clone())),
+            FakeHost::new(HostKind::Main),
+            Arc::new(Inline::default()),
+        );
         session.set_controller(FakeController(log.clone()));
         (session, app, log)
     }
@@ -1417,7 +1568,9 @@ mod tests {
             Text::new("unused").into()
         }
 
-        fn update(&mut self, _msg: Msg) {}
+        fn update(&mut self, _msg: Msg) -> Command<Msg> {
+            Command::none()
+        }
     }
 
     impl App for Single {
@@ -1434,7 +1587,10 @@ mod tests {
     #[test]
     fn an_application_without_navigation_can_have_chrome() {
         let log = Log::default();
-        let mut session = Session::<Fake>::new(Box::new(Single), FakeHost::new(HostKind::Main));
+        let mut session = Session::<Fake>::new(
+            Running::new(Box::new(Single)),
+            FakeHost::new(HostKind::Main),
+        );
         session.set_controller(FakeController(log.clone()));
         session.render_all(&mut ()).unwrap();
 
@@ -1463,5 +1619,139 @@ mod tests {
             take(&log)[..2],
             ["push 1 home instantly", "push 2 detail instantly"]
         );
+    }
+
+    /// A session whose executor the test keeps, and how often it was woken.
+    fn background(state: State) -> (Session<Fake>, TestApp, Arc<Inline>, Arc<Mutex<usize>>) {
+        let app = TestApp::new(State {
+            stack: vec!["home"],
+            ..state
+        });
+        let executor = Arc::new(Inline::default());
+        let mut session = Session::<Fake>::with_executor(
+            Running::new(Box::new(app.clone())),
+            FakeHost::new(HostKind::Main),
+            executor.clone(),
+        );
+        session.set_controller(FakeController(Log::default()));
+        let wakes = Arc::new(Mutex::new(0));
+        let counter = wakes.clone();
+        session.set_waker(Arc::new(move || *counter.lock().unwrap() += 1));
+        session.render_all(&mut ()).unwrap();
+        attach_pending(&mut session);
+        (session, app, executor, wakes)
+    }
+
+    fn renders(session: &Session<Fake>) -> usize {
+        session.hosts[&1].renders
+    }
+
+    #[test]
+    fn the_result_of_a_command_comes_back_as_a_message() {
+        let (mut session, app, _executor, wakes) = background(State::default());
+        let before = renders(&session);
+
+        // The work finishes (here at once) and its message waits in the
+        // mailbox; the application has not seen it yet.
+        session.update(&mut (), Box::new(Msg::Load)).unwrap();
+        assert_eq!(app.state().clicks, 0);
+        assert_eq!(*wakes.lock().unwrap(), 1);
+
+        // The platform wakes the UI thread, which applies it and renders.
+        session.drain(&mut ()).unwrap();
+        assert_eq!(app.state().clicks, 100);
+        assert_eq!(renders(&session), before + 2);
+
+        // Nothing waiting: no render.
+        session.drain(&mut ()).unwrap();
+        assert_eq!(renders(&session), before + 2);
+    }
+
+    #[test]
+    fn several_results_are_applied_with_one_render() {
+        let (mut session, app, _executor, wakes) = background(State::default());
+        session.update(&mut (), Box::new(Msg::Load)).unwrap();
+        session.update(&mut (), Box::new(Msg::Load)).unwrap();
+        // One wake-up is on its way; the second message rides along.
+        assert_eq!(*wakes.lock().unwrap(), 1);
+
+        let before = renders(&session);
+        session.drain(&mut ()).unwrap();
+        assert_eq!(app.state().clicks, 200);
+        assert_eq!(renders(&session), before + 1);
+    }
+
+    #[test]
+    fn a_subscription_runs_while_the_application_returns_it() {
+        let (mut session, app, executor, _wakes) = background(State::default());
+        assert!(executor.running().is_empty());
+
+        let second = Duration::from_secs(1);
+        app.state().clock = Some(second);
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(executor.running(), [second]);
+
+        // A tick is a message like any other.
+        executor.fire();
+        session.drain(&mut ()).unwrap();
+        assert_eq!(app.state().clicks, 1);
+        // Still the same timer: staying subscribed does not restart it.
+        assert_eq!(executor.running(), [second]);
+
+        // Another interval under the same key replaces it.
+        app.state().clock = Some(second * 2);
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(executor.running(), [second * 2]);
+
+        app.state().clock = None;
+        session.render_all(&mut ()).unwrap();
+        assert!(executor.running().is_empty());
+    }
+
+    #[test]
+    fn subscriptions_pause_in_the_background() {
+        let (mut session, _app, executor, _wakes) = background(State {
+            clock: Some(Duration::from_secs(1)),
+            ..State::default()
+        });
+        assert_eq!(executor.running().len(), 1);
+
+        session.set_active(false);
+        assert!(executor.running().is_empty());
+
+        session.set_active(true);
+        assert_eq!(executor.running().len(), 1);
+    }
+
+    #[test]
+    fn work_outlives_the_session_that_started_it() {
+        let (mut session, app, executor, wakes) = background(State {
+            clock: Some(Duration::from_secs(1)),
+            ..State::default()
+        });
+        session.update(&mut (), Box::new(Msg::Load)).unwrap();
+        assert_eq!(*wakes.lock().unwrap(), 1);
+
+        // The activity is recreated: the session ends with a message still
+        // waiting. Its timers stop and it is not woken again.
+        let running = session.into_app();
+        assert!(executor.running().is_empty());
+
+        // The next session is woken for the waiting message as soon as it
+        // connects, and its application has kept its state.
+        let mut next = Session::<Fake>::with_executor(
+            running,
+            FakeHost::new(HostKind::Main),
+            executor.clone(),
+        );
+        let woken = Arc::new(Mutex::new(0));
+        let counter = woken.clone();
+        next.set_waker(Arc::new(move || *counter.lock().unwrap() += 1));
+        assert_eq!(*woken.lock().unwrap(), 1);
+        assert_eq!(*wakes.lock().unwrap(), 1);
+
+        next.drain(&mut ()).unwrap();
+        assert_eq!(app.state().clicks, 100);
+        assert_eq!(executor.running().len(), 1);
     }
 }

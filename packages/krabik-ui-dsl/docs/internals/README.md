@@ -21,6 +21,7 @@ separately in [`../platforms/`](../platforms/). The chapters here say where that
 | [8. The session and events](08-the-session-and-events.md) | The `Platform` traits, `Session`, how navigation and chrome are mirrored, how an event finds its message, and the fake-platform tests. |
 | [9. App, navigation, scaffold, presentation](09-app-navigation-scaffold-presentation.md) | The public surface an application sees and how each typed piece is erased before the session touches it. |
 | [10. One tap, end to end](10-one-tap-end-to-end.md) | Two traces through every core function: a button tap, and one character typed inside a recycled list row. |
+| [11. Commands and the mailbox](11-commands-and-the-mailbox.md) | Work started by `update`, timers, and how a result gets from a worker thread back to the UI thread on each platform. |
 
 ## Suggested reading order
 

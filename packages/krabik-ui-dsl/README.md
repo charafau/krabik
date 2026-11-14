@@ -15,11 +15,12 @@ enum Msg { Increment, Name(String) }
 impl Component for Counter {
     type Msg = Msg;
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             Msg::Increment => self.count += 1,
             Msg::Name(name) => self.name = name,
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<Msg> {

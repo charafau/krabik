@@ -13,11 +13,12 @@
 //! impl Component for Counter {
 //!     type Msg = Msg;
 //!
-//!     fn update(&mut self, msg: Msg) {
+//!     fn update(&mut self, msg: Msg) -> Command<Msg> {
 //!         match msg {
 //!             Msg::Increment => self.count += 1,
 //!             Msg::Name(name) => self.name = name,
 //!         }
+//!         Command::none()
 //!     }
 //!
 //!     fn view(&self) -> Element<Msg> {
@@ -32,10 +33,15 @@
 //!
 //! A larger application is built from smaller components: the parent keeps
 //! the child in its state, shows `child.view().map(Msg::Child)` and forwards
-//! `Msg::Child(msg)` to `child.update(msg)`.
+//! `Msg::Child(msg)` to `child.update(msg).map(Msg::Child)`.
+//!
+//! `update` returns a [`Command`]: work for the runtime to do off the UI
+//! thread, whose result comes back as another message. Most messages return
+//! [`Command::none`]. See [`crate::command`].
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
+use crate::command::{Command, Jobs, Mailbox, Subscription};
 use crate::element::{Element, RawElement};
 use crate::message::Message;
 use crate::navigation::{Navigation, Route};
@@ -48,7 +54,10 @@ pub trait Component {
     type Msg: 'static;
 
     /// Applies a message to the state. The UI is rebuilt afterwards.
-    fn update(&mut self, msg: Self::Msg);
+    ///
+    /// Returns the work this message starts, or [`Command::none`]. It must
+    /// not block: it runs on the UI thread.
+    fn update(&mut self, msg: Self::Msg) -> Command<Self::Msg>;
 
     /// Describes the UI for the current state.
     fn view(&self) -> Element<Self::Msg>;
@@ -85,6 +94,12 @@ pub trait App: Component + Send + 'static {
         None
     }
 
+    /// What should keep sending messages in the current state, such as a
+    /// clock. Compared by key after every message; see [`Subscription`].
+    fn subscriptions(&self) -> Vec<Subscription<Self::Msg>> {
+        Vec::new()
+    }
+
     /// The system alert to show, if any. It stays up while this returns
     /// `Some`; a button sends its message and the application closes the
     /// alert by returning `None` afterwards.
@@ -111,7 +126,8 @@ pub trait App: Component + Send + 'static {
 /// An [`App`] with its message type erased, as the runtime holds it.
 pub(crate) trait AnyApp: Send {
     fn view(&self) -> RawElement;
-    fn update(&mut self, message: Message);
+    fn update(&mut self, message: Message) -> Jobs;
+    fn subscriptions(&self) -> Vec<Subscription<()>>;
     fn navigation(&self) -> Option<Vec<Route>>;
     fn screen(&self, key: &str) -> Option<(RawElement, Chrome)>;
     /// The content and chrome of an app without navigation that has a
@@ -127,11 +143,19 @@ impl<A: App> AnyApp for A {
         Component::view(self).into_raw()
     }
 
-    fn update(&mut self, message: Message) {
+    fn update(&mut self, message: Message) -> Jobs {
         // Every handler in this app's tree was built from `A::Msg`.
-        if let Ok(message) = message.downcast::<A::Msg>() {
-            Component::update(self, *message);
+        match message.downcast::<A::Msg>() {
+            Ok(message) => Component::update(self, *message).into_jobs(),
+            Err(_) => Jobs::none(),
         }
+    }
+
+    fn subscriptions(&self) -> Vec<Subscription<()>> {
+        App::subscriptions(self)
+            .into_iter()
+            .map(Subscription::erase)
+            .collect()
     }
 
     fn navigation(&self) -> Option<Vec<Route>> {
@@ -199,6 +223,25 @@ pub fn set_app_factory<A: App>(factory: impl Fn() -> A + Send + Sync + 'static) 
     let _ = APP_FACTORY.set(Box::new(move || Box::new(factory())));
 }
 
+/// An application and the mailbox its background work delivers to.
+///
+/// The two stay together when an activity is recreated: the session ends,
+/// the application and its mailbox are kept, and the next session continues
+/// with both.
+pub(crate) struct Running {
+    pub(crate) app: Box<dyn AnyApp>,
+    pub(crate) mailbox: Arc<Mailbox>,
+}
+
+impl Running {
+    pub(crate) fn new(app: Box<dyn AnyApp>) -> Self {
+        Self {
+            app,
+            mailbox: Arc::new(Mailbox::default()),
+        }
+    }
+}
+
 /// Creates a new instance of the registered application.
 ///
 /// # Panics
@@ -207,9 +250,9 @@ pub fn set_app_factory<A: App>(factory: impl Fn() -> A + Send + Sync + 'static) 
 /// install function (which calls [`set_app_factory`]) before it creates the
 /// first root view.
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
-pub(crate) fn create_app() -> Box<dyn AnyApp> {
+pub(crate) fn create_app() -> Running {
     let factory = APP_FACTORY.get().expect(
         "krabik: no application registered; call set_app_factory before creating a root view",
     );
-    factory()
+    Running::new(factory())
 }

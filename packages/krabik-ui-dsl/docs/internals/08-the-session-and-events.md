@@ -567,7 +567,7 @@ pub(crate) fn node_event(
 }
 
 fn update(&mut self, cx: &mut P::Cx<'_>, message: Message) -> Result<(), P::Error> {
-    self.app.update(message);
+    self.apply(message);
     self.render_all(cx)
 }
 ```
