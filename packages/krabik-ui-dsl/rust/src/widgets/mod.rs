@@ -35,6 +35,7 @@ pub use text_field::*;
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Wrap;
+use crate::style::FontWeight;
 
 /// A leaf widget: one native view with no children of its own.
 ///
@@ -92,46 +93,81 @@ impl Widget {
         }
     }
 
+    /// The widget's properties, behind the interface every widget shares.
+    fn props(&self) -> &dyn WidgetProps {
+        match self {
+            Self::Text(props) => props,
+            Self::Button(props) => props,
+            Self::TextField(props) => props,
+            Self::Switch(props) => props,
+            Self::Checkbox(props) | Self::RadioButton(props) => props,
+            Self::RadioGroup(props) => props,
+            Self::TabBar(props) => props,
+            Self::DatePicker(props) => props,
+            Self::Slider(props) => props,
+            Self::Progress(props) => props,
+            Self::Spinner(props) => props,
+            Self::Image(props) => props,
+        }
+    }
+
+    fn props_mut(&mut self) -> &mut dyn WidgetProps {
+        match self {
+            Self::Text(props) => props,
+            Self::Button(props) => props,
+            Self::TextField(props) => props,
+            Self::Switch(props) => props,
+            Self::Checkbox(props) | Self::RadioButton(props) => props,
+            Self::RadioGroup(props) => props,
+            Self::TabBar(props) => props,
+            Self::DatePicker(props) => props,
+            Self::Slider(props) => props,
+            Self::Progress(props) => props,
+            Self::Spinner(props) => props,
+            Self::Image(props) => props,
+        }
+    }
+
     /// Re-wraps every message the widget can produce; see
     /// [`Element::map`](crate::element::Element::map).
     pub(crate) fn map_messages(&mut self, wrap: &Wrap) {
-        match self {
-            Self::Button(props) => props.on_click.map(wrap),
-            Self::TextField(props) => {
-                props.on_change.map(wrap);
-                props.on_submit.map(wrap);
-                props.on_focus.map(wrap);
-            }
-            Self::Switch(props) => props.on_toggle.map(wrap),
-            Self::Checkbox(props) | Self::RadioButton(props) => props.on_toggle.map(wrap),
-            Self::RadioGroup(props) => props.on_select.map(wrap),
-            Self::TabBar(props) => props.on_select.map(wrap),
-            Self::DatePicker(props) => props.on_change.map(wrap),
-            Self::Slider(props) => props.on_change.map(wrap),
-            Self::Text(_) | Self::Progress(_) | Self::Spinner(_) | Self::Image(_) => {}
-        }
+        self.props_mut().map_messages(wrap);
     }
 
     /// The size the widget wants for its content when the style does not set
     /// one. `max_width` is the width available to the content, if bounded.
     pub(crate) fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
-        match self {
-            Self::Text(props) => props.intrinsic_size(max_width, measurer),
-            Self::Button(props) => props.intrinsic_size(max_width, measurer),
-            Self::TextField(props) => props.intrinsic_size(max_width, measurer),
-            Self::Switch(props) => props.intrinsic_size(max_width, measurer),
-            Self::Checkbox(props) | Self::RadioButton(props) => {
-                props.intrinsic_size(max_width, measurer)
-            }
-            Self::RadioGroup(props) => props.intrinsic_size(max_width, measurer),
-            Self::TabBar(props) => props.intrinsic_size(max_width),
-            Self::DatePicker(props) => props.intrinsic_size(max_width),
-            Self::Slider(props) => props.intrinsic_size(max_width),
-            Self::Progress(props) => props.intrinsic_size(max_width),
-            Self::Spinner(props) => props.intrinsic_size(),
-            Self::Image(props) => props.intrinsic_size(measurer),
-        }
+        self.props().intrinsic_size(max_width, measurer)
     }
+
+    /// The text size, colour and weight, for a widget that shows text.
+    pub(crate) fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
+        self.props_mut().text_style()
+    }
+}
+
+/// What every widget's properties provide to the framework.
+///
+/// `Widget` forwards to this, so a new widget implements it once instead of
+/// adding an arm to each method.
+pub(crate) trait WidgetProps {
+    /// Re-wraps every message the widget can produce.
+    fn map_messages(&mut self, wrap: &Wrap);
+
+    /// The size the content wants when the style does not set one.
+    fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size;
+
+    /// The text style, for a widget that shows text.
+    fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
+        None
+    }
+}
+
+/// The text properties the shared `size`, `color` and `bold` builders set.
+pub(crate) struct TextStyleMut<'a> {
+    pub size: &'a mut f32,
+    pub color: &'a mut u32,
+    pub weight: &'a mut FontWeight,
 }
 
 /// The width assumed for a control that fills its container when the

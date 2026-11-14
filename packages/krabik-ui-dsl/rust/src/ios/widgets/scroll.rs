@@ -1,12 +1,16 @@
 //! The `scroll` widget on iOS.
 
 use crate::ios::events::dispatch_scroll;
-use crate::ios::schedule;
+use crate::ios::widgets::{Content, RenderNode, Site};
+use crate::ios::{ViewHandle, cast_view, schedule};
 use crate::tree::NodeId;
+use crate::widgets::{Axis, ScrollProps};
 use objc2::DefinedClass;
 use objc2::rc::Retained;
+use objc2::runtime::ProtocolObject;
 use objc2::runtime::{NSObject, NSObjectProtocol};
 use objc2::{MainThreadMarker, MainThreadOnly};
+use objc2_ui_kit::UIView;
 use objc2_ui_kit::{UIScrollView, UIScrollViewDelegate};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -87,4 +91,36 @@ impl ScrollDelegate {
         // this class with the ivars already set.
         unsafe { objc2::msg_send![super(this), init] }
     }
+}
+
+/// Creates the native view of a scroll container.
+pub(crate) fn create(props: &ScrollProps, node: &RenderNode, site: &Site) -> ViewHandle {
+    let scroll = UIScrollView::new(site.mtm);
+    scroll.setClipsToBounds(true);
+    scroll.setShowsVerticalScrollIndicator(props.axis == Axis::Vertical);
+    scroll.setShowsHorizontalScrollIndicator(props.axis == Axis::Horizontal);
+    scroll.setAlwaysBounceVertical(props.axis == Axis::Vertical);
+    scroll.setAlwaysBounceHorizontal(props.axis == Axis::Horizontal);
+    let host = UIView::new(site.mtm);
+    scroll.addSubview(&host);
+    let delegate = ScrollDelegate::new(
+        site.handle,
+        site.host,
+        site.node,
+        props.axis == Axis::Horizontal,
+        site.mtm,
+    );
+    // SAFETY: the delegate is owned by the view handle below and
+    // only reads the scroll view's offset.
+    unsafe { scroll.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
+    let view = cast_view(scroll.clone());
+    ViewHandle::new(
+        view,
+        Content::Scroll {
+            scroll,
+            host,
+            _delegate: delegate,
+        },
+        node,
+    )
 }

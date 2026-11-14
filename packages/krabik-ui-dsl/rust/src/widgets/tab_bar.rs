@@ -4,11 +4,15 @@ use std::marker::PhantomData;
 
 use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::engine::geometry::Size;
+use crate::engine::measure::Measure;
 use crate::message::Handler;
+use crate::message::Wrap;
 use crate::style::FontWeight;
 use crate::widgets::CONTROL_WIDTH;
 use crate::widgets::Column;
+use crate::widgets::TextStyleMut;
 use crate::widgets::Widget;
+use crate::widgets::WidgetProps;
 
 /// Platform-independent properties of a native tab bar.
 #[derive(Clone, Debug, PartialEq)]
@@ -139,9 +143,21 @@ style_builder!(TabBar);
 /// The height of a native tab bar.
 const TAB_BAR_HEIGHT: f32 = 48.0;
 
-impl TabBarProps {
+impl WidgetProps for TabBarProps {
+    fn map_messages(&mut self, wrap: &Wrap) {
+        self.on_select.map(wrap);
+    }
+
+    fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
+        Some(TextStyleMut {
+            size: &mut self.size,
+            color: &mut self.color,
+            weight: &mut self.weight,
+        })
+    }
+
     /// A tab bar fills the available width and has a fixed touch height.
-    pub(crate) fn intrinsic_size(&self, max_width: Option<f32>) -> Size {
+    fn intrinsic_size(&self, max_width: Option<f32>, _measurer: &dyn Measure) -> Size {
         Size::new(max_width.unwrap_or(CONTROL_WIDTH), TAB_BAR_HEIGHT)
     }
 }

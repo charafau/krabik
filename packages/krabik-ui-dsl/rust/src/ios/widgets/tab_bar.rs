@@ -1,6 +1,8 @@
 //! The `tab_bar` widget on iOS.
 
 use crate::ios::events::dispatch_selected;
+use crate::ios::widgets::{Content, RenderNode, Site};
+use crate::ios::{ViewHandle, cast_view};
 use crate::ios::{add_action, color, schedule};
 use crate::tree::NodeId;
 use crate::ui::TabBarProps;
@@ -59,4 +61,13 @@ pub(crate) fn wire_tab_bar(
             }
         },
     );
+}
+
+/// Creates the native view of a tab bar.
+pub(crate) fn create(props: &TabBarProps, node: &RenderNode, site: &Site) -> ViewHandle {
+    let control = UISegmentedControl::new(site.mtm);
+    update_tab_bar(&control, props);
+    wire_tab_bar(&control, site.handle, site.host, site.node, site.mtm);
+    let view = cast_view(control.clone());
+    ViewHandle::new(view, Content::TabBar(control), node)
 }

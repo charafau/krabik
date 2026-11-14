@@ -399,45 +399,33 @@ macro_rules! text_builder {
 }
 
 impl RawElement {
-    pub(crate) fn set_text_size(&mut self, size: f32) {
+    fn text_style(&mut self) -> Option<crate::widgets::TextStyleMut<'_>> {
         match &mut self.kind {
-            ElementKind::Widget(Widget::Text(props)) => props.size = size,
-            ElementKind::Widget(Widget::Button(props)) => props.size = size,
-            ElementKind::Widget(Widget::TextField(props)) => props.size = size,
-            ElementKind::Widget(Widget::Checkbox(props))
-            | ElementKind::Widget(Widget::RadioButton(props)) => props.size = size,
-            ElementKind::Widget(Widget::RadioGroup(props)) => props.size = size,
-            ElementKind::Widget(Widget::TabBar(props)) => props.size = size,
-            ElementKind::Widget(Widget::DatePicker(props)) => props.size = size,
-            _ => {}
+            ElementKind::Widget(widget) => widget.text_style(),
+            ElementKind::Column
+            | ElementKind::Row
+            | ElementKind::Spacer
+            | ElementKind::Pager(_)
+            | ElementKind::Scroll(_)
+            | ElementKind::List(_) => None,
+        }
+    }
+
+    pub(crate) fn set_text_size(&mut self, size: f32) {
+        if let Some(text) = self.text_style() {
+            *text.size = size;
         }
     }
 
     pub(crate) fn set_text_color(&mut self, color: u32) {
-        match &mut self.kind {
-            ElementKind::Widget(Widget::Text(props)) => props.color = color,
-            ElementKind::Widget(Widget::Button(props)) => props.color = color,
-            ElementKind::Widget(Widget::TextField(props)) => props.color = color,
-            ElementKind::Widget(Widget::Checkbox(props))
-            | ElementKind::Widget(Widget::RadioButton(props)) => props.color = color,
-            ElementKind::Widget(Widget::RadioGroup(props)) => props.color = color,
-            ElementKind::Widget(Widget::TabBar(props)) => props.color = color,
-            ElementKind::Widget(Widget::DatePicker(props)) => props.color = color,
-            _ => {}
+        if let Some(text) = self.text_style() {
+            *text.color = color;
         }
     }
 
     pub(crate) fn set_text_weight(&mut self, weight: FontWeight) {
-        match &mut self.kind {
-            ElementKind::Widget(Widget::Text(props)) => props.weight = weight,
-            ElementKind::Widget(Widget::Button(props)) => props.weight = weight,
-            ElementKind::Widget(Widget::TextField(props)) => props.weight = weight,
-            ElementKind::Widget(Widget::Checkbox(props))
-            | ElementKind::Widget(Widget::RadioButton(props)) => props.weight = weight,
-            ElementKind::Widget(Widget::RadioGroup(props)) => props.weight = weight,
-            ElementKind::Widget(Widget::TabBar(props)) => props.weight = weight,
-            ElementKind::Widget(Widget::DatePicker(props)) => props.weight = weight,
-            _ => {}
+        if let Some(text) = self.text_style() {
+            *text.weight = weight;
         }
     }
 }

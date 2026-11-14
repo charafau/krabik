@@ -1,10 +1,13 @@
 //! The `pager` widget on iOS.
 
 use crate::ios::events::dispatch_selected;
-use crate::ios::schedule;
+use crate::ios::widgets::{Content, RenderNode, Site};
+use crate::ios::{ViewHandle, cast_view, schedule};
 use crate::tree::NodeId;
+use crate::widgets::PagerProps;
 use objc2::DefinedClass;
 use objc2::rc::Retained;
+use objc2::runtime::ProtocolObject;
 use objc2::runtime::{NSObject, NSObjectProtocol};
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_ui_kit::{UIScrollView, UIScrollViewDelegate};
@@ -61,4 +64,26 @@ impl PagerDelegate {
         // this class with the ivars already set.
         unsafe { objc2::msg_send![super(this), init] }
     }
+}
+
+/// Creates the native view of a pager.
+pub(crate) fn create(props: &PagerProps, node: &RenderNode, site: &Site) -> ViewHandle {
+    let scroll = UIScrollView::new(site.mtm);
+    scroll.setPagingEnabled(true);
+    scroll.setShowsHorizontalScrollIndicator(false);
+    scroll.setBounces(false);
+    let delegate = PagerDelegate::new(site.handle, site.host, site.node, site.mtm);
+    // SAFETY: the delegate is kept alive by the view handle.
+    unsafe { scroll.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
+    let view = cast_view(scroll.clone());
+    ViewHandle::new(
+        view,
+        Content::Pager {
+            scroll,
+            _delegate: delegate,
+            pages: props.pages,
+            selected: props.selected,
+        },
+        node,
+    )
 }

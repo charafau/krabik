@@ -10,6 +10,7 @@ use crate::ios::widgets::slider::update_slider;
 use crate::ios::widgets::tab_bar::update_tab_bar;
 use crate::ios::widgets::text::update_label;
 use crate::ios::widgets::text_field::update_field;
+use crate::ios::{IosState, NodeId, ViewHandle};
 use crate::render::RenderNode;
 use crate::tree::NodeKind;
 use crate::widgets::Widget;
@@ -123,5 +124,44 @@ pub(crate) fn update_content(
         | NodeKind::Spacer
         | NodeKind::Scroll(_)
         | NodeKind::Recycler(_) => {}
+    }
+}
+
+/// Where a new native view is being created, and where its events go.
+pub(crate) struct Site {
+    /// The session the view belongs to.
+    pub(crate) handle: u64,
+    /// The host inside that session.
+    pub(crate) host: u64,
+    /// The node the view is created for.
+    pub(crate) node: NodeId,
+    /// Proof that the view is created on the main thread.
+    pub(crate) mtm: MainThreadMarker,
+}
+
+impl IosState {
+    /// Creates the native view of a widget, configured and wired to its
+    /// events.
+    pub(crate) fn create_widget(
+        &mut self,
+        widget: &Widget,
+        node: &RenderNode,
+        site: &Site,
+    ) -> ViewHandle {
+        match widget {
+            Widget::Text(props) => text::create(props, node, site),
+            Widget::Button(props) => button::create(props, node, site),
+            Widget::TextField(props) => text_field::create(props, node, site),
+            Widget::Switch(props) => switch::create(props, node, site),
+            Widget::Checkbox(props) => check::create(props, node, site, false),
+            Widget::RadioButton(props) => check::create(props, node, site, true),
+            Widget::RadioGroup(props) => radio_group::create(props, node, site),
+            Widget::TabBar(props) => tab_bar::create(props, node, site),
+            Widget::DatePicker(props) => date_picker::create(props, node, site),
+            Widget::Slider(props) => slider::create(props, node, site),
+            Widget::Progress(props) => progress::create(props, node, site),
+            Widget::Spinner(props) => progress::create_spinner(props, node, site),
+            Widget::Image(props) => self.create_image(props, node, site.mtm),
+        }
     }
 }

@@ -1,5 +1,7 @@
 //! The Android pieces of a session: the host and the Kotlin `KrabikHostController`.
 
+use crate::android::HOST_CONTROLLER_CLASS;
+use crate::android::handles::{Method, VOID, class, get as jni_handles, method};
 use crate::android::host::AndroidState;
 use crate::host::{Actions, Controller, Host, HostKind, Platform};
 use crate::navigation::{Screen, ScreenTransition};
@@ -7,7 +9,7 @@ use crate::presentation::Dialog;
 use crate::runtime::Runtime;
 use crate::tree::NodeId;
 use jni::errors::Result as JniResult;
-use jni::objects::JObject;
+use jni::objects::{JClass, JObject};
 use jni::refs::Global;
 use jni::sys::{jint, jlong};
 use jni::{Env, JValue, jni_sig, jni_str};
@@ -55,10 +57,9 @@ pub(crate) struct AndroidController(pub(crate) Global<JObject<'static>>);
 impl Controller<Android> for AndroidController {
     fn push(&self, env: &mut Env<'_>, host: u64, screen: &Screen) -> JniResult<()> {
         let title = env.new_string(&screen.title)?;
-        env.call_method(
+        jni_handles(env)?.controller.push.call_void(
+            env,
             self.0.as_obj(),
-            jni_str!("push"),
-            jni_sig!("(JLjava/lang/String;I)V"),
             &[
                 JValue::Long(host as jlong),
                 JValue::Object(title.as_ref()),
@@ -69,20 +70,18 @@ impl Controller<Android> for AndroidController {
     }
 
     fn pop(&self, env: &mut Env<'_>, count: usize, transition: ScreenTransition) -> JniResult<()> {
-        env.call_method(
+        jni_handles(env)?.controller.pop.call_void(
+            env,
             self.0.as_obj(),
-            jni_str!("pop"),
-            jni_sig!("(II)V"),
             &[JValue::Int(count as jint), JValue::Int(transition.code())],
         )?;
         Ok(())
     }
 
     fn set_root_visible(&self, env: &mut Env<'_>, visible: bool) -> JniResult<()> {
-        env.call_method(
+        jni_handles(env)?.controller.set_root_visible.call_void(
+            env,
             self.0.as_obj(),
-            jni_str!("setRootVisible"),
-            jni_sig!("(Z)V"),
             &[JValue::Bool(visible)],
         )?;
         Ok(())
@@ -115,10 +114,9 @@ impl Controller<Android> for AndroidController {
                     .unwrap_or("Back")
             )
         )?;
-        env.call_method(
+        jni_handles(env)?.controller.set_toolbar.call_void(
+            env,
             self.0.as_obj(),
-            jni_str!("setToolbar"),
-            jni_sig!("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z[Ljava/lang/String;[Ljava/lang/String;)V"),
             &[
                 JValue::Object(title.as_ref()),
                 JValue::Object(subtitle.as_ref()),
@@ -139,24 +137,25 @@ impl Controller<Android> for AndroidController {
                 .iter()
                 .map(|item| item.icon.android_name().unwrap_or(""))
         );
-        env.call_method(
-            self.0.as_obj(),
-            jni_str!("setBottomNavigation"),
-            jni_sig!("([Ljava/lang/String;[Ljava/lang/String;I)V"),
-            &[
-                JValue::Object(&labels),
-                JValue::Object(&icons),
-                JValue::Int(bar.map_or(0, |bar| bar.selected) as jint),
-            ],
-        )?;
+        jni_handles(env)?
+            .controller
+            .set_bottom_navigation
+            .call_void(
+                env,
+                self.0.as_obj(),
+                &[
+                    JValue::Object(&labels),
+                    JValue::Object(&icons),
+                    JValue::Int(bar.map_or(0, |bar| bar.selected) as jint),
+                ],
+            )?;
         Ok(())
     }
 
     fn set_back_enabled(&self, env: &mut Env<'_>, enabled: bool) -> JniResult<()> {
-        env.call_method(
+        jni_handles(env)?.controller.set_back_enabled.call_void(
+            env,
             self.0.as_obj(),
-            jni_str!("setBackEnabled"),
-            jni_sig!("(Z)V"),
             &[JValue::Bool(enabled)],
         )?;
         Ok(())
@@ -169,10 +168,9 @@ impl Controller<Android> for AndroidController {
         let role_codes: Vec<jint> = dialog.buttons.iter().map(|b| b.role.code()).collect();
         let roles = env.new_int_array(role_codes.len())?;
         roles.set_region(env, 0, &role_codes)?;
-        env.call_method(
+        jni_handles(env)?.controller.show_dialog.call_void(
+            env,
             self.0.as_obj(),
-            jni_str!("showDialog"),
-            jni_sig!("(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[IZ)V"),
             &[
                 JValue::Object(title.as_ref()),
                 JValue::Object(message.as_ref()),
@@ -185,32 +183,81 @@ impl Controller<Android> for AndroidController {
     }
 
     fn dismiss_dialog(&self, env: &mut Env<'_>) -> JniResult<()> {
-        env.call_method(
-            self.0.as_obj(),
-            jni_str!("dismissDialog"),
-            jni_sig!("()V"),
-            &[],
-        )?;
+        jni_handles(env)?
+            .controller
+            .dismiss_dialog
+            .call_void(env, self.0.as_obj(), &[])?;
         Ok(())
     }
 
     fn present_sheet(&self, env: &mut Env<'_>, host: u64) -> JniResult<()> {
-        env.call_method(
+        jni_handles(env)?.controller.present_sheet.call_void(
+            env,
             self.0.as_obj(),
-            jni_str!("presentSheet"),
-            jni_sig!("(J)V"),
             &[JValue::Long(host as jlong)],
         )?;
         Ok(())
     }
 
     fn dismiss_sheet(&self, env: &mut Env<'_>) -> JniResult<()> {
-        env.call_method(
-            self.0.as_obj(),
-            jni_str!("dismissSheet"),
-            jni_sig!("()V"),
-            &[],
-        )?;
+        jni_handles(env)?
+            .controller
+            .dismiss_sheet
+            .call_void(env, self.0.as_obj(), &[])?;
         Ok(())
+    }
+}
+
+/// The methods of the Kotlin `KrabikHostController`, resolved once; see
+/// [`crate::android::handles`].
+pub(crate) struct Handles {
+    /// Keeps the class loaded so the method ids below stay valid.
+    _class: Global<JClass<'static>>,
+    pub(crate) push: Method,
+    pub(crate) pop: Method,
+    pub(crate) set_root_visible: Method,
+    pub(crate) set_toolbar: Method,
+    pub(crate) set_bottom_navigation: Method,
+    pub(crate) set_back_enabled: Method,
+    pub(crate) show_dialog: Method,
+    pub(crate) dismiss_dialog: Method,
+    pub(crate) present_sheet: Method,
+    pub(crate) dismiss_sheet: Method,
+}
+
+impl Handles {
+    pub(crate) fn load(env: &mut Env<'_>) -> JniResult<Self> {
+        let class = class(env, HOST_CONTROLLER_CLASS)?;
+        Ok(Self {
+            push: method!(env, &class, "push", "(JLjava/lang/String;I)V", VOID),
+            pop: method!(env, &class, "pop", "(II)V", VOID),
+            set_root_visible: method!(env, &class, "setRootVisible", "(Z)V", VOID),
+            set_toolbar: method!(
+                env,
+                &class,
+                "setToolbar",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z[Ljava/lang/String;[Ljava/lang/String;)V",
+                VOID
+            ),
+            set_bottom_navigation: method!(
+                env,
+                &class,
+                "setBottomNavigation",
+                "([Ljava/lang/String;[Ljava/lang/String;I)V",
+                VOID
+            ),
+            set_back_enabled: method!(env, &class, "setBackEnabled", "(Z)V", VOID),
+            show_dialog: method!(
+                env,
+                &class,
+                "showDialog",
+                "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[IZ)V",
+                VOID
+            ),
+            dismiss_dialog: method!(env, &class, "dismissDialog", "()V", VOID),
+            present_sheet: method!(env, &class, "presentSheet", "(J)V", VOID),
+            dismiss_sheet: method!(env, &class, "dismissSheet", "()V", VOID),
+            _class: class,
+        })
     }
 }

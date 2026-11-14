@@ -6,9 +6,12 @@ use crate::element::{Element, ElementKind, RawElement, style_builder, text_build
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
+use crate::message::Wrap;
 use crate::style::FontWeight;
 use crate::widgets::TextProps;
+use crate::widgets::TextStyleMut;
 use crate::widgets::Widget;
+use crate::widgets::WidgetProps;
 
 /// Platform-independent properties of a button node.
 #[derive(Clone, Debug, PartialEq)]
@@ -78,9 +81,21 @@ const BUTTON_PADDING_Y: f32 = 12.0;
 /// The smallest height a button label is given.
 const BUTTON_MIN_HEIGHT: f32 = 20.0;
 
-impl ButtonProps {
+impl WidgetProps for ButtonProps {
+    fn map_messages(&mut self, wrap: &Wrap) {
+        self.on_click.map(wrap);
+    }
+
+    fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
+        Some(TextStyleMut {
+            size: &mut self.size,
+            color: &mut self.color,
+            weight: &mut self.weight,
+        })
+    }
+
     /// The label plus the button's own padding.
-    pub(crate) fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
+    fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
         let inner_width = max_width.map(|width| (width - BUTTON_PADDING_X * 2.0).max(0.0));
         let label = TextProps {
             content: self.label.clone(),

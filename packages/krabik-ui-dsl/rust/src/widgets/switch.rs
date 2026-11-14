@@ -6,7 +6,9 @@ use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
+use crate::message::Wrap;
 use crate::widgets::Widget;
+use crate::widgets::WidgetProps;
 
 /// Platform-independent properties of a switch node.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,10 +71,14 @@ impl<M> From<Switch<M>> for Element<M> {
 
 style_builder!(Switch);
 
-impl SwitchProps {
+impl WidgetProps for SwitchProps {
+    fn map_messages(&mut self, wrap: &Wrap) {
+        self.on_toggle.map(wrap);
+    }
+
     /// A switch keeps the native control's size; an explicit dimension in the
     /// style still overrides it.
-    pub(crate) fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
+    fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
         let size = measurer.switch_size();
         Size::new(
             max_width.map_or(size.width, |width| width.min(size.width)),

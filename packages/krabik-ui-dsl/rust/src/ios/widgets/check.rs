@@ -1,11 +1,14 @@
 //! The `check` widget on iOS.
 
 use crate::ios::events::dispatch_checked;
+use crate::ios::widgets::{Content, RenderNode, Site};
+use crate::ios::{ViewHandle, cast_view};
 use crate::ios::{add_action, color, schedule, system_font};
 use crate::tree::NodeId;
 use crate::ui::CheckProps;
 use objc2::MainThreadMarker;
 use objc2_foundation::NSString;
+use objc2_ui_kit::UIButtonType;
 use objc2_ui_kit::{
     UIButton, UIControlContentHorizontalAlignment, UIControlEvents, UIControlState, UIImage,
 };
@@ -61,4 +64,18 @@ pub(crate) fn wire_check(
             schedule(move || dispatch_checked(handle, host, id, checked));
         },
     );
+}
+
+/// Creates the native view of a checkbox, or of a radio button.
+pub(crate) fn create(
+    props: &CheckProps,
+    node: &RenderNode,
+    site: &Site,
+    radio: bool,
+) -> ViewHandle {
+    let button = UIButton::buttonWithType(UIButtonType::Custom, site.mtm);
+    update_check(&button, props, radio);
+    wire_check(&button, site.handle, site.host, site.node, site.mtm);
+    let view = cast_view(button.clone());
+    ViewHandle::new(view, Content::Check { button, radio }, node)
 }

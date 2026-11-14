@@ -5,7 +5,9 @@ use std::marker::PhantomData;
 use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
+use crate::message::Wrap;
 use crate::widgets::Widget;
+use crate::widgets::WidgetProps;
 
 /// Where an image is loaded from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,11 +91,13 @@ impl<M> From<Image<M>> for Element<M> {
 
 style_builder!(Image);
 
-impl ImageProps {
+impl WidgetProps for ImageProps {
+    fn map_messages(&mut self, _wrap: &Wrap) {}
+
     /// The image's natural size, or zero while it is unknown (for example a
     /// remote image that has not loaded). The layout scales it to the
     /// node's style.
-    pub(crate) fn intrinsic_size(&self, measurer: &dyn Measure) -> Size {
+    fn intrinsic_size(&self, _max_width: Option<f32>, measurer: &dyn Measure) -> Size {
         match measurer.image_size(self) {
             Some(natural) if natural.width > 0.0 && natural.height > 0.0 => natural,
             _ => Size::ZERO,

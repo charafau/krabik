@@ -8,40 +8,27 @@ use crate::ios::motion::{
     FrameTicker, LayoutFrames, animate_style_change, animation_is_enabled, run_animation,
     style_snapshot,
 };
-use crate::ios::rows::{IosRowState, ROW_CELL_ID, RecyclerDataSource};
+use crate::ios::rows::create_recycler;
+use crate::ios::rows::{IosRowState, RecyclerDataSource};
 use crate::ios::style::{apply_accessibility, apply_style};
-use crate::ios::widgets::button::{update_button, wire_click};
-use crate::ios::widgets::check::{update_check, wire_check};
-use crate::ios::widgets::date_picker::{update_date_picker, wire_date_picker};
 use crate::ios::widgets::pager::PagerDelegate;
-use crate::ios::widgets::progress::{update_progress, update_spinner};
-use crate::ios::widgets::radio_group::update_radio_group;
 use crate::ios::widgets::scroll::ScrollDelegate;
-use crate::ios::widgets::slider::{update_slider, wire_slider};
-use crate::ios::widgets::switch::wire_switch;
-use crate::ios::widgets::tab_bar::{update_tab_bar, wire_tab_bar};
-use crate::ios::widgets::text::update_label;
-use crate::ios::widgets::text_field::{update_field, wire_field};
-use crate::ios::widgets::update_content;
+use crate::ios::widgets::{Site, pager, scroll, update_content};
 use crate::ios::{cast_view, parent_host_in, schedule, with_session};
 use crate::render::{Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{NodeId, NodeKind};
-use crate::ui::{Animation, Axis, EdgeInsets};
+use crate::ui::{Animation, EdgeInsets};
 use crate::widgets::Widget;
 use block2::RcBlock;
+use objc2::MainThreadMarker;
 use objc2::rc::{Retained, Weak};
-use objc2::runtime::ProtocolObject;
-use objc2::{ClassType, MainThreadMarker, MainThreadOnly};
 use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
-use objc2_foundation::NSString;
 use objc2_quartz_core::{CADisplayLink, CAGradientLayer};
 use objc2_ui_kit::{
-    UIActivityIndicatorView, UIActivityIndicatorViewStyle, UIButton, UIButtonType,
-    UICollectionView, UICollectionViewCell, UICollectionViewFlowLayout, UIDatePicker, UIEdgeInsets,
-    UIImageView, UILabel, UILayoutConstraintAxis, UIProgressView, UIScrollView, UISegmentedControl,
-    UISlider, UIStackView, UIStackViewAlignment, UIStackViewDistribution, UISwitch,
-    UITextBorderStyle, UITextField, UIView, UIViewAnimatingPosition,
+    UIActivityIndicatorView, UIButton, UICollectionView, UIDatePicker, UIImageView, UILabel,
+    UIProgressView, UIScrollView, UISegmentedControl, UISlider, UIStackView, UISwitch, UITextField,
+    UIView, UIViewAnimatingPosition,
 };
 use std::collections::HashMap;
 
@@ -404,229 +391,17 @@ impl IosState {
     }
 
     pub(crate) fn create_handle(&mut self, node: &RenderNode, mtm: MainThreadMarker) -> ViewHandle {
+        let site = Site {
+            handle: self.handle,
+            host: self.host,
+            node: node.id,
+            mtm,
+        };
         let mut handle = match &node.kind {
-            NodeKind::Widget(Widget::Text(props)) => {
-                let wrapper = UIView::new(mtm);
-                let label = UILabel::new(mtm);
-                update_label(&label, props);
-                wrapper.addSubview(&label);
-                ViewHandle::new(wrapper, Content::Label(label), node)
-            }
-            NodeKind::Widget(Widget::TextField(props)) => {
-                let wrapper = UIView::new(mtm);
-                let field = UITextField::new(mtm);
-                field.setBorderStyle(UITextBorderStyle::None);
-                update_field(&field, props);
-                wire_field(&field, self.handle, self.host, node.id, mtm);
-                wrapper.addSubview(&field);
-                ViewHandle::new(wrapper, Content::Field(field), node)
-            }
-            NodeKind::Widget(Widget::Button(props)) => {
-                let button = UIButton::buttonWithType(UIButtonType::System, mtm);
-                update_button(&button, props);
-                wire_click(&button, self.handle, self.host, node.id, mtm);
-                let view = cast_view(button.clone());
-                ViewHandle::new(view, Content::Button(button), node)
-            }
-            NodeKind::Widget(Widget::Switch(props)) => {
-                let switch = UISwitch::new(mtm);
-                switch.setOn(props.checked);
-                wire_switch(&switch, self.handle, self.host, node.id, mtm);
-                let view = cast_view(switch.clone());
-                ViewHandle::new(view, Content::Switch(switch), node)
-            }
-            NodeKind::Widget(Widget::Checkbox(props)) => {
-                let button = UIButton::buttonWithType(UIButtonType::Custom, mtm);
-                update_check(&button, props, false);
-                wire_check(&button, self.handle, self.host, node.id, mtm);
-                let view = cast_view(button.clone());
-                ViewHandle::new(
-                    view,
-                    Content::Check {
-                        button,
-                        radio: false,
-                    },
-                    node,
-                )
-            }
-            NodeKind::Widget(Widget::RadioButton(props)) => {
-                let button = UIButton::buttonWithType(UIButtonType::Custom, mtm);
-                update_check(&button, props, true);
-                wire_check(&button, self.handle, self.host, node.id, mtm);
-                let view = cast_view(button.clone());
-                ViewHandle::new(
-                    view,
-                    Content::Check {
-                        button,
-                        radio: true,
-                    },
-                    node,
-                )
-            }
-            NodeKind::Widget(Widget::RadioGroup(props)) => {
-                let stack = UIStackView::new(mtm);
-                stack.setAxis(UILayoutConstraintAxis::Vertical);
-                stack.setAlignment(UIStackViewAlignment::Fill);
-                stack.setDistribution(UIStackViewDistribution::FillEqually);
-                let mut buttons = Vec::new();
-                let mut labels = Vec::new();
-                update_radio_group(
-                    &stack,
-                    &mut buttons,
-                    &mut labels,
-                    props,
-                    self.handle,
-                    self.host,
-                    node.id,
-                    mtm,
-                );
-                let view = cast_view(stack.clone());
-                ViewHandle::new(
-                    view,
-                    Content::RadioGroup {
-                        stack,
-                        buttons,
-                        labels,
-                    },
-                    node,
-                )
-            }
-            NodeKind::Widget(Widget::DatePicker(props)) => {
-                let picker = UIDatePicker::new(mtm);
-                update_date_picker(&picker, props);
-                wire_date_picker(&picker, self.handle, self.host, node.id, mtm);
-                let view = cast_view(picker.clone());
-                ViewHandle::new(view, Content::DatePicker(picker), node)
-            }
-            NodeKind::Widget(Widget::TabBar(props)) => {
-                let control = UISegmentedControl::new(mtm);
-                update_tab_bar(&control, props);
-                wire_tab_bar(&control, self.handle, self.host, node.id, mtm);
-                let view = cast_view(control.clone());
-                ViewHandle::new(view, Content::TabBar(control), node)
-            }
-            NodeKind::Pager(props) => {
-                let scroll = UIScrollView::new(mtm);
-                scroll.setPagingEnabled(true);
-                scroll.setShowsHorizontalScrollIndicator(false);
-                scroll.setBounces(false);
-                let delegate = PagerDelegate::new(self.handle, self.host, node.id, mtm);
-                // SAFETY: the delegate is kept alive by the view handle.
-                unsafe { scroll.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
-                let view = cast_view(scroll.clone());
-                ViewHandle::new(
-                    view,
-                    Content::Pager {
-                        scroll,
-                        _delegate: delegate,
-                        pages: props.pages,
-                        selected: props.selected,
-                    },
-                    node,
-                )
-            }
-            NodeKind::Widget(Widget::Slider(props)) => {
-                let slider = UISlider::new(mtm);
-                update_slider(&slider, props);
-                wire_slider(&slider, self.handle, self.host, node.id, mtm);
-                let view = cast_view(slider.clone());
-                ViewHandle::new(view, Content::Slider(slider), node)
-            }
-            NodeKind::Widget(Widget::Progress(props)) => {
-                let progress = UIProgressView::new(mtm);
-                update_progress(&progress, props);
-                let view = cast_view(progress.clone());
-                ViewHandle::new(view, Content::Progress(progress), node)
-            }
-            NodeKind::Widget(Widget::Spinner(props)) => {
-                let spinner = UIActivityIndicatorView::initWithActivityIndicatorStyle(
-                    UIActivityIndicatorView::alloc(mtm),
-                    UIActivityIndicatorViewStyle::Medium,
-                );
-                update_spinner(&spinner, props);
-                let view = cast_view(spinner.clone());
-                ViewHandle::new(view, Content::Spinner(spinner), node)
-            }
-            NodeKind::Widget(Widget::Image(props)) => {
-                let image = UIImageView::new(mtm);
-                self.load_image(node.id, &image, props);
-                let view = cast_view(image.clone());
-                ViewHandle::new(view, Content::Image(image), node)
-            }
-            NodeKind::Scroll(props) => {
-                let scroll = UIScrollView::new(mtm);
-                scroll.setClipsToBounds(true);
-                scroll.setShowsVerticalScrollIndicator(props.axis == Axis::Vertical);
-                scroll.setShowsHorizontalScrollIndicator(props.axis == Axis::Horizontal);
-                scroll.setAlwaysBounceVertical(props.axis == Axis::Vertical);
-                scroll.setAlwaysBounceHorizontal(props.axis == Axis::Horizontal);
-                let host = UIView::new(mtm);
-                scroll.addSubview(&host);
-                let delegate = ScrollDelegate::new(
-                    self.handle,
-                    self.host,
-                    node.id,
-                    props.axis == Axis::Horizontal,
-                    mtm,
-                );
-                // SAFETY: the delegate is owned by the view handle below and
-                // only reads the scroll view's offset.
-                unsafe { scroll.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
-                let view = cast_view(scroll.clone());
-                ViewHandle::new(
-                    view,
-                    Content::Scroll {
-                        scroll,
-                        host,
-                        _delegate: delegate,
-                    },
-                    node,
-                )
-            }
-            NodeKind::Recycler(props) => {
-                let layout = UICollectionViewFlowLayout::new(mtm);
-                layout.setMinimumLineSpacing(0.0);
-                layout.setMinimumInteritemSpacing(0.0);
-                layout.setSectionInset(UIEdgeInsets {
-                    top: 0.0,
-                    left: 0.0,
-                    bottom: 0.0,
-                    right: 0.0,
-                });
-                let collection = UICollectionView::initWithFrame_collectionViewLayout(
-                    UICollectionView::alloc(mtm),
-                    CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(0.0, 0.0)),
-                    &layout,
-                );
-                collection.setShowsVerticalScrollIndicator(true);
-                collection.setAlwaysBounceVertical(true);
-                let identifier = NSString::from_str(ROW_CELL_ID);
-                // SAFETY: the cell class is a `UICollectionViewCell`, which is
-                // what the dequeue call below expects.
-                unsafe {
-                    collection.registerClass_forCellWithReuseIdentifier(
-                        Some(UICollectionViewCell::class()),
-                        &identifier,
-                    );
-                }
-                let data_source =
-                    RecyclerDataSource::new(self.handle, self.host, node.id, props, mtm);
-                collection.setDataSource(Some(ProtocolObject::from_ref(&*data_source)));
-                // SAFETY: the data source is kept alive by the view handle and
-                // only reads the collection view's size and index paths.
-                unsafe {
-                    collection.setDelegate(Some(ProtocolObject::from_ref(&*data_source)));
-                }
-                let view = cast_view(collection.clone());
-                ViewHandle::new(
-                    view,
-                    Content::Recycler {
-                        collection,
-                        data_source,
-                    },
-                    node,
-                )
-            }
+            NodeKind::Widget(widget) => self.create_widget(widget, node, &site),
+            NodeKind::Pager(props) => pager::create(props, node, &site),
+            NodeKind::Scroll(props) => scroll::create(props, node, &site),
+            NodeKind::Recycler(props) => create_recycler(props, node, &site),
             NodeKind::Column | NodeKind::Row => {
                 let view = UIView::new(mtm);
                 let host = UIView::new(mtm);

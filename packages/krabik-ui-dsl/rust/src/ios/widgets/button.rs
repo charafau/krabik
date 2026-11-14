@@ -1,11 +1,14 @@
 //! The `button` widget on iOS.
 
 use crate::ios::events::dispatch_click;
+use crate::ios::widgets::{Content, RenderNode, Site};
+use crate::ios::{ViewHandle, cast_view};
 use crate::ios::{add_action, color, schedule, system_font};
 use crate::tree::NodeId;
 use crate::ui::ButtonProps;
 use objc2::MainThreadMarker;
 use objc2_foundation::NSString;
+use objc2_ui_kit::UIButtonType;
 use objc2_ui_kit::{UIButton, UIControlEvents, UIControlState};
 
 pub(crate) fn update_button(button: &UIButton, props: &ButtonProps) {
@@ -35,4 +38,13 @@ pub(crate) fn wire_click(
         mtm,
         move |_| schedule(move || dispatch_click(handle, host, id)),
     );
+}
+
+/// Creates the native view of a button.
+pub(crate) fn create(props: &ButtonProps, node: &RenderNode, site: &Site) -> ViewHandle {
+    let button = UIButton::buttonWithType(UIButtonType::System, site.mtm);
+    update_button(&button, props);
+    wire_click(&button, site.handle, site.host, site.node, site.mtm);
+    let view = cast_view(button.clone());
+    ViewHandle::new(view, Content::Button(button), node)
 }

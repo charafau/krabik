@@ -6,8 +6,11 @@ use crate::element::{Element, ElementKind, RawElement, style_builder, text_build
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
+use crate::message::Wrap;
 use crate::style::{FontWeight, IntoPoints};
+use crate::widgets::TextStyleMut;
 use crate::widgets::Widget;
+use crate::widgets::WidgetProps;
 use crate::widgets::{CHECK_GAP, CHECK_HEIGHT, CHECK_INDICATOR, TextProps};
 
 /// Platform-independent properties of a group of mutually exclusive radio buttons.
@@ -99,9 +102,21 @@ impl<M> From<RadioGroup<M>> for Element<M> {
 style_builder!(RadioGroup);
 text_builder!(RadioGroup);
 
-impl RadioGroupProps {
+impl WidgetProps for RadioGroupProps {
+    fn map_messages(&mut self, wrap: &Wrap) {
+        self.on_select.map(wrap);
+    }
+
+    fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
+        Some(TextStyleMut {
+            size: &mut self.size,
+            color: &mut self.color,
+            weight: &mut self.weight,
+        })
+    }
+
     /// The options stacked vertically, as wide as the widest one.
-    pub(crate) fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
+    fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
         if self.options.is_empty() {
             return Size::ZERO;
         }

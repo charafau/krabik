@@ -7,8 +7,7 @@ use crate::android::style::{
     apply_accessibility, apply_content_size, apply_frame, apply_layouts, apply_padding,
     apply_style, set_tag,
 };
-use crate::android::widgets::button::configure_button;
-use crate::android::widgets::{configure_view, update_view};
+use crate::android::widgets::{Site, configure_view, create_widget, pager, update_view};
 use crate::frame_batch::FrameBatch;
 use crate::geometry::{Rect, Size};
 use crate::host::{Actions, HostKind};
@@ -17,7 +16,6 @@ use crate::render::{Op, RenderNode};
 use crate::runtime::Runtime;
 use crate::tree::{NodeId, NodeKind, UiNode};
 use crate::ui::Axis;
-use crate::widgets::Widget;
 use jni::errors::Result as JniResult;
 use jni::objects::JObject;
 use jni::refs::Global;
@@ -340,108 +338,35 @@ impl AndroidState {
         node: &RenderNode,
         register: bool,
     ) -> JniResult<JObject<'local>> {
-        let view = if let NodeKind::Scroll(props) = &node.kind {
-            create_scroll(
-                env,
-                self.context.as_obj(),
-                self.root.as_obj(),
-                props.axis == Axis::Horizontal,
-            )?
-        } else {
-            let ids = jni_handles(env)?;
-            let context = [JValue::Object(self.context.as_obj())];
-            let child_context = [
-                JValue::Object(self.context.as_obj()),
-                JValue::Object(self.root.as_obj()),
-                JValue::Long(node.id.0 as jlong),
-            ];
-
-            match &node.kind {
-                NodeKind::Widget(Widget::Text(_)) => {
-                    ids.text_view_ctor
-                        .construct(env, &ids.text_view, &context)?
-                }
-                NodeKind::Widget(Widget::Button(_)) => {
-                    ids.button_ctor.construct(env, &ids.button, &context)?
-                }
-                NodeKind::Widget(Widget::TextField(_)) => {
-                    ids.text_input_ctor
-                        .construct(env, &ids.text_input, &child_context)?
-                }
-                NodeKind::Widget(Widget::Switch(_)) => {
-                    ids.switch_ctor
-                        .construct(env, &ids.switch, &child_context)?
-                }
-                NodeKind::Widget(Widget::Checkbox(_)) => {
-                    ids.checkbox_ctor
-                        .construct(env, &ids.checkbox, &child_context)?
-                }
-                NodeKind::Widget(Widget::RadioButton(_)) => {
-                    ids.radio_ctor
-                        .construct(env, &ids.radio_button, &child_context)?
-                }
-                NodeKind::Widget(Widget::RadioGroup(_)) => {
-                    ids.radio_group_ctor
-                        .construct(env, &ids.radio_group, &child_context)?
-                }
-                NodeKind::Widget(Widget::TabBar(_)) => {
-                    ids.tab_bar_ctor
-                        .construct(env, &ids.tab_bar, &child_context)?
-                }
-                NodeKind::Pager(_) => ids.pager_ctor.construct(env, &ids.pager, &child_context)?,
-                NodeKind::Widget(Widget::DatePicker(_)) => {
-                    ids.date_picker_ctor
-                        .construct(env, &ids.date_picker, &child_context)?
-                }
-                NodeKind::Widget(Widget::Slider(_)) => {
-                    ids.seek_bar_ctor
-                        .construct(env, &ids.seek_bar, &child_context)?
-                }
-                NodeKind::Widget(Widget::Progress(_)) => ids
-                    .create_progress
-                    .call(
-                        env,
-                        &ids.krabik_views,
-                        &[JValue::Object(self.context.as_obj())],
-                    )?
-                    .l()?,
-                NodeKind::Widget(Widget::Spinner(_)) => {
-                    ids.progress_bar_ctor
-                        .construct(env, &ids.progress_bar, &context)?
-                }
-                NodeKind::Widget(Widget::Image(_)) => {
-                    ids.image_view_ctor
-                        .construct(env, &ids.image_view, &context)?
-                }
-                // Decorated layout containers become real containers so they can
-                // draw behind their children and clip them to rounded corners.
-                NodeKind::Column | NodeKind::Row => {
-                    ids.frame_layout_ctor
-                        .construct(env, &ids.frame_layout, &context)?
-                }
-                NodeKind::Spacer => ids.view_ctor.construct(env, &ids.view, &context)?,
-                NodeKind::Recycler(props) => create_recycler(
-                    env,
-                    self.context.as_obj(),
-                    self.root.as_obj(),
-                    node.id,
-                    props,
-                    self.density,
-                )?,
-                // The root is the host view itself; scroll views are created above.
-                NodeKind::Root | NodeKind::Scroll(_) => return Ok(JObject::null()),
+        let site = Site {
+            context: self.context.as_obj(),
+            root: self.root.as_obj(),
+            node: node.id,
+        };
+        let view = match &node.kind {
+            NodeKind::Widget(widget) => create_widget(env, &site, widget)?,
+            NodeKind::Pager(_) => pager::create(env, &site)?,
+            NodeKind::Scroll(props) => {
+                create_scroll(env, site.context, site.root, props.axis == Axis::Horizontal)?
             }
+            NodeKind::Recycler(props) => {
+                create_recycler(env, site.context, site.root, node.id, props, self.density)?
+            }
+            // Decorated layout containers become real containers so they can
+            // draw behind their children and clip them to rounded corners.
+            NodeKind::Column | NodeKind::Row => {
+                let ids = jni_handles(env)?;
+                site.stock(env, &ids.frame_layout, &ids.frame_layout_ctor)?
+            }
+            NodeKind::Spacer => {
+                let ids = jni_handles(env)?;
+                site.stock(env, &ids.view, &ids.view_ctor)?
+            }
+            // The root is the host view itself.
+            NodeKind::Root => return Ok(JObject::null()),
         };
 
         configure_view(env, &view, &node.kind, self.density)?;
-        if matches!(node.kind, NodeKind::Widget(Widget::Button(_))) {
-            configure_button(env, &view)?;
-            jni_handles(env)?.set_on_click_listener.call_void(
-                env,
-                &view,
-                &[JValue::Object(self.root.as_obj())],
-            )?;
-        }
         apply_padding(env, &view, node.style.padding, self.density)?;
         apply_style(env, &view, node, false)?;
         apply_accessibility(env, &view, node)?;

@@ -1,16 +1,22 @@
 //! Recycled lists: binding rows into the holders a `RecyclerView` provides.
 
-use crate::android::handles::get as jni_handles;
+use crate::android::handles::{
+    OBJECT, StaticMethod, VOID, class, get as jni_handles, root_signature, static_method,
+};
 use crate::android::host::{AndroidState, RowState};
+use crate::android::{KRABIK_RECYCLERS_CLASS, KRABIK_ROWS_CLASS};
 use crate::geometry::Size;
 use crate::host::Actions;
 use crate::layout::LayoutResult;
 use crate::tree::{NodeId, RecyclerProps, UiNode};
 use crate::{render, tree};
 use jni::errors::Result as JniResult;
-use jni::objects::JObject;
+use jni::objects::{JClass, JObject};
+use jni::refs::Global;
+use jni::signature::RuntimeMethodSignature;
 use jni::sys::{jint, jlong};
 use jni::{Env, JValue};
+use jni::{jni_sig, jni_str};
 use std::collections::HashMap;
 
 impl AndroidState {
@@ -137,8 +143,9 @@ impl AndroidState {
         let overlay = if transition_ms > 0 && had_previous && !ops.is_empty() {
             let ids = jni_handles(env)?;
             let overlay = ids
-                .snapshot_row
-                .call(env, &ids.krabik_rows, &[JValue::Object(host)])?
+                .rows
+                .snapshot
+                .call(env, &ids.rows.rows_class, &[JValue::Object(host)])?
                 .l()?;
             if overlay.is_null() {
                 None
@@ -155,9 +162,9 @@ impl AndroidState {
 
         if let Some(overlay) = overlay {
             let ids = jni_handles(env)?;
-            ids.fade_row.call_void(
+            ids.rows.fade.call_void(
                 env,
-                &ids.krabik_rows,
+                &ids.rows.rows_class,
                 &[
                     JValue::Object(host),
                     JValue::Object(overlay.as_obj()),
@@ -245,10 +252,11 @@ pub(crate) fn create_recycler<'local>(
 ) -> JniResult<JObject<'local>> {
     let ids = jni_handles(env)?;
     let height = row_height_px(props, density);
-    ids.create_recycler
+    ids.rows
+        .create
         .call(
             env,
-            &ids.krabik_recyclers,
+            &ids.rows.recyclers_class,
             &[
                 JValue::Object(context),
                 JValue::Object(root),
@@ -268,9 +276,9 @@ pub(crate) fn update_recycler(
 ) -> JniResult<()> {
     let ids = jni_handles(env)?;
     let height = row_height_px(props, density);
-    ids.update_recycler.call_void(
+    ids.rows.update.call_void(
         env,
-        &ids.krabik_recyclers,
+        &ids.rows.recyclers_class,
         &[
             JValue::Object(view),
             JValue::Int(props.item_count.min(i32::MAX as usize) as jint),
@@ -285,4 +293,58 @@ pub(crate) fn row_height_px(props: &RecyclerProps, density: f32) -> jint {
     props
         .item_height
         .map_or(0, |height| (height * density).round().max(1.0) as jint)
+}
+
+/// The JNI handles this module uses, resolved once; see [`crate::android::handles`].
+pub(crate) struct Handles {
+    pub(crate) rows_class: Global<JClass<'static>>,
+    pub(crate) recyclers_class: Global<JClass<'static>>,
+    pub(crate) create: StaticMethod,
+    pub(crate) update: StaticMethod,
+    pub(crate) snapshot: StaticMethod,
+    pub(crate) fade: StaticMethod,
+}
+
+impl Handles {
+    pub(crate) fn load(
+        env: &mut Env<'_>,
+        _widget_signature: &RuntimeMethodSignature,
+    ) -> JniResult<Self> {
+        let krabik_rows = class(env, KRABIK_ROWS_CLASS)?;
+        let krabik_recyclers = class(env, KRABIK_RECYCLERS_CLASS)?;
+        Ok(Self {
+            create: StaticMethod {
+                id: env.get_static_method_id(
+                    &krabik_recyclers,
+                    jni_str!("create"),
+                    root_signature("(Landroid/content/Context;{root}JII)Landroid/view/ViewGroup;")?
+                        .method_signature(),
+                )?,
+                returns: OBJECT,
+            },
+            update: static_method!(
+                env,
+                &krabik_recyclers,
+                "update",
+                "(Landroid/view/ViewGroup;IIJ)V",
+                VOID
+            ),
+            snapshot: static_method!(
+                env,
+                &krabik_rows,
+                "snapshot",
+                "(Landroid/view/ViewGroup;)Landroid/widget/ImageView;",
+                OBJECT
+            ),
+            fade: static_method!(
+                env,
+                &krabik_rows,
+                "fadeOut",
+                "(Landroid/view/ViewGroup;Landroid/view/View;I)V",
+                VOID
+            ),
+            rows_class: krabik_rows,
+            recyclers_class: krabik_recyclers,
+        })
+    }
 }

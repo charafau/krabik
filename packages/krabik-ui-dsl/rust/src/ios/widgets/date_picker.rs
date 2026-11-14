@@ -1,6 +1,8 @@
 //! The `date_picker` widget on iOS.
 
 use crate::ios::events::dispatch_picker;
+use crate::ios::widgets::{Content, RenderNode, Site};
+use crate::ios::{ViewHandle, cast_view};
 use crate::ios::{add_action, schedule};
 use crate::tree::NodeId;
 use crate::ui::{DatePickerMode, DatePickerProps, DatePickerValue, DateValue, TimeValue};
@@ -152,4 +154,13 @@ pub(crate) fn wire_date_picker(
             }
         },
     );
+}
+
+/// Creates the native view of a date picker.
+pub(crate) fn create(props: &DatePickerProps, node: &RenderNode, site: &Site) -> ViewHandle {
+    let picker = UIDatePicker::new(site.mtm);
+    update_date_picker(&picker, props);
+    wire_date_picker(&picker, site.handle, site.host, site.node, site.mtm);
+    let view = cast_view(picker.clone());
+    ViewHandle::new(view, Content::DatePicker(picker), node)
 }

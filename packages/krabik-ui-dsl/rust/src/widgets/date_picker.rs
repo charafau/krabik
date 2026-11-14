@@ -4,9 +4,13 @@ use std::marker::PhantomData;
 
 use crate::element::{Element, ElementKind, RawElement, style_builder, text_builder};
 use crate::engine::geometry::Size;
+use crate::engine::measure::Measure;
 use crate::message::Handler;
+use crate::message::Wrap;
 use crate::style::FontWeight;
+use crate::widgets::TextStyleMut;
 use crate::widgets::Widget;
+use crate::widgets::WidgetProps;
 use std::fmt;
 
 /// A calendar date in the device's local calendar.
@@ -294,10 +298,22 @@ const DATETIME_PICKER_WIDTH: f32 = 240.0;
 /// The height of a compact picker field.
 const DATE_PICKER_HEIGHT: f32 = 48.0;
 
-impl DatePickerProps {
+impl WidgetProps for DatePickerProps {
+    fn map_messages(&mut self, wrap: &Wrap) {
+        self.on_change.map(wrap);
+    }
+
+    fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
+        Some(TextStyleMut {
+            size: &mut self.size,
+            color: &mut self.color,
+            weight: &mut self.weight,
+        })
+    }
+
     /// A compact field has a fixed size; an inline picker fits the available
     /// width up to its natural size.
-    pub(crate) fn intrinsic_size(&self, max_width: Option<f32>) -> Size {
+    fn intrinsic_size(&self, max_width: Option<f32>, _measurer: &dyn Measure) -> Size {
         let (compact_width, inline_width, inline_height) = match self.value {
             DatePickerValue::Date(_) => (DATE_PICKER_WIDTH, 320.0, 320.0),
             DatePickerValue::Time(_) => (TIME_PICKER_WIDTH, 240.0, 240.0),

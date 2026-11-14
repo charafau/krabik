@@ -5,8 +5,11 @@ use std::marker::PhantomData;
 use crate::element::{Element, ElementKind, RawElement, style_builder, text_builder};
 use crate::engine::geometry::{Constraints, Size};
 use crate::engine::measure::Measure;
+use crate::message::Wrap;
 use crate::style::{FontWeight, TextAlign};
+use crate::widgets::TextStyleMut;
 use crate::widgets::Widget;
+use crate::widgets::WidgetProps;
 
 /// Platform-independent properties of a text node.
 #[derive(Clone, Debug, PartialEq)]
@@ -88,9 +91,19 @@ impl<M> From<Text<M>> for Element<M> {
 style_builder!(Text);
 text_builder!(Text);
 
-impl TextProps {
+impl WidgetProps for TextProps {
+    fn map_messages(&mut self, _wrap: &Wrap) {}
+
+    fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
+        Some(TextStyleMut {
+            size: &mut self.size,
+            color: &mut self.color,
+            weight: &mut self.weight,
+        })
+    }
+
     /// Text is as large as the platform measures it at the available width.
-    pub(crate) fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
+    fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
         measurer.measure(
             self,
             Constraints {
