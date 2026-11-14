@@ -1,14 +1,16 @@
 # Krabik UI DSL — Roadmap & Status
 
-How the framework works is described in the [guide](README.md#guide). This file tracks status.
+How the framework works is described in the [documentation](docs/README.md). This file tracks
+status.
 
 ---
 
 ## Done ✅
 
 > The entries below are a log, oldest first. Sections 1 to 5 were written before the
-> restructure at the end of this list: file names such as `rust/src/android.rs`, string actions
-> and `Event::…` in them refer to code that has since been reorganized.
+> restructure (section 6): file names such as `rust/src/android.rs`, string actions and
+> `Event::…` in them refer to code that has since been reorganized. The commit-by-commit account
+> of sections 6 and 7 is in [docs/design/history.md](docs/design/history.md).
 
 ### 1. Decouple Application Code from Platform Renderer ✅
 
@@ -485,22 +487,40 @@ siblings with the same key would hash to the same node identifier.
   predictive at the root; the app draws edge to edge.
 - **Native chrome.** System alert, content-sized bottom sheet, host-level bottom navigation.
 
+### 7. Follow-ups: cheap renders, macros, dark theme, Scaffold ✅
+
+- **Unchanged renders are cheap.** A rebuilt tree equal to the current one skips layout and
+  emits nothing; a recycled row does the same against the tree it showed last.
+- **Each widget owns its platform code.** `create` sits next to `update` in every
+  `android/widgets` and `ios/widgets` module, with the widget's cached JNI handles; the Kotlin
+  host controller is called through cached method ids.
+- **Proc macros.** `#[derive(Widget)]` generates a widget's builder, `widgets!` declares the
+  `Widget` enum from one table, and `view!` lets an app write a tree declaratively.
+- **Dark theme.** `Color` carries a light and a dark value, resolved by the engine. Android
+  themes are DayNight and the application survives the activity recreation a theme switch
+  causes; iOS repaints on an appearance change.
+- **Scaffold.** `App::screen` returns a `Scaffold`: app bar, body, bottom navigation, floating
+  action button, navigation drawer and snackbar. `Navigation` is a list of routes.
+- **Tests and builds.** A rotation test, appearance tests on both platforms, shared Android test
+  helpers, iOS device builds, and CI jobs for the UI suites.
+
 ---
 
 ## Remaining ❌
 
-### Verify the Android CI job ❌
+### Run the CI workflow for the first time ❌
 
-The `android` job in [`ci.yml`](../../../.github/workflows/ci.yml) was validated locally only.
-Push the branch and confirm it passes, including the step that assembles the example shell. The
-first run is slow (Rust cross-compile + Gradle download); later runs are cached. If the runner
-disagrees on `platforms;android-37.0` or an action major, adjust the job.
+[`ci.yml`](../../.github/workflows/ci.yml) has jobs for the Rust checks, the Android and iOS
+builds, a device-target build, and the Espresso and XCUITest suites on an emulator and a
+simulator. None of it has run on a runner: every command was only run locally in the same form.
+Push the branch to GitHub and expect to adjust SDK package names, action versions or simulator
+names on the first run. The UI suites sleep in places and may need longer timeouts on a slower
+machine.
 
-### Run the instrumented tests in CI ❌
+### Run on a physical iPhone ❌
 
-Every app has UI tests (XCUITest and Espresso), but CI only builds the apps.
-Adding an emulator job (`connectedDebugAndroidTest`) would cover the Android flow, including the
-re-entrant text-input path fixed by the event try-lock.
+The iOS projects build and link for a device (`aarch64-apple-ios`), but that was only checked
+without signing. Put `DEVELOPMENT_TEAM = <team id>` in an app's `ios/Local.xcconfig` and run it.
 
 ### 4. Optimize JNI Performance ⚠️
 
@@ -588,24 +608,81 @@ matters for large lists.
 - Expose platform-only capabilities without leaking them into the shared DSL
   (for example Android ripple/press states, iOS SF Symbols or blur effects).
 
+## Known rough edges
+
+Found while the documentation was written by reading every file. None is a crash; each is a place
+where behaviour is surprising or one platform does less than the other. They were read from the
+source, not all reproduced on a device.
+
+### Behaviour
+
+- **Native controls can drift from state.** If `update` ignores or reverts a value, the tree is
+  unchanged, nothing is sent, and a switch, slider or bottom navigation bar keeps what the user
+  did. Host chrome that can be dismissed natively (drawer, snackbar, dialog, sheet) has a
+  "remember what the platform shows and re-sync" rule; widgets and the bottom bar do not.
+- **Route keys must be unique in a stack.** A screen's host is found by its key, so the same key
+  twice makes one pop drop both. Documented on `Route`; not enforced.
+- **Nothing pops unless the app implements `App::back`.** The app bar's back arrow goes through
+  the same path as the system back action. iOS swipe-back is disabled.
+- **Chrome needs navigation.** Without `navigation()`, there is no app bar, floating button,
+  drawer or snackbar; a single-screen app needs a one-route stack to get them.
+- **Style on an undecorated container can be dropped.** A plain `Column`, `Row` or `Spacer` has
+  no native view, so `enabled`, `accessibility_label` and animations set only on it reach
+  nothing, and `enabled(false)` is not inherited by children.
+- **An identical snackbar is not shown again**, because descriptions are compared. Put something
+  that changes in the message.
+- **A windowed list measures against the host's viewport**, not its own frame, so a list filling
+  half the screen materializes about twice the rows it needs.
+- **`reset_scroll` only clears Rust's stored offset**; the native scroll view is not told.
+
+### One platform does less
+
+- iOS: `AppBar::back_title` has no visible effect (the back button is a custom chevron); the
+  date picker ignores text size, colour and weight; the tab bar ignores size and weight; only
+  the largest of four corner radii is used; a sheet's height is fixed when it is presented; the
+  alert has no `cancelable` option.
+- Android: the alert shows at most three buttons and drops a second non-cancel, non-first one
+  beyond the neutral slot silently.
+
+### Safety nets that are missing
+
+- An exhaustive `match` can still be satisfied by adding a variant to a do-nothing arm. On iOS a
+  widget's `create` calls its update function only by convention; Android funnels both through
+  `configure_view`.
+- `#[derive(Widget)]` recognises `Color`, `Handler`, `Option`, `Vec` and `String` by the name as
+  written. `crate::style::Color` or `Option<Color>` would be skipped for dark mode.
+- Chrome event codes are kept in step by hand in four places (Rust, Kotlin, Swift, the C header),
+  and a new `Chrome` field that one platform's controller never sends still compiles.
+- A recycled list is only a recycler on Android and iOS, so no host test covers row binding.
+- One wrong JNI name or signature makes `nativeCreate` fail and nothing renders; the Rust-side
+  error is printed with `eprintln!`, which may not reach logcat.
+- Duplicate sibling keys are only asserted in debug builds.
+
+### Build
+
+- `rust.gradle.kts` does not list `rust/macros/src` among its inputs, so a change only to the
+  macro crate may not rebuild the Android library.
+- Debug and release Rust builds write to the same `app/src/main/jniLibs`, and the default ABI is
+  the host's only: pass `-PkrabikAbis=...` for a release.
+- `jni` is an unconditional dependency, so it is compiled for iOS and the host as well.
+- The slide and fade durations in `res/anim/krabik_*.xml` must match `TRANSITION_MS` in
+  `KrabikHostController` by hand.
+- No R8 keep rules: classes and methods are looked up by name, which only matters if an app turns
+  minification on.
+
 ## Nice-to-haves
 
-- CI: verify the existing Android job on a runner, then add the Android
-  emulator (`connectedDebugAndroidTest`) and iOS simulator (`xcodebuild test`)
-  jobs. Tracked under "Remaining ❌" above.
-- Every message re-renders, which rebinds the visible rows of a recycled list;
-  typing in a recycled form therefore rebinds per keystroke. A way for
-  `update` to say "nothing visible changed" would avoid that.
-- Proc macros: a `#[derive(Widget)]` for the builder and `Widget` arms that
-  every widget repeats (see guide chapter 7).
-- Group the cached JNI handles in `android/handles.rs` by widget, next to the
-  code that uses them.
-- A dark theme: the shells use `Theme.Material3.Light` and the examples use
-  fixed light colours.
-- iOS device builds: the projects are set up for the simulator target only.
-- `List::revision` is manual. Losing the cached prefix by accident is safe but
-  slow; a debug warning when a very large list has no revision would catch it.
-- Benchmark fixtures for large lists (10k+ rows) so prefix/key regressions show
-  up in CI rather than in a demo.
-- Document the recycled-row focus rules (restore on rebind, real blur clears)
-  in the guide, not only the gallery demo and the API docs.
+- Let a view read the current appearance (light or dark), for cases adaptive colours do not
+  cover, such as choosing a different image.
+- A drawer menu button on Android and iOS only appears on a root screen; a pushed screen keeps
+  its back button and opens the drawer by a swipe (Android) or from the app's own button.
+- Creating a widget's native view is still one exhaustive `match` per platform, in
+  `android/widgets/mod.rs` and `ios/widgets/mod.rs`.
+- A screen's description is rebuilt after every message. Unchanged output is cheap to apply, but
+  building it still allocates; very large non-list screens would benefit from memoising subtrees.
+- `List::revision` is manual. Losing the cached prefix by accident is safe but slow; a debug
+  warning when a very large list has no revision would catch it.
+- Benchmark fixtures for large lists (10k+ rows) so prefix/key regressions show up in CI rather
+  than in a demo.
+- Document the recycled-row focus rules (restore on rebind, real blur clears) in the guide, not
+  only the gallery demo and the API docs.

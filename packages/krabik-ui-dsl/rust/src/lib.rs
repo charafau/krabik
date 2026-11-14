@@ -48,3 +48,34 @@ mod android;
 
 #[cfg(target_os = "ios")]
 mod ios;
+
+/// Compiles the complete Rust listings in `docs/` as doc-tests, so the
+/// documentation cannot drift from the API without `cargo test` noticing.
+///
+/// Only blocks fenced as plain `rust` are compiled; excerpts are fenced
+/// `rust,ignore`.
+#[cfg(doctest)]
+mod documentation {
+    #[doc = include_str!("../../docs/internals/09-app-navigation-scaffold-presentation.md")]
+    pub struct Internals09AppNavigationScaffoldPresentation;
+    #[doc = include_str!("../../docs/recipes/debug-a-render.md")]
+    pub struct RecipesDebugARender;
+    #[doc = include_str!("../../docs/recipes/write-tests.md")]
+    pub struct RecipesWriteTests;
+    #[doc = include_str!("../../docs/tutorial/01-your-first-app.md")]
+    pub struct Tutorial01YourFirstApp;
+    #[doc = include_str!("../../docs/tutorial/02-widgets-and-layout.md")]
+    pub struct Tutorial02WidgetsAndLayout;
+    #[doc = include_str!("../../docs/tutorial/03-lists-and-state.md")]
+    pub struct Tutorial03ListsAndState;
+    #[doc = include_str!("../../docs/tutorial/04-components.md")]
+    pub struct Tutorial04Components;
+    #[doc = include_str!("../../docs/tutorial/05-navigation-and-scaffold.md")]
+    pub struct Tutorial05NavigationAndScaffold;
+    #[doc = include_str!("../../docs/tutorial/06-dialogs-sheets-and-more-chrome.md")]
+    pub struct Tutorial06DialogsSheetsAndMoreChrome;
+    #[doc = include_str!("../../docs/tutorial/07-colours-and-dark-mode.md")]
+    pub struct Tutorial07ColoursAndDarkMode;
+    #[doc = include_str!("../../docs/tutorial/08-the-view-macro.md")]
+    pub struct Tutorial08TheViewMacro;
+}

@@ -4,7 +4,9 @@ A mobile UI framework in Rust. You describe your interface as a tree of
 widgets; the framework lays it out with [Taffy](https://github.com/DioxusLabs/taffy)
 and draws it with real native views: `TextView`, `Button`, `RecyclerView` on
 Android; `UILabel`, `UIButton`, `UICollectionView` on iOS. Navigation, the
-toolbar, the tab bar, alerts and sheets are the platform's own.
+app bar, the tab bar, alerts, sheets, the floating action button and the
+drawer are the platform's own, and the app follows the device's light or
+dark appearance.
 
 ```rust
 #[derive(Clone)]
@@ -36,16 +38,16 @@ State lives in your app, events are values of your own message type checked
 by the compiler, and after every message the view is rebuilt and only what
 changed is applied to the native views.
 
-## Guide
+## Documentation
 
-1. [Your first app](docs/01-your-first-app.md): state, messages, view
-2. [Widgets, layout and styling](docs/02-widgets-and-layout.md)
-3. [Components](docs/03-components.md): growing an app without a giant `update`
-4. [Navigation, toolbar, dialogs and sheets](docs/04-navigation.md)
-5. [How it works inside](docs/05-how-it-works.md): tree, layout, diff, events
-6. [The Android and iOS halves](docs/06-platforms.md)
-7. [Adding a widget](docs/07-adding-a-widget.md)
-8. [Project layout, building and testing](docs/08-project-layout.md)
+The [documentation](docs/README.md) is in four parts:
+
+1. [Tutorial](docs/tutorial/README.md): build a Notes app step by step.
+2. How it works: [the engine](docs/internals/README.md) and
+   [the platforms](docs/platforms/README.md), file by file.
+3. Design: [why it is built this way](docs/design/decisions.md) and
+   [what was done, in order](docs/design/history.md).
+4. [Recipes](docs/recipes/README.md): add a widget, add native chrome, write tests, debug a render.
 
 ## Apps in this directory
 
@@ -59,10 +61,10 @@ changed is applied to the native views.
 ## Quick start
 
 ```sh
-rustup target add aarch64-linux-android aarch64-apple-ios-sim
+# the Rust targets are installed automatically from rust-toolchain.toml
 
 # unit tests
-cargo test --manifest-path rust/Cargo.toml
+cargo test --manifest-path rust/Cargo.toml --workspace
 
 # Android (emulator running)
 cd example/android && ./gradlew :app:installDebug -PkrabikAbis=arm64-v8a
