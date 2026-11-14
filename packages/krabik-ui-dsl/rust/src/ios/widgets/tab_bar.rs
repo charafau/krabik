@@ -64,9 +64,8 @@ pub(crate) fn wire_tab_bar(
 }
 
 /// Creates the native view of a tab bar.
-pub(crate) fn create(props: &TabBarProps, node: &RenderNode, site: &Site) -> ViewHandle {
+pub(crate) fn create(node: &RenderNode, site: &Site) -> ViewHandle {
     let control = UISegmentedControl::new(site.mtm);
-    update_tab_bar(&control, props);
     wire_tab_bar(&control, site.handle, site.host, site.node, site.mtm);
     let view = cast_view(control.clone());
     ViewHandle::new(view, Content::TabBar(control), node)

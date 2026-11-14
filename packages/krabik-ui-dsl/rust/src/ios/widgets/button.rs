@@ -41,9 +41,8 @@ pub(crate) fn wire_click(
 }
 
 /// Creates the native view of a button.
-pub(crate) fn create(props: &ButtonProps, node: &RenderNode, site: &Site) -> ViewHandle {
+pub(crate) fn create(node: &RenderNode, site: &Site) -> ViewHandle {
     let button = UIButton::buttonWithType(UIButtonType::System, site.mtm);
-    update_button(&button, props);
     wire_click(&button, site.handle, site.host, site.node, site.mtm);
     let view = cast_view(button.clone());
     ViewHandle::new(view, Content::Button(button), node)

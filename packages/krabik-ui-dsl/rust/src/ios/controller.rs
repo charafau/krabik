@@ -44,11 +44,11 @@ impl Host<Ios> for IosState {
     }
 
     fn row_actions(&self, id: NodeId) -> Option<&Actions> {
-        self.row_actions.get(&id)
+        self.rows.actions(id)
     }
 
     fn row_of(&self, id: NodeId) -> Option<(NodeId, usize)> {
-        self.row_nodes.get(&id).copied()
+        self.rows.item_of(id)
     }
 
     fn render(
@@ -87,8 +87,18 @@ impl Controller<Ios> for IosController {
     }
 
     fn set_chrome(&self, _: &mut MainThreadMarker, chrome: &Chrome) -> Result<(), Infallible> {
+        // Every field is named, so a new one does not compile until this
+        // function sends it. The snackbar has its own calls.
+        let Chrome {
+            app_bar,
+            bottom_navigation,
+            floating_action_button,
+            drawer,
+            snackbar: _,
+        } = chrome;
+
         // A screen without an app bar hides the navigation bar.
-        let bar = chrome.app_bar.as_ref();
+        let bar = app_bar.as_ref();
         controller_set_toolbar(
             &self.0,
             bar.map_or("", |bar| bar.title.as_str()),
@@ -98,9 +108,9 @@ impl Controller<Ios> for IosController {
             bar.is_none(),
             bar.map_or(&[][..], |bar| bar.actions.as_slice()),
         );
-        controller_set_bottom_navigation(&self.0, chrome.bottom_navigation.as_ref());
+        controller_set_bottom_navigation(&self.0, bottom_navigation.as_ref());
 
-        let fab = chrome.floating_action_button.as_ref();
+        let fab = floating_action_button.as_ref();
         let label = NSString::from_str(fab.map_or("", |fab| fab.label.as_str()));
         let icon = NSString::from_str(fab.and_then(|fab| fab.icon.ios_name()).unwrap_or(""));
         // SAFETY: see `controller_push`.
@@ -113,7 +123,7 @@ impl Controller<Ios> for IosController {
             ]
         };
 
-        let drawer = chrome.drawer.as_ref();
+        let drawer = drawer.as_ref();
         let items = drawer.map_or(&[][..], |drawer| drawer.items.as_slice());
         let labels = string_array(items.iter().map(|item| item.label.as_str()));
         let icons = string_array(items.iter().map(|item| item.icon.ios_name().unwrap_or("")));

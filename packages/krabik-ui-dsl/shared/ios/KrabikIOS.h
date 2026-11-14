@@ -60,9 +60,25 @@ void krabik_ios_on_native_pop(uint64_t handle);
 /// Reports a tap on the toolbar item at `index`.
 void krabik_ios_on_toolbar_action(uint64_t handle, uint64_t index);
 
-/// Reports what the user did to the floating action button (kind 0), the
-/// drawer (1 picked `index`, 2 opened, 3 closed) or the snackbar (4 action
-/// pressed, 5 timed out or swiped away).
+/// What `krabik_ios_on_chrome_event` can report. The numbers are defined by
+/// `ChromeEvent` in Rust; a Rust test compares this list with them.
+enum {
+    /// The floating action button was pressed.
+    KrabikChromeEventFab = 0,
+    /// A drawer destination was picked; `index` says which.
+    KrabikChromeEventDrawerSelected = 1,
+    /// The user opened the drawer.
+    KrabikChromeEventDrawerOpened = 2,
+    /// The user closed the drawer.
+    KrabikChromeEventDrawerClosed = 3,
+    /// The snackbar's action was pressed.
+    KrabikChromeEventSnackbarAction = 4,
+    /// The snackbar timed out or was swiped away.
+    KrabikChromeEventSnackbarDismissed = 5,
+};
+
+/// Reports what the user did to the floating action button, the drawer or
+/// the snackbar; `kind` is one of the `KrabikChromeEvent` values above.
 void krabik_ios_on_chrome_event(uint64_t handle, int64_t kind, int64_t index);
 
 #ifdef __cplusplus

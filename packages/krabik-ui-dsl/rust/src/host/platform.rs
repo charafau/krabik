@@ -107,17 +107,151 @@ pub(crate) enum ChromeEvent {
 }
 
 impl ChromeEvent {
+    /// The number each event travels as, by name. Kotlin, Swift and the C
+    /// header repeat these; `the_platforms_use_the_same_event_codes` reads
+    /// those files and fails when one of them disagrees.
+    pub(crate) const CODES: [(&'static str, i64); 6] = [
+        ("Fab", 0),
+        ("DrawerSelected", 1),
+        ("DrawerOpened", 2),
+        ("DrawerClosed", 3),
+        ("SnackbarAction", 4),
+        ("SnackbarDismissed", 5),
+    ];
+
     /// Decodes the event from the two numbers the platforms report.
-    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(test, target_os = "android", target_os = "ios")),
+        allow(dead_code)
+    )]
     pub(crate) fn from_code(kind: i64, index: i64) -> Option<Self> {
-        Some(match kind {
-            0 => Self::Fab,
-            1 => Self::DrawerSelected(usize::try_from(index).ok()?),
-            2 => Self::DrawerOpened,
-            3 => Self::DrawerClosed,
-            4 => Self::SnackbarAction,
-            5 => Self::SnackbarDismissed,
+        let (name, _) = Self::CODES.iter().find(|(_, code)| *code == kind)?;
+        Some(match *name {
+            "Fab" => Self::Fab,
+            "DrawerSelected" => Self::DrawerSelected(usize::try_from(index).ok()?),
+            "DrawerOpened" => Self::DrawerOpened,
+            "DrawerClosed" => Self::DrawerClosed,
+            "SnackbarAction" => Self::SnackbarAction,
+            "SnackbarDismissed" => Self::SnackbarDismissed,
             _ => return None,
         })
+    }
+
+    /// The name this event has in [`ChromeEvent::CODES`].
+    #[cfg(test)]
+    fn name(self) -> &'static str {
+        match self {
+            Self::Fab => "Fab",
+            Self::DrawerSelected(_) => "DrawerSelected",
+            Self::DrawerOpened => "DrawerOpened",
+            Self::DrawerClosed => "DrawerClosed",
+            Self::SnackbarAction => "SnackbarAction",
+            Self::SnackbarDismissed => "SnackbarDismissed",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The numbers and durations the two shells repeat. They are written in
+    //! Kotlin, Swift and C, where the Rust compiler cannot see them, so
+    //! these tests read the files.
+
+    use super::*;
+
+    const KOTLIN: &str =
+        include_str!("../../../shared/android/src/main/java/dev/krabik/ui/KrabikHostController.kt");
+    const SWIFT: &str = include_str!("../../../shared/ios/KrabikHostController.swift");
+    const HEADER: &str = include_str!("../../../shared/ios/KrabikIOS.h");
+    const ANDROID_INTEGERS: &str =
+        include_str!("../../../shared/android/src/main/res/values/krabik_integers.xml");
+
+    /// Every `<prefix><Name> ... = <number>` in `source`, with the name
+    /// reduced to lower-case letters so `DRAWER_OPENED` and `DrawerOpened`
+    /// compare equal.
+    fn constants(source: &str, prefix: &str) -> Vec<(String, i64)> {
+        let mut found = Vec::new();
+        for line in source.lines() {
+            let Some(start) = line.find(prefix) else {
+                continue;
+            };
+            let rest = &line[start + prefix.len()..];
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .filter(|c| *c != '_')
+                .collect::<String>()
+                .to_lowercase();
+            let Some(value) = rest.split('=').nth(1) else {
+                continue;
+            };
+            let digits: String = value.chars().filter(char::is_ascii_digit).collect();
+            if let Ok(value) = digits.parse() {
+                found.push((name, value));
+            }
+        }
+        found.sort();
+        found
+    }
+
+    fn expected() -> Vec<(String, i64)> {
+        let mut codes: Vec<(String, i64)> = ChromeEvent::CODES
+            .iter()
+            .map(|(name, code)| (name.to_lowercase(), *code))
+            .collect();
+        codes.sort();
+        codes
+    }
+
+    #[test]
+    fn every_event_has_a_code_and_decodes_from_it() {
+        let events = [
+            ChromeEvent::Fab,
+            ChromeEvent::DrawerSelected(3),
+            ChromeEvent::DrawerOpened,
+            ChromeEvent::DrawerClosed,
+            ChromeEvent::SnackbarAction,
+            ChromeEvent::SnackbarDismissed,
+        ];
+        assert_eq!(events.len(), ChromeEvent::CODES.len());
+        for event in events {
+            let (_, code) = ChromeEvent::CODES
+                .iter()
+                .find(|(name, _)| *name == event.name())
+                .expect("the event is in the table");
+            assert_eq!(ChromeEvent::from_code(*code, 3), Some(event));
+        }
+        assert_eq!(ChromeEvent::from_code(99, 0), None);
+        // A negative index is not a destination.
+        assert_eq!(ChromeEvent::from_code(1, -1), None);
+    }
+
+    #[test]
+    fn the_platforms_use_the_same_event_codes() {
+        assert_eq!(constants(KOTLIN, "const val EVENT_"), expected(), "Kotlin");
+        assert_eq!(constants(SWIFT, "static let event"), expected(), "Swift");
+        assert_eq!(
+            constants(HEADER, "KrabikChromeEvent"),
+            expected(),
+            "C header"
+        );
+    }
+
+    #[test]
+    fn a_screen_transition_takes_the_same_time_on_both_platforms() {
+        let android = ANDROID_INTEGERS
+            .lines()
+            .find(|line| line.contains("name=\"krabik_transition_ms\""))
+            .and_then(|line| line.split('>').nth(1))
+            .and_then(|value| value.split('<').next())
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .expect("the Android integer resource");
+        let ios = SWIFT
+            .lines()
+            .find(|line| line.contains("static let transitionSeconds"))
+            .and_then(|line| line.split('=').nth(1))
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .expect("the Swift constant");
+        assert_eq!(android, ios * 1000.0);
     }
 }

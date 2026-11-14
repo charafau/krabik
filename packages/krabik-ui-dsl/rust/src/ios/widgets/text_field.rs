@@ -140,11 +140,10 @@ pub(crate) fn wire_field(
 }
 
 /// Creates the native view of a text field.
-pub(crate) fn create(props: &TextFieldProps, node: &RenderNode, site: &Site) -> ViewHandle {
+pub(crate) fn create(node: &RenderNode, site: &Site) -> ViewHandle {
     let wrapper = UIView::new(site.mtm);
     let field = UITextField::new(site.mtm);
     field.setBorderStyle(UITextBorderStyle::None);
-    update_field(&field, props);
     wire_field(&field, site.handle, site.host, site.node, site.mtm);
     wrapper.addSubview(&field);
     ViewHandle::new(wrapper, Content::Field(field), node)

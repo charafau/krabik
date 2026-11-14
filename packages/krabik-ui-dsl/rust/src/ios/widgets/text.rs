@@ -30,10 +30,9 @@ pub(crate) fn update_label(label: &UILabel, props: &TextProps) {
 }
 
 /// Creates the native view of a text.
-pub(crate) fn create(props: &TextProps, node: &RenderNode, site: &Site) -> ViewHandle {
+pub(crate) fn create(node: &RenderNode, site: &Site) -> ViewHandle {
     let wrapper = UIView::new(site.mtm);
     let label = UILabel::new(site.mtm);
-    update_label(&label, props);
     wrapper.addSubview(&label);
     ViewHandle::new(wrapper, Content::Label(label), node)
 }

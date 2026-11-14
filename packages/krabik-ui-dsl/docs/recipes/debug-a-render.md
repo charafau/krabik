@@ -207,7 +207,7 @@ If the ops are what they should be, stop testing on the host. The remaining stag
 ## Step 4: did the platform apply them?
 
 Both platforms have one function that every op goes through. They are the place for a temporary
-`eprintln!` and the first place to read.
+`crate::log::error(..)` line and the first place to read.
 
 **Android**: `AndroidState::apply_op` in `rust/src/android/host.rs`. `Create` goes to
 `create_and_insert`, which calls `create_view` (construct, then `configure_view`, padding, style,
@@ -227,11 +227,11 @@ Checks, in order:
    signature fails the lot, `run` returns the default handle `0`, and `RustRootView` then does
    nothing because every call is guarded by `if (handle != 0L)`.
 2. **Did the op error?** Every Android entry point runs inside `run` in `rust/src/android/mod.rs`.
-   On an error it describes and clears the Java exception, prints `"{operation} failed: {error}"`
-   with `eprintln!`, and returns. The render stops at the failing op: `AndroidState::render`
+   On an error it describes and clears the Java exception, reports `"{operation} failed: {error}"`
+   through `crate::log::error`, and returns. The render stops at the failing op: `AndroidState::render`
    breaks out of its loop on the first error, so later ops of that batch are not applied. On iOS
    the entry points run inside `guard` in `rust/src/ios/mod.rs`, which catches an Objective-C
-   exception and prints `krabik ios: {label} handler raised an exception: ...`.
+   exception and reports `{label} handler raised an exception: ...`.
 3. **Does the view exist natively?** Use the Layout Inspector (Android Studio) or the view
    debugger (Xcode). On Android every view Rust creates carries its node id as its tag
    (`set_tag` in `create_view`), and `RustRootView.registeredViewCount()` tells you how many are
@@ -240,10 +240,11 @@ Checks, in order:
    function and check that the property you changed is in it. See
    [A widget that only configured itself on create](#a-widget-that-only-configured-itself-on-create).
 
-Where `eprintln!` goes: Xcode's console on iOS. On Android, as far as I know, standard error of
-an app process is not shown in logcat by default, so the Rust half of an error message can be
-invisible while the Java exception half (`exception_describe`) is logged. If you need Rust-side
-output on Android, that is worth confirming on your device before trusting silence.
+Where the messages go: `crate::log::error` (`rust/src/log.rs`) writes to the Android system log
+under the tag `krabik`, so `adb logcat -s krabik` shows the Rust half of an error next to the
+Java exception half (`exception_describe`). On iOS and under `cargo test` it writes to standard
+error, which Xcode's console shows. A failed JNI lookup also names the class, method or
+constructor it was looking for.
 
 ## Step 5: does the event come back?
 
@@ -387,21 +388,22 @@ changed number produces an `Op::Update`, and the platform's update asks the adap
 **The row is rebound, but the handlers are old.** A rebind of an unchanged row takes a shortcut:
 
 ```rust,ignore
-// rust/src/android/rows.rs, in `bind_row`
+// rust/src/host/rows.rs, in `RowBinder::begin` (shared by both platforms)
         // A render rebinds every attached row. Most of them did not change:
         // keep the widgets and frames, and only take over the new handlers.
-        if let Some(state) = self.row_states.get_mut(&(list, holder))
-            && state.index == index
-            && state.width_px == width_px
-            && state.tree == tree
+        if reapply.is_none()
+            && let Some(row) = self.rows.get_mut(key)
+            && row.list == list
+            && row.index == index
+            && row.width == width
+            && row.tree == tree
         {
-            let height = state.height_px;
-            state.tree = tree;
-            self.clear_row_actions(list, index);
-            let state = &self.row_states[&(list, holder)];
-            let actions = row_actions(&state.tree);
-            self.store_row_actions(list, index, actions);
-            return Ok(height);
+            let height = row.height;
+            row.tree = tree;
+            self.clear_actions(list, index);
+            let actions = actions_of(&self.rows[key].tree);
+            self.store_actions(list, index, actions);
+            return Bind::Unchanged { height };
         }
 ```
 
@@ -478,7 +480,7 @@ through `schedule` in `rust/src/ios/mod.rs`, which defers it to the next main-qu
 `EditingDidEnd` when a focused field is removed)". The cost is that an iOS event is handled one
 turn later than it happened, which is why the XCUITests always wait for results.
 
-Check: a temporary `eprintln!` in the `None` branch of `on_event`.
+Check: a temporary `crate::log::error(..)` in the `None` branch of `on_event`.
 
 ### A widget that only configured itself on create
 

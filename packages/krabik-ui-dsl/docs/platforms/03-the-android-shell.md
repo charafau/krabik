@@ -245,9 +245,11 @@ the animation of the transition it was pushed with, and the target is shown.
 
 `setRootVisible(visible)` switches between `mainContainer` and `navContainer`. When the last
 screen is popped with an animation, hiding `navContainer` at once would cut the animation off, so
-it is hidden by a delayed `Runnable` after `TRANSITION_MS + 40` milliseconds. `TRANSITION_MS`
-(280) must match the `android:duration` in the seven `res/anim/krabik_*.xml` files; nothing ties
-the two together.
+it is hidden by a delayed `Runnable` after `transitionMs + 40` milliseconds. `transitionMs` is
+read from the integer resource `krabik_transition_ms` (280), which the seven
+`res/anim/krabik_*.xml` files use for their `android:duration` as well, so the two cannot differ.
+A Rust test (`a_screen_transition_takes_the_same_time_on_both_platforms`) compares it with the
+iOS constant.
 
 `KrabikScreenFragment` itself is small. `onCreateView` constructs a `RustRootView` with the
 session handle and host id from its arguments and gives it an opaque background from the theme

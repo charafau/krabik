@@ -154,7 +154,10 @@ impl Ctor {
 macro_rules! method {
     ($env:expr, $class:expr, $name:literal, $sig:literal, $returns:expr) => {
         Method {
-            id: $env.get_method_id($class, jni_str!($name), jni_sig!($sig))?,
+            id: $crate::android::handles::named(
+                $env.get_method_id($class, jni_str!($name), jni_sig!($sig)),
+                concat!("method ", $name, " ", $sig),
+            )?,
             returns: $returns,
         }
     };
@@ -163,7 +166,10 @@ macro_rules! method {
 macro_rules! static_method {
     ($env:expr, $class:expr, $name:literal, $sig:literal, $returns:expr) => {
         StaticMethod {
-            id: $env.get_static_method_id($class, jni_str!($name), jni_sig!($sig))?,
+            id: $crate::android::handles::named(
+                $env.get_static_method_id($class, jni_str!($name), jni_sig!($sig)),
+                concat!("static method ", $name, " ", $sig),
+            )?,
             returns: $returns,
         }
     };
@@ -172,7 +178,10 @@ macro_rules! static_method {
 macro_rules! static_field {
     ($env:expr, $class:expr, $name:literal, $sig:literal, $ty:expr) => {
         StaticField {
-            id: $env.get_static_field_id($class, jni_str!($name), jni_sig!($sig))?,
+            id: $crate::android::handles::named(
+                $env.get_static_field_id($class, jni_str!($name), jni_sig!($sig)),
+                concat!("static field ", $name, " ", $sig),
+            )?,
             ty: $ty,
         }
     };
@@ -181,7 +190,10 @@ macro_rules! static_field {
 macro_rules! ctor {
     ($env:expr, $class:expr, $sig:literal) => {
         Ctor {
-            id: $env.get_method_id($class, jni_str!("<init>"), jni_sig!($sig))?,
+            id: $crate::android::handles::named(
+                $env.get_method_id($class, jni_str!("<init>"), jni_sig!($sig)),
+                concat!("constructor ", $sig),
+            )?,
         }
     };
 }
@@ -199,13 +211,28 @@ pub(crate) fn widget_ctor(
     signature: &RuntimeMethodSignature,
 ) -> JniResult<Ctor> {
     Ok(Ctor {
-        id: env.get_method_id(class, jni_str!("<init>"), signature.method_signature())?,
+        id: named(
+            env.get_method_id(class, jni_str!("<init>"), signature.method_signature()),
+            "a widget constructor (Context, RustRootView, long)",
+        )?,
     })
 }
 
 pub(crate) fn class(env: &mut Env<'_>, name: &JNIStr) -> JniResult<Global<JClass<'static>>> {
-    let class = env.find_class(name)?;
+    let class = named(env.find_class(name), &format!("class {name:?}"))?;
     env.new_global_ref(&class)
+}
+
+/// Reports which lookup failed. The JNI error itself only says that one
+/// did, and one wrong name here means nothing is ever rendered.
+pub(crate) fn named<T>(result: JniResult<T>, what: &str) -> JniResult<T> {
+    if result.is_err() {
+        crate::log::error(&format!(
+            "JNI lookup failed for {what}. The Kotlin and Rust sides disagree about a name \
+             or signature; nothing can be rendered until they match."
+        ));
+    }
+    result
 }
 
 /// Every JNI handle the renderer uses.

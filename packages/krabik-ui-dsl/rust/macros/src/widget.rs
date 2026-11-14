@@ -22,6 +22,8 @@ struct FieldConfig {
     arg: bool,
     default: Option<Expr>,
     setter: Option<Setter>,
+    /// The field holds a colour that is not resolved for dark mode.
+    fixed_color: bool,
 }
 
 #[derive(Default)]
@@ -74,8 +76,23 @@ pub(crate) fn expand(input: TokenStream) -> syn::Result<TokenStream> {
         let ident = field.ident.as_ref().expect("named field");
         let field_config = field_config(field)?;
         let docs = doc_attributes(&field.attrs);
-        if is_named(&field.ty, "Color") {
-            colors.push(ident.clone());
+        if !field_config.fixed_color {
+            // Colours are resolved for the appearance wherever they sit.
+            if is_color(&field.ty) {
+                colors.push(quote! { self.#ident = self.#ident.resolve(scheme); });
+            } else if option_payload(&field.ty).is_some_and(is_color) {
+                colors.push(quote! {
+                    if let Some(color) = &mut self.#ident {
+                        *color = color.resolve(scheme);
+                    }
+                });
+            } else if vec_payload(&field.ty).is_some_and(is_color) {
+                colors.push(quote! {
+                    for color in &mut self.#ident {
+                        *color = color.resolve(scheme);
+                    }
+                });
+            }
         }
 
         if field_config.arg {
@@ -205,7 +222,7 @@ pub(crate) fn expand(input: TokenStream) -> syn::Result<TokenStream> {
 
             fn resolve_colors(&mut self, scheme: crate::style::ColorScheme) {
                 let _ = scheme;
-                #(self.#colors = self.#colors.resolve(scheme);)*
+                #(#colors)*
             }
         }
     })
@@ -286,8 +303,12 @@ fn field_config(field: &Field) -> syn::Result<FieldConfig> {
                     })?;
                 }
                 config.setter = Some(setter);
+            } else if meta.path.is_ident("fixed_color") {
+                config.fixed_color = true;
             } else {
-                return Err(meta.error("unknown option; expected `arg`, `default` or `set`"));
+                return Err(
+                    meta.error("unknown option; expected `arg`, `default`, `set` or `fixed_color`")
+                );
             }
             Ok(())
         })?;
@@ -417,9 +438,27 @@ fn is_string(ty: &Type) -> bool {
     is_named(ty, "String")
 }
 
-/// Whether the type is written as the bare name `name`.
+/// Whether the field is a `Color`, however the path to it is written.
+fn is_color(ty: &Type) -> bool {
+    is_named(ty, "Color")
+}
+
+/// Whether the type is `name` without type arguments, written bare or with
+/// a path in front (`Color`, `style::Color`, `crate::style::Color`).
+///
+/// A macro sees names, not types: an alias such as `type Tint = Color` is
+/// not recognised, and an unrelated type that happens to be called `Color`
+/// is. Use the real name, or `#[widget(fixed_color)]` to opt a field out.
 fn is_named(ty: &Type, name: &str) -> bool {
-    matches!(ty, Type::Path(path) if path.path.is_ident(name))
+    let Type::Path(path) = ty else {
+        return false;
+    };
+    path.qself.is_none()
+        && path
+            .path
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == name && segment.arguments.is_none())
 }
 
 fn is_unit(ty: &Type) -> bool {
@@ -516,6 +555,31 @@ mod tests {
         assert!(code.contains("crate :: element :: text_builder ! (Thing) ;"));
         assert!(code.contains("fn text_style"));
         assert!(code.contains("self . color = self . color . resolve (scheme) ;"));
+    }
+
+    #[test]
+    fn colours_are_resolved_wherever_they_sit() {
+        let code = expanded(quote! {
+            #[widget(name = Thing)]
+            pub struct ThingProps {
+                pub tint: Color,
+                pub qualified: crate::style::Color,
+                pub maybe: Option<Color>,
+                pub stops: Vec<style::Color>,
+                #[widget(fixed_color)]
+                pub brand: Color,
+                pub count: u32,
+            }
+        });
+        assert!(
+            code.contains("self . tint = self . tint . resolve (scheme) ;"),
+            "{code}"
+        );
+        assert!(code.contains("self . qualified = self . qualified . resolve (scheme) ;"));
+        assert!(code.contains("if let Some (color) = & mut self . maybe"));
+        assert!(code.contains("for color in & mut self . stops"));
+        assert!(!code.contains("self . brand . resolve"));
+        assert!(!code.contains("self . count . resolve"));
     }
 
     #[test]

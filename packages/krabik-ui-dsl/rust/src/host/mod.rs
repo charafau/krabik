@@ -11,6 +11,10 @@
 
 pub(crate) mod events;
 mod platform;
+// Only the platform renderers bind rows (and the tests do), and each of
+// them leaves a few of the facts the binder offers unused.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod rows;
 mod session;
 
 pub(crate) use events::{Actions, NodeEvent};

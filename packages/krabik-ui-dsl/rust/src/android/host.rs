@@ -10,11 +10,11 @@ use crate::android::style::{
 use crate::android::widgets::{Site, configure_view, create_widget, pager, update_view};
 use crate::frame_batch::FrameBatch;
 use crate::geometry::{Rect, Size};
-use crate::host::{Actions, HostKind};
-use crate::layout::LayoutResult;
+use crate::host::HostKind;
+use crate::host::rows::RowBinder;
 use crate::render::{Op, RenderNode};
 use crate::runtime::Runtime;
-use crate::tree::{NodeId, NodeKind, UiNode};
+use crate::tree::{NodeId, NodeKind};
 use crate::ui::Axis;
 use jni::errors::Result as JniResult;
 use jni::objects::JObject;
@@ -38,25 +38,6 @@ pub(crate) struct ViewHandle {
     pub(crate) frame: Option<Rect>,
 }
 
-/// One recycled row currently bound to a holder.
-///
-/// The cached tree and widgets let a rebind diff against what the holder
-/// already shows instead of tearing the row down and building it again.
-pub(crate) struct RowState {
-    /// The item index the holder shows.
-    pub(crate) index: usize,
-    /// The width the row was laid out for, in pixels.
-    pub(crate) width_px: i32,
-    /// The measured row height, in pixels.
-    pub(crate) height_px: i32,
-    /// The row subtree of the last bind, with its own root identifier.
-    pub(crate) tree: UiNode,
-    /// The layout the cached tree was built with.
-    pub(crate) layout: LayoutResult,
-    /// The row's widgets, keyed by their node ids.
-    pub(crate) views: HashMap<NodeId, ViewHandle>,
-}
-
 /// The state of one root view in a session.
 pub(crate) struct AndroidState {
     pub(crate) runtime: Runtime,
@@ -64,14 +45,9 @@ pub(crate) struct AndroidState {
     pub(crate) root: Global<JObject<'static>>,
     pub(crate) context: Global<JObject<'static>>,
     pub(crate) views: HashMap<NodeId, ViewHandle>,
-    /// Actions of the rows currently bound in recycled lists.
-    pub(crate) row_actions: HashMap<NodeId, Actions>,
-    /// The node ids a (list, row) binding created, for clearing on rebind.
-    pub(crate) row_action_ids: HashMap<(NodeId, usize), Vec<NodeId>>,
-    /// The rows currently bound to recycled-list holders, by (list, holder).
-    pub(crate) row_states: HashMap<(NodeId, i64), RowState>,
-    /// The item each row node belongs to, for routing focus back to its row.
-    pub(crate) row_nodes: HashMap<NodeId, (NodeId, usize)>,
+    /// The rows bound to recycled-list holders, by (list, holder id), with
+    /// their handlers.
+    pub(crate) rows: RowBinder<(NodeId, i64), ViewHandle>,
     pub(crate) density: f32,
     pub(crate) viewport: Size,
 }
@@ -94,10 +70,7 @@ impl AndroidState {
             root: env.new_global_ref(root)?,
             context: context_ref,
             views: HashMap::new(),
-            row_actions: HashMap::new(),
-            row_action_ids: HashMap::new(),
-            row_states: HashMap::new(),
-            row_nodes: HashMap::new(),
+            rows: RowBinder::default(),
             density,
             viewport: Size::ZERO,
         })

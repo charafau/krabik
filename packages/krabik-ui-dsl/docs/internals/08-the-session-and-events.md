@@ -606,7 +606,7 @@ closure that runs is always the one from the latest `view()`.
 If the id is not in the main tree, it may be a widget inside a recycled row. Those rows are built
 by the platform outside `Runtime::update`, so their nodes are in no tree the session can see. When
 the platform binds a row it runs `Actions::of` over the row's nodes and stores the results keyed
-by node id (on Android: `record_row_actions` in `rust/src/android/rows.rs`). `Host::row_actions`
+by node id (`RowBinder::finish` in `rust/src/host/rows.rs`, shared by both platforms). `Host::row_actions`
 exposes that table. Row node ids come from `tree::row_root(list, index)` (chapter 4), so they
 cannot collide with main-tree ids, and one flat map per host is enough.
 

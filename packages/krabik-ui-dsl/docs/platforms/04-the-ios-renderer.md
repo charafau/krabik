@@ -145,7 +145,7 @@ in `widgets/` wraps its dispatch in `schedule`. See `events.rs` below for the fu
 pub(crate) fn guard(label: &str, body: impl FnOnce()) {
     let result = objc2::exception::catch(std::panic::AssertUnwindSafe(body));
     if let Err(exception) = result {
-        // ... format and eprintln!
+        // ... format and crate::log::error
     }
 }
 ```
@@ -231,7 +231,7 @@ pub(crate) struct IosState {
     pub(crate) root: Weak<UIView>,
     pub(crate) views: HashMap<NodeId, ViewHandle>,
     pub(crate) images: ImageLoader,
-    // row_actions, row_action_ids, row_states, row_nodes: recycled lists
+    pub(crate) rows: RowBinder<usize, ViewHandle>,   // recycled lists
     pub(crate) pending_exits: HashMap<NodeId, Retained<UIView>>,
     pub(crate) viewport: Size,
 }
@@ -297,12 +297,13 @@ let mut handle = match &node.kind {
     NodeKind::Column | NodeKind::Row => { /* UIView + Content::Host */ }
     NodeKind::Spacer | NodeKind::Root => { /* plain UIView */ }
 };
+update_content(&mut handle.content, node, self.handle, self.host, mtm);
 apply_style(&handle.view, node, &mut handle.gradient);
 apply_accessibility(&handle.view, node, mtm);
 ```
 
-Unlike Android's two-step "construct, then configure", an iOS `create` function receives the
-properties and returns a configured, wired view.
+As on Android, creation is two steps: a widget's `create` builds the view and wires its events,
+and `update_content`, the same function a later change goes through, applies the properties.
 
 ## `widgets/`: one file per widget
 
@@ -352,12 +353,13 @@ pub(crate) fn create(props: &ButtonProps, node: &RenderNode, site: &Site) -> Vie
 }
 ```
 
-- `update_*` applies every property. It is called by `create` and by `update_content`, so
-  creation and update cannot drift apart. This is the same guarantee Android gets from
-  `configure_view`.
+- `update_*` applies every property. It is called only from `update_content`, which runs
+  right after creation and on every later change, so creation and update cannot drift apart.
+  This is the same guarantee Android gets from `configure_view`.
 - `wire_*` attaches the event handlers, once, at creation. The handler reads whatever it needs
   from the sender *now* (a field's text, a slider's value) and then schedules the dispatch.
-- `create` builds the view, calls both, and returns the `ViewHandle`.
+- `create` builds the view, wires it, and returns the `ViewHandle`. It does not take the
+  properties.
 
 Widgets that are not `UIControl`s use a delegate class instead of `add_action`:
 `ScrollDelegate` (`widgets/scroll.rs`) and `PagerDelegate` (`widgets/pager.rs`), both defined
@@ -630,34 +632,32 @@ batch schedules another.
 
 ### Binding a row and the unchanged-row fast path
 
-`bind_row` is the iOS twin of Android's. Rows are keyed by the cell's address (`cell as *const _
-as usize`), since UIKit reuses cell objects and there is no holder id.
+`bind_row` asks the same `RowBinder` Android uses (`rust/src/host/rows.rs`; the Android renderer
+chapter walks through it). Rows are keyed by the cell's address (`cell as *const _ as usize`),
+since UIKit reuses cell objects and there is no holder id.
 
 ```rust,ignore
 // rust/src/ios/rows.rs (trimmed)
-if let Some(state) = self.row_states.get_mut(&key)
-    && state.list == list
-    && state.index == index
-    && state.width == width
-    && state.tree == tree
-{
-    state.tree = tree;
-    // ... re-record the row's actions
-    return false;
-}
+let key = cell as *const UICollectionViewCell as usize;
+let mut pending = match self.rows.begin(&mut self.runtime, &key, list, index, width as f32) {
+    Bind::Missing | Bind::Unchanged { .. } => return false,
+    Bind::Changed(pending) => *pending,
+};
 ```
 
-Same cell, same item, same width, equal tree: nothing to do except take over the new handlers
-(the trees compare equal even when their closures differ, because handlers compare by presence).
-Since a revision change re-binds every visible row after every message, this path is what makes a
-message that does not touch the list cost almost nothing.
+`Unchanged` means same cell, same item, same width, equal tree: nothing to do, and the binder
+has already taken over the new handlers (the trees compare equal even when their closures
+differ, because handlers compare by presence). Since a revision change re-binds every visible
+row after every message, this path is what makes a message that does not touch the list cost
+almost nothing.
 
-Otherwise the row is laid out, diffed against what the cell showed before (or against an empty
-tree if the cell is unknown), and the ops are applied into the cell's `contentView` with
-`animate = false`. With a row transition, a snapshot view of the old content is laid over the new
-and faded out.
+Otherwise the binder has laid the row out and diffed it against what the cell showed before (or
+against an empty tree if the cell is unknown, in which case `pending.fresh` is set and the
+cell's subviews are removed first). The ops are applied into the cell's `contentView` with
+`animate = false`, and `self.rows.finish(key, pending)` records the result. With a row
+transition, a snapshot view of the old content is laid over the new and faded out.
 
-`bind_row` returns whether the row's height changed. `rebind_visible_rows` invalidates the layout
+`bind_row` returns whether the row's height changed (`pending.resized`). `rebind_visible_rows` invalidates the layout
 only in that case, because the size query lays every visible row out again
 (`size_for_item_at_index_path` calls `row_height`, which builds and lays out the row).
 

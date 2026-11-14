@@ -131,7 +131,7 @@ pub(crate) fn finish_download(
                 {
                     targets.push(image_view.clone());
                 }
-                for row in state.row_states.values() {
+                for row in state.rows.rows() {
                     if let Some(view) = row.views.get(&node_id)
                         && let Content::Image(image_view) = &view.content
                     {

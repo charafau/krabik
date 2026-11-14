@@ -727,20 +727,22 @@ test application's state exists only to produce the disagreeing case. Add one fo
 
 ## What the compiler will not tell you
 
-**A controller that never sends the slot.** `set_chrome` receives the whole `Chrome` and each
-platform reads the fields it knows. If you add the field and forget step 4 or step 7, everything
-compiles and the slot never appears on that platform. Only a UI test on that platform notices.
-The fake controller has the same gap: if `FakeController::set_chrome` does not log the slot, a
-session test cannot see whether it was sent.
+**A controller that never sends the slot.** Both platform `set_chrome` functions start by
+destructuring `Chrome` with every field named, so a new field does not compile on Android or iOS
+until that function mentions it. Mentioning it is not sending it, though: binding the field to
+`_` compiles. The fake controller is not protected at all: if `FakeController::set_chrome` does
+not log the slot, a session test cannot see whether it was sent.
 
-**The event numbers.** They are written in four places by hand: `ChromeEvent::from_code` in Rust,
-the `EVENT_...` constants in Kotlin, the `event...` constants in Swift, and the comment in
-`KrabikIOS.h`. An unknown number is dropped silently (`_ => return None`, then the entry point
-returns). A number that is swapped delivers the wrong event.
+**The event numbers.** They are written in four places: `ChromeEvent::CODES` in Rust, the
+`EVENT_...` constants in Kotlin, the `event...` constants in Swift, and the `KrabikChromeEvent`
+enum in `KrabikIOS.h`. The Rust table is the definition. `the_platforms_use_the_same_event_codes`
+in `rust/src/host/platform.rs` reads the other three files and fails when a name or a number
+differs, so add your event to all four and let that test tell you what you missed. An unknown
+number at runtime is still dropped silently (`from_code` returns `None`).
 
-**The `from_code` line itself.** A `ChromeEvent` variant with an arm in `chrome_event` and no
-line in `from_code` compiles. The session test still passes, because it constructs the variant
-directly. On a device the event is never decoded.
+**The `from_code` line itself.** `every_event_has_a_code_and_decodes_from_it` lists every
+variant and checks that each has an entry in `CODES` and decodes from its number. Add the new
+variant to that list; the test's length check fails if the table and the list disagree.
 
 **Method names and signatures on Android.** `"setFab"` and
 `"(Ljava/lang/String;Ljava/lang/String;Z)V"` are strings. All controller handles are resolved in

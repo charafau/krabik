@@ -221,6 +221,26 @@ One failure during this work was the test's, not the framework's: right after an
 returns to the foreground, a tap can still go to the window that covered it. The test repeats
 the tap until the switch has taken it.
 
+### Safety nets
+
+Things that used to go wrong silently now fail a test or a build. The chrome event numbers and
+the transition duration, which Kotlin, Swift and the C header repeat, are compared with Rust's
+by a test that reads those files. Both controllers destructure `Chrome`, so a new slot does not
+compile until each mentions it. A failed JNI lookup names what it was looking for in logcat and
+the app stops with a message, where it used to show an empty screen. The derive resolves a
+colour however its type is written and inside `Option` and `Vec`. Duplicate keys are caught for
+list rows too, and reported once in release builds. On iOS a new view gets its properties from
+the same function that later updates them.
+
+The largest part was the row binding of recycled lists. Android and iOS each had a copy of the
+logic that decides what a row needs; it is now one `RowBinder` in `rust/src/host/rows.rs` with
+host tests, and the platforms only apply its operations.
+
+Two things turned up while testing. The duplicate-key check failed one of the framework's own
+tests, which had been building a list with repeated keys all along. And under load a text field
+that had just rejected a character lost the next one typed: resetting the text with `setText`
+restarts the keyboard's input connection. The field's text is now edited in place.
+
 ## What is still open
 
 - Run the CI workflow for the first time and fix whatever the runner disagrees with.

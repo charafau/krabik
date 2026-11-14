@@ -39,11 +39,11 @@ impl Host<Android> for AndroidState {
     }
 
     fn row_actions(&self, id: NodeId) -> Option<&Actions> {
-        self.row_actions.get(&id)
+        self.rows.actions(id)
     }
 
     fn row_of(&self, id: NodeId) -> Option<(NodeId, usize)> {
-        self.row_nodes.get(&id).copied()
+        self.rows.item_of(id)
     }
 
     fn render(&mut self, env: &mut Env<'_>, element: &crate::ui::RawElement) -> JniResult<()> {
@@ -89,8 +89,18 @@ impl Controller<Android> for AndroidController {
     fn set_chrome(&self, env: &mut Env<'_>, chrome: &Chrome) -> JniResult<()> {
         let ids = &jni_handles(env)?.controller;
 
+        // Every field is named, so a new one does not compile until this
+        // function sends it. The snackbar has its own calls.
+        let Chrome {
+            app_bar,
+            bottom_navigation,
+            floating_action_button,
+            drawer,
+            snackbar: _,
+        } = chrome;
+
         // A screen without an app bar hides the toolbar.
-        let bar = chrome.app_bar.as_ref();
+        let bar = app_bar.as_ref();
         let actions = bar.map_or(&[][..], |bar| bar.actions.as_slice());
         let action_labels = string_array!(env, actions.iter().map(|a| a.label.as_str()));
         let action_icons = string_array!(
@@ -126,7 +136,7 @@ impl Controller<Android> for AndroidController {
         )?;
 
         // No items hides the bar.
-        let bottom = chrome.bottom_navigation.as_ref();
+        let bottom = bottom_navigation.as_ref();
         let items = bottom.map_or(&[][..], |bar| bar.items.as_slice());
         let labels = string_array!(env, items.iter().map(|item| item.label.as_str()));
         let icons = string_array!(
@@ -145,7 +155,7 @@ impl Controller<Android> for AndroidController {
             ],
         )?;
 
-        let fab = chrome.floating_action_button.as_ref();
+        let fab = floating_action_button.as_ref();
         let label = jcall!(
             env,
             env.new_string(fab.map_or("", |fab| fab.label.as_str()))
@@ -164,7 +174,7 @@ impl Controller<Android> for AndroidController {
             ],
         )?;
 
-        let drawer = chrome.drawer.as_ref();
+        let drawer = drawer.as_ref();
         let items = drawer.map_or(&[][..], |drawer| drawer.items.as_slice());
         let labels = string_array!(env, items.iter().map(|item| item.label.as_str()));
         let icons = string_array!(

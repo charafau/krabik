@@ -1,15 +1,16 @@
 //! One native root view: applying engine operations to UIKit views.
 
 use crate::geometry::{Rect, Size};
-use crate::host::{Actions, HostKind};
+use crate::host::HostKind;
+use crate::host::rows::RowBinder;
 use crate::ios::images::ImageLoader;
 use crate::ios::measure::IosMeasure;
 use crate::ios::motion::{
     FrameTicker, LayoutFrames, animate_style_change, animation_is_enabled, run_animation,
     style_snapshot,
 };
+use crate::ios::rows::RecyclerDataSource;
 use crate::ios::rows::create_recycler;
-use crate::ios::rows::{IosRowState, RecyclerDataSource};
 use crate::ios::style::{apply_accessibility, apply_style};
 use crate::ios::widgets::pager::PagerDelegate;
 use crate::ios::widgets::scroll::ScrollDelegate;
@@ -145,14 +146,9 @@ pub(crate) struct IosState {
     pub(crate) root: Weak<UIView>,
     pub(crate) views: HashMap<NodeId, ViewHandle>,
     pub(crate) images: ImageLoader,
-    /// Actions of the rows currently bound in recycled lists.
-    pub(crate) row_actions: HashMap<NodeId, Actions>,
-    /// The node ids a (list, row) binding created, for clearing on rebind.
-    pub(crate) row_action_ids: HashMap<(NodeId, usize), Vec<NodeId>>,
-    /// The rows currently bound to collection-view cells, by cell identity.
-    pub(crate) row_states: HashMap<usize, IosRowState>,
-    /// The item each row node belongs to, for routing focus back to its row.
-    pub(crate) row_nodes: HashMap<NodeId, (NodeId, usize)>,
+    /// The rows bound to collection-view cells, by cell identity, with
+    /// their handlers.
+    pub(crate) rows: RowBinder<usize, ViewHandle>,
     /// Views animating out after their node was removed, by node id.
     pub(crate) pending_exits: HashMap<NodeId, Retained<UIView>>,
     pub(crate) viewport: Size,
@@ -179,10 +175,7 @@ impl IosState {
             root: Weak::from_retained(root),
             views: HashMap::new(),
             images: ImageLoader::default(),
-            row_actions: HashMap::new(),
-            row_action_ids: HashMap::new(),
-            row_states: HashMap::new(),
-            row_nodes: HashMap::new(),
+            rows: RowBinder::default(),
             pending_exits: HashMap::new(),
             viewport: Size::ZERO,
         }
@@ -418,6 +411,9 @@ impl IosState {
             }
         };
 
+        // The same call an update makes: a new view gets its properties
+        // from the one function that also keeps them current.
+        update_content(&mut handle.content, node, self.handle, self.host, mtm);
         apply_style(&handle.view, node, &mut handle.gradient);
         apply_accessibility(&handle.view, node, mtm);
         handle

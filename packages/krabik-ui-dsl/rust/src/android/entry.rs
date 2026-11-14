@@ -283,7 +283,7 @@ pub extern "system" fn native_restore_row_focus<'caller>(
         let list = NodeId(node_id as u64);
 
         let focused = {
-            let Some(row) = state.row_states.get(&(list, holder_id)) else {
+            let Some(row) = state.rows.row(&(list, holder_id)) else {
                 return Ok(());
             };
             let Some(focus) = state.runtime.row_focus() else {

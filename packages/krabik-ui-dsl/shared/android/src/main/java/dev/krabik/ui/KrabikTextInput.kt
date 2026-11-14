@@ -150,7 +150,16 @@ class KrabikTextInput(
         val end = selectionEnd.coerceAtLeast(0)
 
         removeTextChangedListener(watcher)
-        setText(value)
+        // The existing text is edited in place. `setText` would replace the
+        // buffer, which makes the keyboard restart its input connection, and
+        // a key pressed during that restart is lost: after the application
+        // rejected one character, the next one typed would vanish.
+        val current = editableText
+        if (current != null) {
+            current.replace(0, current.length, value)
+        } else {
+            setText(value)
+        }
         val length = value.length
         setSelection(start.coerceAtMost(length), end.coerceAtMost(length))
         addTextChangedListener(watcher)
