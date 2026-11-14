@@ -10,22 +10,22 @@ use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
 use krabik_ui_dsl::ui::{
-    Align, Button, Checkbox, Column, CornerRadii, DatePicker, DatePickerValue, DateValue,
+    Align, Button, Checkbox, Color, Column, CornerRadii, DatePicker, DatePickerValue, DateValue,
     EdgeInsets, Element, Gradient, Image, ImageScale, ImageSource, ImeAction, Justify,
     KeyboardType, List, ProgressIndicator, RadioGroup, Row, ScrollView, Slider, Spacer, Switch,
     Text, TextAlign, TextField,
 };
 
-pub const COLOR_MUTED: u32 = 0xFF66_6666;
-pub const COLOR_WHITE: u32 = 0xFFFF_FFFF;
-pub const COLOR_BLUE: u32 = 0xFF15_65C0;
-pub const COLOR_TEAL: u32 = 0xFF00_897B;
-pub const COLOR_AMBER: u32 = 0xFFF9_A825;
-pub const COLOR_PURPLE: u32 = 0xFF6A_1B9A;
-pub const COLOR_BORDER: u32 = 0xFFDD_DDDD;
-pub const COLOR_SURFACE: u32 = 0xFFF4_F4F4;
-pub const COLOR_LIGHT_BLUE: u32 = 0xFFE3_F2FD;
-pub const COLOR_LIGHT_TEAL: u32 = 0xFFE0_F2F1;
+pub const COLOR_MUTED: Color = Color::adaptive(0xFF66_6666, 0xFFA0_A4A8);
+pub const COLOR_WHITE: Color = Color::fixed(0xFFFF_FFFF);
+pub const COLOR_BLUE: Color = Color::fixed(0xFF15_65C0);
+pub const COLOR_TEAL: Color = Color::fixed(0xFF00_897B);
+pub const COLOR_AMBER: Color = Color::fixed(0xFFF9_A825);
+pub const COLOR_PURPLE: Color = Color::fixed(0xFF6A_1B9A);
+pub const COLOR_BORDER: Color = Color::adaptive(0xFFDD_DDDD, 0xFF44_474A);
+pub const COLOR_SURFACE: Color = Color::adaptive(0xFFF4_F4F4, 0xFF2A_2B2E);
+pub const COLOR_LIGHT_BLUE: Color = Color::adaptive(0xFFE3_F2FD, 0xFF17_324D);
+pub const COLOR_LIGHT_TEAL: Color = Color::adaptive(0xFFE0_F2F1, 0xFF14_3835);
 /// The example screens reachable from the gallery.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Demo {
@@ -982,7 +982,7 @@ fn caption(text: &str) -> Text<Msg> {
     Text::new(text).size(13).color(COLOR_MUTED)
 }
 
-fn chip(text: &str, color: u32) -> Text<Msg> {
+fn chip(text: &str, color: Color) -> Text<Msg> {
     Text::new(text)
         .size(14)
         .color(COLOR_WHITE)

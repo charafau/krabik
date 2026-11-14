@@ -7,6 +7,7 @@ use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
 use crate::message::Wrap;
+use crate::style::Color;
 use crate::style::FontWeight;
 use crate::widgets::IntrinsicSize;
 use crate::widgets::TextProps;
@@ -25,8 +26,8 @@ pub struct CheckProps {
     pub on_toggle: Handler<bool>,
     /// Font size of the label in logical points.
     pub size: f32,
-    /// ARGB color of the label.
-    pub color: u32,
+    /// Color of the label.
+    pub color: Color,
     /// Font weight of the label.
     pub weight: FontWeight,
 }
@@ -39,7 +40,7 @@ impl CheckProps {
             checked,
             on_toggle: Handler::none(),
             size: 16.0,
-            color: 0xFF00_0000,
+            color: Color::TEXT,
             weight: FontWeight::Normal,
         }
     }
@@ -155,6 +156,10 @@ impl WidgetProps for CheckProps {
             color: &mut self.color,
             weight: &mut self.weight,
         })
+    }
+
+    fn resolve_colors(&mut self, scheme: crate::style::ColorScheme) {
+        self.color = self.color.resolve(scheme);
     }
 }
 

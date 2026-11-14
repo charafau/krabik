@@ -84,7 +84,7 @@ pub(crate) fn update_date_picker(
         view,
         &[
             JValue::Float(props.size),
-            JValue::Int(props.color as jint),
+            JValue::Int(props.color.argb() as jint),
             JValue::Bool(matches!(props.weight, FontWeight::Bold)),
         ],
     )

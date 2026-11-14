@@ -5,6 +5,7 @@ use krabik_ui_dsl_macros::Widget;
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
+use crate::style::Color;
 use crate::style::{FontWeight, IntoPoints};
 use crate::widgets::IntrinsicSize;
 use crate::widgets::{CHECK_GAP, CHECK_HEIGHT, CHECK_INDICATOR, TextProps};
@@ -29,9 +30,9 @@ pub struct RadioGroupProps {
     /// Font size of the labels in logical points.
     #[widget(default = 16.0)]
     pub size: f32,
-    /// ARGB color of the labels and indicators.
-    #[widget(default = 0xFF00_0000)]
-    pub color: u32,
+    /// Color of the labels and indicators.
+    #[widget(default = Color::TEXT)]
+    pub color: Color,
     /// Font weight of the labels.
     #[widget(default = FontWeight::Normal)]
     pub weight: FontWeight,

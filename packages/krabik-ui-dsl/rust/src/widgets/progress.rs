@@ -6,7 +6,7 @@ use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Wrap;
-use crate::style::CONTROL_ACCENT;
+use crate::style::Color;
 use crate::widgets::CONTROL_WIDTH;
 use crate::widgets::IntrinsicSize;
 use crate::widgets::Widget;
@@ -17,8 +17,8 @@ use crate::widgets::WidgetProps;
 pub struct ProgressProps {
     /// The progress in the range `0.0..=1.0`.
     pub value: f32,
-    /// ARGB color of the filled part.
-    pub color: u32,
+    /// Color of the filled part.
+    pub color: Color,
 }
 
 impl ProgressProps {
@@ -26,7 +26,7 @@ impl ProgressProps {
     pub fn new(value: f32) -> Self {
         Self {
             value,
-            color: CONTROL_ACCENT,
+            color: Color::ACCENT,
         }
     }
 }
@@ -34,15 +34,15 @@ impl ProgressProps {
 /// Platform-independent properties of an indeterminate progress spinner.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpinnerProps {
-    /// ARGB color of the spinner.
-    pub color: u32,
+    /// Color of the spinner.
+    pub color: Color,
 }
 
 impl SpinnerProps {
     /// Creates a spinner with the default accent color.
     pub fn new() -> Self {
         Self {
-            color: CONTROL_ACCENT,
+            color: Color::ACCENT,
         }
     }
 }
@@ -75,8 +75,9 @@ impl<M> ProgressIndicator<M> {
         )
     }
 
-    /// Sets the ARGB color of the filled part or spinner.
-    pub fn color(mut self, color: u32) -> Self {
+    /// Sets the color of the filled part or spinner.
+    pub fn color(mut self, color: impl Into<Color>) -> Self {
+        let color = color.into();
         match &mut self.0.kind {
             ElementKind::Widget(Widget::Progress(props)) => props.color = color,
             ElementKind::Widget(Widget::Spinner(props)) => props.color = color,
@@ -101,6 +102,10 @@ const SPINNER_SIZE: f32 = 24.0;
 
 impl WidgetProps for ProgressProps {
     fn map_messages(&mut self, _wrap: &Wrap) {}
+
+    fn resolve_colors(&mut self, scheme: crate::style::ColorScheme) {
+        self.color = self.color.resolve(scheme);
+    }
 }
 
 impl IntrinsicSize for ProgressProps {
@@ -112,6 +117,10 @@ impl IntrinsicSize for ProgressProps {
 
 impl WidgetProps for SpinnerProps {
     fn map_messages(&mut self, _wrap: &Wrap) {}
+
+    fn resolve_colors(&mut self, scheme: crate::style::ColorScheme) {
+        self.color = self.color.resolve(scheme);
+    }
 }
 
 impl IntrinsicSize for SpinnerProps {

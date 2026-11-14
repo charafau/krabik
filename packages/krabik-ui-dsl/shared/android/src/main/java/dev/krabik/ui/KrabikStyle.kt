@@ -200,7 +200,7 @@ object KrabikStyle {
                 }
                 mask.cornerRadii = radii
                 val wrapper = style.ripple ?: RippleDrawable(
-                    ColorStateList.valueOf(RIPPLE_COLOR),
+                    ColorStateList.valueOf(rippleColor(view.context)),
                     shape,
                     mask,
                 ).also { style.ripple = it }
@@ -319,6 +319,22 @@ object KrabikStyle {
         }
     }
 
-    private const val RIPPLE_COLOR: Int = 0x1F000000
+    /** The theme's press highlight, so the ripple suits light and dark. */
+    private fun rippleColor(context: android.content.Context): Int {
+        val value = android.util.TypedValue()
+        val found = context.theme.resolveAttribute(
+            android.R.attr.colorControlHighlight,
+            value,
+            true,
+        )
+        return if (found && value.resourceId != 0) {
+            context.getColor(value.resourceId)
+        } else if (found) {
+            value.data
+        } else {
+            0x1F000000
+        }
+    }
+
     private const val SCALE = 10_000f
 }

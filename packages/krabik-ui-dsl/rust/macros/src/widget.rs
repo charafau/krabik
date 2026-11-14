@@ -68,11 +68,15 @@ pub(crate) fn expand(input: TokenStream) -> syn::Result<TokenStream> {
     let mut initializers = Vec::new();
     let mut methods = Vec::new();
     let mut handlers = Vec::new();
+    let mut colors = Vec::new();
 
     for field in fields {
         let ident = field.ident.as_ref().expect("named field");
         let field_config = field_config(field)?;
         let docs = doc_attributes(&field.attrs);
+        if is_named(&field.ty, "Color") {
+            colors.push(ident.clone());
+        }
 
         if field_config.arg {
             let (param, convert) = constructor_argument(&field.ty);
@@ -198,6 +202,11 @@ pub(crate) fn expand(input: TokenStream) -> syn::Result<TokenStream> {
             }
 
             #text_style
+
+            fn resolve_colors(&mut self, scheme: crate::style::ColorScheme) {
+                let _ = scheme;
+                #(self.#colors = self.#colors.resolve(scheme);)*
+            }
         }
     })
 }
@@ -405,7 +414,12 @@ fn generic_payload<'a>(ty: &'a Type, wrapper: &str) -> Option<&'a Type> {
 }
 
 fn is_string(ty: &Type) -> bool {
-    matches!(ty, Type::Path(path) if path.path.is_ident("String"))
+    is_named(ty, "String")
+}
+
+/// Whether the type is written as the bare name `name`.
+fn is_named(ty: &Type, name: &str) -> bool {
+    matches!(ty, Type::Path(path) if path.path.is_ident(name))
 }
 
 fn is_unit(ty: &Type) -> bool {
@@ -483,7 +497,7 @@ mod tests {
                 #[widget(set)]
                 pub placeholder: String,
                 pub size: f32,
-                pub color: u32,
+                pub color: Color,
                 pub weight: FontWeight,
             }
         });
@@ -501,6 +515,7 @@ mod tests {
         assert!(code.contains("crate :: widgets :: Widget :: Other (props)"));
         assert!(code.contains("crate :: element :: text_builder ! (Thing) ;"));
         assert!(code.contains("fn text_style"));
+        assert!(code.contains("self . color = self . color . resolve (scheme) ;"));
     }
 
     #[test]

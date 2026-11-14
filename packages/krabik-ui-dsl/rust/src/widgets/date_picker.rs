@@ -7,6 +7,7 @@ use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
 use crate::message::Wrap;
+use crate::style::Color;
 use crate::style::FontWeight;
 use crate::widgets::IntrinsicSize;
 use crate::widgets::TextStyleMut;
@@ -182,8 +183,8 @@ pub struct DatePickerProps {
     pub on_change: Handler<DatePickerValue>,
     /// Font size of the compact field in logical points.
     pub size: f32,
-    /// ARGB color of the compact field's text.
-    pub color: u32,
+    /// Color of the compact field's text.
+    pub color: Color,
     /// Font weight of the compact field's text.
     pub weight: FontWeight,
 }
@@ -198,7 +199,7 @@ impl DatePickerProps {
             time_range: None,
             on_change: Handler::none(),
             size: 16.0,
-            color: 0xFF00_0000,
+            color: Color::TEXT,
             weight: FontWeight::Normal,
         }
     }
@@ -310,6 +311,10 @@ impl WidgetProps for DatePickerProps {
             color: &mut self.color,
             weight: &mut self.weight,
         })
+    }
+
+    fn resolve_colors(&mut self, scheme: crate::style::ColorScheme) {
+        self.color = self.color.resolve(scheme);
     }
 }
 

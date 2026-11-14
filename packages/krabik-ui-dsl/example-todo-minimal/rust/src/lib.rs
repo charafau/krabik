@@ -13,14 +13,14 @@ use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
 use krabik_ui_dsl::ui::{
-    Align, Button, Checkbox, Column, EdgeInsets, Element, List, Row, Spacer, Text, TextField,
+    Align, Button, Checkbox, Color, Column, EdgeInsets, Element, List, Row, Spacer, Text, TextField,
 };
 use krabik_ui_dsl::view;
 
-const COLOR_TEXT: u32 = 0xFF20_2125;
-const COLOR_MUTED: u32 = 0xFF66_6666;
-const COLOR_SURFACE: u32 = 0xFFF4_F4F4;
-const COLOR_DONE: u32 = 0xFFE6_F4EA;
+const COLOR_TEXT: Color = Color::adaptive(0xFF20_2125, 0xFFE8_EAED);
+const COLOR_MUTED: Color = Color::adaptive(0xFF66_6666, 0xFFA0_A4A8);
+const COLOR_SURFACE: Color = Color::adaptive(0xFFF4_F4F4, 0xFF2A_2B2E);
+const COLOR_DONE: Color = Color::adaptive(0xFFE6_F4EA, 0xFF1E_3A2A);
 
 const ROW_HEIGHT: f32 = 56.0;
 

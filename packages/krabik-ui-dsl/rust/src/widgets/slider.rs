@@ -5,7 +5,7 @@ use krabik_ui_dsl_macros::Widget;
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
-use crate::style::CONTROL_ACCENT;
+use crate::style::Color;
 use crate::widgets::CONTROL_WIDTH;
 use crate::widgets::IntrinsicSize;
 
@@ -32,9 +32,9 @@ pub struct SliderProps {
     pub step: Option<f32>,
     /// Reports the new value whenever it changes.
     pub on_change: Handler<f32>,
-    /// ARGB color of the active track and thumb.
-    #[widget(default = CONTROL_ACCENT, set)]
-    pub color: u32,
+    /// Color of the active track and thumb.
+    #[widget(default = Color::ACCENT, set(into))]
+    pub color: Color,
 }
 
 fn positive_step(step: f32) -> Option<f32> {

@@ -15,6 +15,46 @@ final class ShowcaseUITests: XCTestCase {
         app = nil
     }
 
+    /// Rust paints with fixed colours, so it has to be told when the
+    /// appearance changes. The screen and its state must stay as they were.
+    func testSwitchingToDarkKeepsTheScreenAndItsState() throws {
+        XCUIDevice.shared.appearance = .light
+        defer { XCUIDevice.shared.appearance = .light }
+
+        open("Radio group")
+        tapButton("Large")
+        XCTAssertTrue(app.staticTexts["Selected: Large"].waitForExistence(timeout: 5))
+        let light = brightness(of: app.screenshot())
+
+        XCUIDevice.shared.appearance = .dark
+        XCTAssertTrue(app.staticTexts["Selected: Large"].waitForExistence(timeout: 5))
+        sleep(1)
+        let dark = brightness(of: app.screenshot())
+        XCTAssertGreaterThan(light, 0.7, "the light screen is mostly light")
+        XCTAssertLessThan(dark, 0.3, "the dark screen is mostly dark")
+
+        backToCatalog()
+    }
+
+    /// The average brightness of a screenshot, from 0 (black) to 1 (white).
+    private func brightness(of screenshot: XCUIScreenshot) -> Double {
+        guard let image = screenshot.image.cgImage else { return 0 }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = CGContext(
+            data: &pixel,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+        // Drawing the whole image into one pixel averages it.
+        context?.interpolationQuality = .medium
+        context?.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return (Double(pixel[0]) + Double(pixel[1]) + Double(pixel[2])) / (3 * 255)
+    }
+
     func testNewWidgets() throws {
         open("Radio group")
         XCTAssertTrue(app.staticTexts["Selected: Medium"].waitForExistence(timeout: 5))

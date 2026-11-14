@@ -35,7 +35,7 @@ pub(crate) fn update_tab_bar(
             JValue::Object(&labels),
             JValue::Int(props.selected as jint),
             JValue::Float(props.size),
-            JValue::Int(props.color as jint),
+            JValue::Int(props.color.argb() as jint),
             JValue::Bool(matches!(props.weight, FontWeight::Bold)),
         ],
     )

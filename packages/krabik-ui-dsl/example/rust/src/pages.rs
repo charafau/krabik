@@ -4,7 +4,7 @@ use krabik_ui_dsl::app::Component;
 use krabik_ui_dsl::navigation::{BottomNavItem, BottomNavigation};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::ui::{
-    Align, AnimationCurve, Button, Checkbox, Column, DatePicker, DatePickerMode, DateValue,
+    Align, AnimationCurve, Button, Checkbox, Color, Column, DatePicker, DatePickerMode, DateValue,
     EdgeInsets, Element, Gradient, Icon, Image, ImageScale, ImageSource, Justify, List, Pager,
     ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider, Spacer, Switch, TabBar,
     Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
@@ -12,15 +12,18 @@ use krabik_ui_dsl::ui::{
 
 use crate::{Msg, ShowcaseApp};
 
-pub(crate) const COLOR_TEXT: u32 = 0xFF20_2125;
-pub(crate) const COLOR_MUTED: u32 = 0xFF66_6666;
-pub(crate) const COLOR_SURFACE: u32 = 0xFFF4_F4F4;
-pub(crate) const COLOR_DONE: u32 = 0xFFE6_F4EA;
-pub(crate) const COLOR_ACCENT: u32 = 0xFF00_897B;
-const COLOR_BLUE: u32 = 0xFF15_65C0;
-const COLOR_AMBER: u32 = 0xFFF9_A825;
-const COLOR_PURPLE: u32 = 0xFF6A_1B9A;
-const COLOR_BORDER: u32 = 0xFFDD_DDDD;
+pub(crate) const COLOR_TEXT: Color = Color::adaptive(0xFF20_2125, 0xFFE8_EAED);
+pub(crate) const COLOR_MUTED: Color = Color::adaptive(0xFF66_6666, 0xFFA0_A4A8);
+pub(crate) const COLOR_SURFACE: Color = Color::adaptive(0xFFF4_F4F4, 0xFF2A_2B2E);
+pub(crate) const COLOR_DONE: Color = Color::adaptive(0xFFE6_F4EA, 0xFF1E_3A2A);
+pub(crate) const COLOR_ACCENT: Color = Color::adaptive(0xFF00_897B, 0xFF4D_B6AC);
+const COLOR_BLUE: Color = Color::fixed(0xFF15_65C0);
+const COLOR_AMBER: Color = Color::fixed(0xFFF9_A825);
+const COLOR_PURPLE: Color = Color::fixed(0xFF6A_1B9A);
+/// The two tints alternate rows use.
+const COLOR_WARM: Color = Color::adaptive(0xFFFF_F3E0, 0xFF4A_3520);
+const COLOR_COOL: Color = Color::adaptive(0xFFE3_F2FD, 0xFF17_324D);
+const COLOR_BORDER: Color = Color::adaptive(0xFFDD_DDDD, 0xFF44_474A);
 
 /// A muted secondary line of copy.
 pub(crate) fn caption<M>(text: &str) -> Text<M> {
@@ -609,7 +612,7 @@ fn animation_decoration_page(app: &ShowcaseApp) -> Element<Msg> {
             Column::new()
                 .animate(360)
                 .animation_curve(AnimationCurve::cubic_bezier(0.2, 0.8, 0.2, 1.0))
-                .background(if alt { 0xFFFF_F3E0 } else { 0xFFE3_F2FD })
+                .background(if alt { COLOR_WARM } else { COLOR_COOL })
                 .border(
                     if alt { 1 } else { 3 },
                     if alt { COLOR_AMBER } else { COLOR_BLUE },
@@ -715,7 +718,7 @@ fn animation_enter_exit_page(app: &ShowcaseApp) -> Element<Msg> {
 
 fn animation_curves_page(app: &ShowcaseApp) -> Element<Msg> {
     let wide = app.curves_alt;
-    let bar = |label: &'static str, color: u32, curve: AnimationCurve| -> Element<Msg> {
+    let bar = |label: &'static str, color: Color, curve: AnimationCurve| -> Element<Msg> {
         Column::new()
             .spacing(6)
             .width_percent(1.0)
@@ -810,7 +813,7 @@ fn bottom_sheet_page() -> Element<Msg> {
 
 fn pager_page(app: &ShowcaseApp) -> Element<Msg> {
     let selected = app.pager_page.min(2);
-    let card = |title: &'static str, body: &'static str, color: u32| -> Element<Msg> {
+    let card = |title: &'static str, body: &'static str, color: Color| -> Element<Msg> {
         Column::new()
             .background(color)
             .padding(20)
@@ -831,9 +834,9 @@ fn pager_page(app: &ShowcaseApp) -> Element<Msg> {
                 .on_select(Msg::Page)
                 .height(320)
                 .accessibility_label("View pager")
-                .child(card("One", "The first page.", 0xFF15_65C0))
-                .child(card("Two", "The second page.", 0xFF00_897B))
-                .child(card("Three", "The third page.", 0xFF6A_1B9A)),
+                .child(card("One", "The first page.", Color::fixed(0xFF15_65C0)))
+                .child(card("Two", "The second page.", Color::fixed(0xFF00_897B)))
+                .child(card("Three", "The third page.", Color::fixed(0xFF6A_1B9A))),
             caption("Swiping reports the settled page through Event::Selected."),
         ],
     )
@@ -841,7 +844,7 @@ fn pager_page(app: &ShowcaseApp) -> Element<Msg> {
 
 fn tabs_view_page(app: &ShowcaseApp) -> Element<Msg> {
     let selected = app.tabs_view.min(2);
-    let page_body = |title: &'static str, detail: &'static str, color: u32| -> Element<Msg> {
+    let page_body = |title: &'static str, detail: &'static str, color: Color| -> Element<Msg> {
         Column::new()
             .background(color)
             .padding(20)
@@ -867,17 +870,17 @@ fn tabs_view_page(app: &ShowcaseApp) -> Element<Msg> {
                 .child(page_body(
                     "Overview page",
                     "The first tab page.",
-                    0xFF15_65C0,
+                    Color::fixed(0xFF15_65C0),
                 ))
                 .child(page_body(
                     "Details page",
                     "Details page content.",
-                    0xFF00_897B,
+                    Color::fixed(0xFF00_897B),
                 ))
                 .child(page_body(
                     "Settings page",
                     "Settings page content.",
-                    0xFF6A_1B9A,
+                    Color::fixed(0xFF6A_1B9A),
                 )),
             caption("Tapping a tab and swiping the pager both dispatch Event::Selected."),
         ],
@@ -1038,7 +1041,7 @@ fn scroll_page() -> Element<Msg> {
                 .background(if index % 2 == 0 {
                     COLOR_SURFACE
                 } else {
-                    0xFFFF_FFFF
+                    Color::BACKGROUND
                 })
                 .corner_radius(8)
                 .child(Text::new(format!("Row {index}")).size(15)),
@@ -1228,7 +1231,7 @@ fn styling_page() -> Element<Msg> {
             Text::new("Border")
                 .size(16)
                 .color(COLOR_TEXT)
-                .background(0xFFFF_FFFF)
+                .background(Color::BACKGROUND)
                 .border(2, COLOR_BORDER)
                 .padding_each(EdgeInsets::symmetric(14, 10))
                 .corner_radius(12),
@@ -1242,7 +1245,7 @@ fn styling_page() -> Element<Msg> {
             Text::new("Elevation")
                 .size(16)
                 .color(COLOR_TEXT)
-                .background(0xFFFF_FFFF)
+                .background(Color::BACKGROUND)
                 .elevation(4)
                 .padding_each(EdgeInsets::symmetric(14, 10))
                 .corner_radius(12),
@@ -1258,7 +1261,7 @@ fn styling_page() -> Element<Msg> {
             )
             .size(16)
             .color(COLOR_TEXT)
-            .background(0xFFFF_FFFF)
+            .background(Color::BACKGROUND)
             .border(2, COLOR_BORDER)
             .elevation(4)
             .enabled(false)
@@ -1268,7 +1271,7 @@ fn styling_page() -> Element<Msg> {
     )
 }
 
-fn chip(text: &str, color: u32) -> Text<Msg> {
+fn chip(text: &str, color: Color) -> Text<Msg> {
     Text::new(text)
         .size(14)
         .color(0xFFFF_FFFF)

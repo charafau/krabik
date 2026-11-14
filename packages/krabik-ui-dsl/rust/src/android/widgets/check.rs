@@ -31,7 +31,7 @@ pub(crate) fn update_check(
         &[JValue::Int(COMPLEX_UNIT_SP), JValue::Float(props.size)],
     )?;
     ids.set_text_color
-        .call_void(env, view, &[JValue::Int(props.color as jint)])?;
+        .call_void(env, view, &[JValue::Int(props.color.argb() as jint)])?;
     ids.set_max_lines.call_void(env, view, &[JValue::Int(1)])?;
     let ellipsis = ids.truncate_at_end.get(env, &ids.truncate_at)?;
     ids.set_ellipsize

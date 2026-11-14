@@ -4,15 +4,17 @@ use crate::android::controller::{Android, AndroidController};
 use crate::android::handles::get as jni_handles;
 use crate::android::host::AndroidState;
 use crate::android::run;
+use crate::app::AnyApp;
 use crate::geometry::Size;
 use crate::host::{HostKind, NodeEvent, Session};
+use crate::style::ColorScheme;
 use crate::tree::NodeId;
 use crate::ui::{DatePickerValue, DateValue, TimeValue};
 use jni::errors::Result as JniResult;
 use jni::objects::{JObject, JString};
 use jni::refs::Global;
 use jni::sys::{jboolean, jfloat, jint, jlong};
-use jni::{Env, EnvUnowned, JValue, jni_sig, jni_str};
+use jni::{Env, EnvUnowned, JValue};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -26,6 +28,13 @@ pub(crate) struct AndroidSession {
 
 pub(crate) static STATES: OnceLock<Mutex<HashMap<jlong, AndroidSession>>> = OnceLock::new();
 pub(crate) static NEXT_HANDLE: AtomicI64 = AtomicI64::new(1);
+
+/// Applications waiting for the activity that replaces the one they ran in.
+static RETAINED_APPS: OnceLock<Mutex<HashMap<jlong, Box<dyn AnyApp>>>> = OnceLock::new();
+
+fn retained_apps() -> &'static Mutex<HashMap<jlong, Box<dyn AnyApp>>> {
+    RETAINED_APPS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 pub(crate) fn states() -> &'static Mutex<HashMap<jlong, AndroidSession>> {
     STATES.get_or_init(|| Mutex::new(HashMap::new()))
@@ -54,6 +63,8 @@ pub extern "system" fn native_create<'caller>(
     this: JObject<'caller>,
     context: JObject<'caller>,
     density: jfloat,
+    night: jboolean,
+    retained_app: jlong,
 ) -> jlong {
     run(&mut unenv, "nativeCreate", |env| {
         // Resolving the handles here is what makes the app's own Kotlin
@@ -61,8 +72,21 @@ pub extern "system" fn native_create<'caller>(
         // point, which is the app's.
         jni_handles(env)?;
         let main = AndroidState::new(env, &context, &this, density, HostKind::Main)?;
+        // An activity recreated by a configuration change, such as a switch
+        // between light and dark, continues with the application it had.
+        let app = retained_apps()
+            .lock()
+            .expect("retained apps")
+            .remove(&retained_app)
+            .unwrap_or_else(crate::app::create_app);
+        let mut core = Session::new(app, main);
+        core.set_color_scheme(if night {
+            ColorScheme::Dark
+        } else {
+            ColorScheme::Light
+        });
         let session = AndroidSession {
-            core: Session::new(crate::app::create_app(), main),
+            core,
             context: env.new_global_ref(&context)?,
             density,
         };
@@ -564,26 +588,47 @@ pub extern "system" fn native_unbind_row<'caller>(
 }
 
 /// Releases the widgets and the Rust state of a `RustRootView`.
+///
+/// With `retain`, the application itself is kept and its id returned, so
+/// the activity that replaces this one can continue with it. Otherwise
+/// returns `0`.
 #[unsafe(export_name = native_name!("nativeDestroy"))]
 pub extern "system" fn native_destroy<'caller>(
     mut unenv: EnvUnowned<'caller>,
     _this: JObject<'caller>,
     handle: jlong,
-) {
+    retain: jboolean,
+) -> jlong {
     run(&mut unenv, "nativeDestroy", |env| {
-        if let Some(mut session) = states().lock().expect("android states").remove(&handle) {
-            for host in session.core.hosts_mut() {
-                let _ = jcall!(
-                    env,
-                    env.call_method(
-                        host.root.as_obj(),
-                        jni_str!("removeAllViews"),
-                        jni_sig!("()V"),
-                        &[],
-                    )
-                )?;
-            }
+        let Some(mut session) = states().lock().expect("android states").remove(&handle) else {
+            return Ok(0);
+        };
+        let ids = jni_handles(env)?;
+        for host in session.core.hosts_mut() {
+            ids.remove_all_views
+                .call_void(env, host.root.as_obj(), &[])?;
         }
+        if !retain {
+            return Ok(0);
+        }
+        let id = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
+        retained_apps()
+            .lock()
+            .expect("retained apps")
+            .insert(id, session.core.into_app());
+        Ok(id)
+    })
+}
+
+/// Drops an application that was retained but never picked up again.
+#[unsafe(export_name = native_name!("nativeDropRetainedApp"))]
+pub extern "system" fn native_drop_retained_app<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _class: jni::objects::JClass<'caller>,
+    id: jlong,
+) {
+    run(&mut unenv, "nativeDropRetainedApp", |_env| {
+        retained_apps().lock().expect("retained apps").remove(&id);
         Ok(())
     });
 }

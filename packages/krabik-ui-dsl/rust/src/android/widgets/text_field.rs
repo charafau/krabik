@@ -34,7 +34,7 @@ pub(crate) fn update_text_field(
         &[JValue::Int(COMPLEX_UNIT_SP), JValue::Float(props.size)],
     )?;
     ids.set_text_color
-        .call_void(env, view, &[JValue::Int(props.color as jint)])?;
+        .call_void(env, view, &[JValue::Int(props.color.argb() as jint)])?;
 
     let keyboard = match props.keyboard {
         KeyboardType::Text => 0,

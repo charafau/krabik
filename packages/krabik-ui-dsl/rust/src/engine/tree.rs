@@ -234,6 +234,20 @@ pub(crate) fn row_root(list: NodeId, index: usize) -> NodeId {
     NodeId(mixed | 1)
 }
 
+/// Picks the value for `scheme` in every colour of the tree.
+///
+/// The renderers only ever see resolved colours, and a change of appearance
+/// reaches them as ordinary updates of the nodes whose colours differ.
+pub(crate) fn resolve_colors(node: &mut UiNode, scheme: crate::style::ColorScheme) {
+    node.style.resolve_colors(scheme);
+    if let NodeKind::Widget(widget) = &mut node.kind {
+        widget.resolve_colors(scheme);
+    }
+    for child in &mut node.children {
+        resolve_colors(child, scheme);
+    }
+}
+
 /// Stamps the current render revision into every recycled list.
 ///
 /// RecyclerView's adapter needs a signal to rebind its attached cells when the

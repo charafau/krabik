@@ -100,10 +100,10 @@ pub(crate) fn apply_typeface(env: &mut Env<'_>, view: &JObject<'_>, bold: bool) 
 pub(crate) fn text_properties(kind: &NodeKind) -> Option<(&str, f32, u32, FontWeight)> {
     match kind {
         NodeKind::Widget(Widget::Text(props)) => {
-            Some((&props.content, props.size, props.color, props.weight))
+            Some((&props.content, props.size, props.color.argb(), props.weight))
         }
         NodeKind::Widget(Widget::Button(props)) => {
-            Some((&props.label, props.size, props.color, props.weight))
+            Some((&props.label, props.size, props.color.argb(), props.weight))
         }
         _ => None,
     }

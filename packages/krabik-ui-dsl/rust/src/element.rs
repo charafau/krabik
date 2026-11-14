@@ -259,9 +259,9 @@ macro_rules! style_builder {
                 self
             }
 
-            /// Sets the background color as ARGB.
-            pub fn background(mut self, color: u32) -> Self {
-                self.0.style.background = Some(color);
+            /// Sets the background color: an ARGB number or a [`Color`]($crate::style::Color).
+            pub fn background(mut self, color: impl Into<$crate::style::Color>) -> Self {
+                self.0.style.background = Some(color.into());
                 self
             }
 
@@ -284,7 +284,11 @@ macro_rules! style_builder {
             }
 
             /// Draws a border around the node.
-            pub fn border(mut self, width: impl $crate::style::IntoPoints, color: u32) -> Self {
+            pub fn border(
+                mut self,
+                width: impl $crate::style::IntoPoints,
+                color: impl Into<$crate::style::Color>,
+            ) -> Self {
                 self.0.style.border = Some($crate::style::Border::new(width.into_points(), color));
                 self
             }
@@ -383,9 +387,9 @@ macro_rules! text_builder {
                 self
             }
 
-            /// Sets the ARGB text color.
-            pub fn color(mut self, color: u32) -> Self {
-                self.0.set_text_color(color);
+            /// Sets the text color: an ARGB number or a [`Color`]($crate::style::Color).
+            pub fn color(mut self, color: impl Into<$crate::style::Color>) -> Self {
+                self.0.set_text_color(color.into());
                 self
             }
 
@@ -417,7 +421,7 @@ impl RawElement {
         }
     }
 
-    pub(crate) fn set_text_color(&mut self, color: u32) {
+    pub(crate) fn set_text_color(&mut self, color: crate::style::Color) {
         if let Some(text) = self.text_style() {
             *text.color = color;
         }

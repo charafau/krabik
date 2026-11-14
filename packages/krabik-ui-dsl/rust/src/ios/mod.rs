@@ -40,7 +40,9 @@ pub(crate) fn system_font(size: f32, weight: FontWeight) -> Retained<UIFont> {
     }
 }
 
-pub(crate) fn color(argb: u32) -> Retained<UIColor> {
+/// The `UIColor` of a colour the engine has resolved.
+pub(crate) fn color(color: crate::style::Color) -> Retained<UIColor> {
+    let argb = color.argb();
     let alpha = f64::from((argb >> 24) & 0xFF) / 255.0;
     let red = f64::from((argb >> 16) & 0xFF) / 255.0;
     let green = f64::from((argb >> 8) & 0xFF) / 255.0;
@@ -48,9 +50,9 @@ pub(crate) fn color(argb: u32) -> Retained<UIColor> {
     UIColor::colorWithRed_green_blue_alpha(red, green, blue, alpha)
 }
 
-pub(crate) fn cg_color(argb: u32) -> Retained<CGColor> {
+pub(crate) fn cg_color(value: crate::style::Color) -> Retained<CGColor> {
     // SAFETY: the color is a valid `UIColor` and `CGColor` is retained.
-    unsafe { color(argb).CGColor() }
+    unsafe { color(value).CGColor() }
 }
 
 /// The view that hosts the children of the given native parent.
