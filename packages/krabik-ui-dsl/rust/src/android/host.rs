@@ -47,6 +47,10 @@ pub(crate) struct ViewHandle {
 pub(crate) struct RowState {
     /// The item index the holder shows.
     pub(crate) index: usize,
+    /// The width the row was laid out for, in pixels.
+    pub(crate) width_px: i32,
+    /// The measured row height, in pixels.
+    pub(crate) height_px: i32,
     /// The row subtree of the last bind, with its own root identifier.
     pub(crate) tree: UiNode,
     /// The layout the cached tree was built with.

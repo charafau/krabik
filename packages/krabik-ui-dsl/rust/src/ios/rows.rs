@@ -241,6 +241,10 @@ impl RecyclerDataSource {
 pub(crate) struct IosRowState {
     pub(crate) list: NodeId,
     pub(crate) index: usize,
+    /// The width the row was laid out for.
+    pub(crate) width: f64,
+    /// The measured row height.
+    pub(crate) height: f32,
     pub(crate) tree: UiNode,
     pub(crate) layout: LayoutResult,
     pub(crate) views: HashMap<NodeId, ViewHandle>,
@@ -261,11 +265,16 @@ impl IosState {
         width: f32,
     ) -> Option<(UiNode, LayoutResult)> {
         let element = self.row_element(list, index)?;
-        let root = tree::row_root(list, index);
-        let (tree, layout) =
-            self.runtime
-                .layout_subtree(&element, root, Size::new(width.max(1.0), 100_000.0));
+        let tree = self
+            .runtime
+            .build_subtree(&element, tree::row_root(list, index));
+        let layout = self.layout_row(&tree, width);
         Some((tree, layout))
+    }
+
+    fn layout_row(&self, tree: &UiNode, width: f32) -> LayoutResult {
+        self.runtime
+            .layout_tree(tree, Size::new(width.max(1.0), 100_000.0))
     }
 
     /// The height a variable-height row needs at the given width.
@@ -273,10 +282,7 @@ impl IosState {
         let Some((_, layout)) = self.row_layout(list, index, width) else {
             return 0.0;
         };
-        layout
-            .frames
-            .get(&tree::row_root(list, index))
-            .map_or(0.0, |frame| frame.height.max(0.0))
+        root_height(&layout, list, index)
     }
 
     /// The collection view and data source of a recycled list.
@@ -305,36 +311,66 @@ impl IosState {
         };
         let width = collection.bounds().size.width;
         let paths = collection.indexPathsForVisibleItems();
+        let mut resized = false;
         for path in paths.iter() {
             let index = path.item().max(0) as usize;
             if let Some(cell) = collection.cellForItemAtIndexPath(&path) {
-                self.bind_row(id, index, &cell, width);
+                resized |= self.bind_row(id, index, &cell, width);
             }
         }
-        // Content changes can alter a row's measured height.
-        collection.collectionViewLayout().invalidateLayout();
+        // Only a row whose measured height changed needs the layout to ask
+        // for sizes again; that query lays every visible row out once more.
+        if resized {
+            collection.collectionViewLayout().invalidateLayout();
+        }
     }
 
     /// Builds or updates one recycled row inside a collection-view cell.
+    ///
+    /// Returns whether the row's height differs from what the cell showed.
     pub(crate) fn bind_row(
         &mut self,
         list: NodeId,
         index: usize,
         cell: &UICollectionViewCell,
         width: f64,
-    ) {
-        let Some((tree, layout)) = self.row_layout(list, index, width as f32) else {
-            return;
+    ) -> bool {
+        let Some(element) = self.row_element(list, index) else {
+            return false;
         };
+        let tree = self
+            .runtime
+            .build_subtree(&element, tree::row_root(list, index));
+        let key = cell as *const UICollectionViewCell as usize;
+
+        // A render rebinds every visible row. Most of them did not change:
+        // keep the widgets and frames, and only take over the new handlers.
+        if let Some(state) = self.row_states.get_mut(&key)
+            && state.list == list
+            && state.index == index
+            && state.width == width
+            && state.tree == tree
+        {
+            state.tree = tree;
+            self.clear_row_actions(list, index);
+            let actions = row_actions(&self.row_states[&key].tree);
+            self.store_row_actions(list, index, actions);
+            return false;
+        }
+
+        let layout = self.layout_row(&tree, width as f32);
+        let height = root_height(&layout, list, index);
         let transition_ms = self
             .runtime
             .row_source(list)
             .map_or(0, |props| props.row_transition_ms);
         let content = cell.contentView();
-        let key = cell as *const UICollectionViewCell as usize;
 
         let previous = self.row_states.remove(&key);
         let had_previous = previous.is_some();
+        let resized = previous.as_ref().is_some_and(|state| {
+            state.list == list && state.index == index && (state.height - height).abs() > 0.5
+        });
         let rebinding = previous
             .as_ref()
             .is_some_and(|state| state.list == list && state.index == index);
@@ -397,6 +433,8 @@ impl IosState {
             IosRowState {
                 list,
                 index,
+                width,
+                height,
                 tree,
                 layout,
                 views,
@@ -410,6 +448,7 @@ impl IosState {
         {
             self.try_focus_field(focus);
         }
+        resized
     }
 
     /// Releases the widgets and actions of the row a cell currently shows.
@@ -524,15 +563,30 @@ impl IosState {
     }
 
     pub(crate) fn record_row_actions(&mut self, list: NodeId, index: usize, tree: &UiNode) {
-        let mut ids = Vec::new();
-        for node in tree::preorder(tree) {
-            if let Some(actions) = Actions::of(node) {
-                self.row_actions.insert(node.id, actions);
-                ids.push(node.id);
-            }
-        }
+        self.store_row_actions(list, index, row_actions(tree));
+    }
+
+    fn store_row_actions(&mut self, list: NodeId, index: usize, actions: Vec<(NodeId, Actions)>) {
+        let ids = actions.iter().map(|(id, _)| *id).collect();
+        self.row_actions.extend(actions);
         self.row_action_ids.insert((list, index), ids);
     }
+}
+
+/// The handlers of every widget in a row.
+fn row_actions(tree: &UiNode) -> Vec<(NodeId, Actions)> {
+    tree::preorder(tree)
+        .into_iter()
+        .filter_map(|node| Actions::of(node).map(|actions| (node.id, actions)))
+        .collect()
+}
+
+/// The measured height of a laid-out row.
+fn root_height(layout: &LayoutResult, list: NodeId, index: usize) -> f32 {
+    layout
+        .frames
+        .get(&tree::row_root(list, index))
+        .map_or(0.0, |frame| frame.height.max(0.0))
 }
 
 /// Applies pending count, height and content changes to a recycled list.
