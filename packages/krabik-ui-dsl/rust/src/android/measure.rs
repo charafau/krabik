@@ -131,9 +131,9 @@ impl AndroidMeasure {
     pub(crate) fn measure_switch(&self) -> JniResult<Size> {
         self.vm.attach_current_thread(|env| {
             let ids = jni_handles(env)?;
-            let view = ids.plain_switch_ctor.construct(
+            let view = ids.switch.plain_ctor.construct(
                 env,
-                &ids.plain_switch,
+                &ids.switch.plain_class,
                 &[JValue::Object(self.context.as_obj())],
             )?;
             let width = measure_spec(env, 0, MEASURE_UNSPECIFIED)?;
@@ -155,10 +155,11 @@ impl AndroidMeasure {
             let ids = jni_handles(env)?;
             let source = jcall!(env, env.new_string(path))?;
             let packed = ids
-                .image_size
+                .image
+                .size
                 .call(
                     env,
-                    &ids.krabik_images,
+                    &ids.image.images_class,
                     &[
                         JValue::Object(self.context.as_obj()),
                         JValue::Object(source.as_ref()),

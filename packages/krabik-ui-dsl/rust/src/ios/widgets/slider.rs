@@ -1,6 +1,8 @@
 //! The `slider` widget on iOS.
 
 use crate::ios::events::dispatch_value;
+use crate::ios::widgets::{Content, RenderNode, Site};
+use crate::ios::{ViewHandle, cast_view};
 use crate::ios::{add_action, color, schedule};
 use crate::tree::NodeId;
 use crate::ui::{SliderProps, snap_slider_value};
@@ -40,4 +42,13 @@ pub(crate) fn wire_slider(
             schedule(move || dispatch_value(handle, host, id, f64::from(value)));
         },
     );
+}
+
+/// Creates the native view of a slider.
+pub(crate) fn create(props: &SliderProps, node: &RenderNode, site: &Site) -> ViewHandle {
+    let slider = UISlider::new(site.mtm);
+    update_slider(&slider, props);
+    wire_slider(&slider, site.handle, site.host, site.node, site.mtm);
+    let view = cast_view(slider.clone());
+    ViewHandle::new(view, Content::Slider(slider), node)
 }

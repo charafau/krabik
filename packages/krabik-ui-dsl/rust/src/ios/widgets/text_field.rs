@@ -1,14 +1,16 @@
 //! The `text_field` widget on iOS.
 
+use crate::ios::ViewHandle;
 use crate::ios::events::{dispatch_focus, dispatch_submitted, dispatch_text};
+use crate::ios::widgets::{Content, RenderNode, Site};
 use crate::ios::{add_action, color, schedule, system_font};
 use crate::tree::NodeId;
 use crate::ui::{ImeAction, KeyboardType, TextFieldProps};
 use objc2::MainThreadMarker;
 use objc2::runtime::{AnyObject, Sel};
 use objc2_foundation::NSString;
-use objc2_ui_kit::UITextInputTraits;
 use objc2_ui_kit::{UIControlEvents, UIKeyboardType, UIReturnKeyType, UITextField};
+use objc2_ui_kit::{UITextBorderStyle, UITextInputTraits, UIView};
 
 pub(crate) fn update_field(field: &UITextField, props: &TextFieldProps) {
     let current = field
@@ -135,4 +137,15 @@ pub(crate) fn wire_field(
         mtm,
         move |_| schedule(move || dispatch_focus(handle, host, id, false)),
     );
+}
+
+/// Creates the native view of a text field.
+pub(crate) fn create(props: &TextFieldProps, node: &RenderNode, site: &Site) -> ViewHandle {
+    let wrapper = UIView::new(site.mtm);
+    let field = UITextField::new(site.mtm);
+    field.setBorderStyle(UITextBorderStyle::None);
+    update_field(&field, props);
+    wire_field(&field, site.handle, site.host, site.node, site.mtm);
+    wrapper.addSubview(&field);
+    ViewHandle::new(wrapper, Content::Field(field), node)
 }

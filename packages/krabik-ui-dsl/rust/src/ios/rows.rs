@@ -2,21 +2,25 @@
 
 use crate::geometry::Size;
 use crate::host::Actions;
+use crate::ios::cast_view;
 use crate::ios::host::{Content, IosState, ViewHandle};
 use crate::ios::motion::{animation_is_enabled, run_animation};
+use crate::ios::widgets::Site;
 use crate::ios::{guard, remove_subviews, schedule, with_state};
 use crate::layout::LayoutResult;
+use crate::render::RenderNode;
 use crate::tree::{NodeId, RecyclerProps, UiNode};
 use crate::ui::{AnimationCurve, RawElement};
 use crate::{render, tree};
 use block2::RcBlock;
-use objc2::DefinedClass;
 use objc2::rc::Retained;
+use objc2::runtime::ProtocolObject;
 use objc2::runtime::{NSObject, NSObjectProtocol};
+use objc2::{ClassType, DefinedClass};
 use objc2::{MainThreadMarker, MainThreadOnly};
-use objc2_core_foundation::CGSize;
+use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSArray, NSIndexPath, NSString};
-use objc2_ui_kit::NSIndexPathUIKitAdditions;
+use objc2_ui_kit::{NSIndexPathUIKitAdditions, UICollectionViewFlowLayout, UIEdgeInsets};
 use objc2_ui_kit::{
     UICollectionView, UICollectionViewCell, UICollectionViewDataSource, UICollectionViewDelegate,
     UICollectionViewDelegateFlowLayout, UICollectionViewLayout, UIScrollViewDelegate, UIView,
@@ -659,4 +663,49 @@ pub(crate) fn focus_row_async(handle: u64, host: u64, field: NodeId) {
             }
         });
     });
+}
+
+/// Creates the native view of a recycled list.
+pub(crate) fn create_recycler(props: &RecyclerProps, node: &RenderNode, site: &Site) -> ViewHandle {
+    let layout = UICollectionViewFlowLayout::new(site.mtm);
+    layout.setMinimumLineSpacing(0.0);
+    layout.setMinimumInteritemSpacing(0.0);
+    layout.setSectionInset(UIEdgeInsets {
+        top: 0.0,
+        left: 0.0,
+        bottom: 0.0,
+        right: 0.0,
+    });
+    let collection = UICollectionView::initWithFrame_collectionViewLayout(
+        UICollectionView::alloc(site.mtm),
+        CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(0.0, 0.0)),
+        &layout,
+    );
+    collection.setShowsVerticalScrollIndicator(true);
+    collection.setAlwaysBounceVertical(true);
+    let identifier = NSString::from_str(ROW_CELL_ID);
+    // SAFETY: the cell class is a `UICollectionViewCell`, which is
+    // what the dequeue call below expects.
+    unsafe {
+        collection.registerClass_forCellWithReuseIdentifier(
+            Some(UICollectionViewCell::class()),
+            &identifier,
+        );
+    }
+    let data_source = RecyclerDataSource::new(site.handle, site.host, site.node, props, site.mtm);
+    collection.setDataSource(Some(ProtocolObject::from_ref(&*data_source)));
+    // SAFETY: the data source is kept alive by the view handle and
+    // only reads the collection view's size and index paths.
+    unsafe {
+        collection.setDelegate(Some(ProtocolObject::from_ref(&*data_source)));
+    }
+    let view = cast_view(collection.clone());
+    ViewHandle::new(
+        view,
+        Content::Recycler {
+            collection,
+            data_source,
+        },
+        node,
+    )
 }

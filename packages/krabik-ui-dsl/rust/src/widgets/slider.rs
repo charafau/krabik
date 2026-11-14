@@ -4,10 +4,13 @@ use std::marker::PhantomData;
 
 use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::engine::geometry::Size;
+use crate::engine::measure::Measure;
 use crate::message::Handler;
+use crate::message::Wrap;
 use crate::style::CONTROL_ACCENT;
 use crate::widgets::CONTROL_WIDTH;
 use crate::widgets::Widget;
+use crate::widgets::WidgetProps;
 
 /// Platform-independent properties of a slider.
 #[derive(Clone, Debug, PartialEq)]
@@ -124,9 +127,13 @@ style_builder!(Slider);
 /// The intrinsic height of a slider.
 const SLIDER_HEIGHT: f32 = 40.0;
 
-impl SliderProps {
+impl WidgetProps for SliderProps {
+    fn map_messages(&mut self, wrap: &Wrap) {
+        self.on_change.map(wrap);
+    }
+
     /// A slider fills the width it is given and has a fixed touch height.
-    pub(crate) fn intrinsic_size(&self, max_width: Option<f32>) -> Size {
+    fn intrinsic_size(&self, max_width: Option<f32>, _measurer: &dyn Measure) -> Size {
         Size::new(max_width.unwrap_or(CONTROL_WIDTH), SLIDER_HEIGHT)
     }
 }

@@ -1,10 +1,13 @@
 //! Loading bundled and remote images into image views.
 
 use crate::ios::host::{Content, IosState};
+use crate::ios::{ViewHandle, cast_view};
 use crate::ios::{guard, schedule, with_state};
+use crate::render::RenderNode;
 use crate::tree::NodeId;
 use crate::ui::{ImageProps, ImageScale, ImageSource};
 use block2::RcBlock;
+use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_foundation::{NSBundle, NSData, NSError, NSString, NSURL, NSURLResponse, NSURLSession};
 use objc2_ui_kit::{UIImage, UIImageView, UIViewContentMode};
@@ -142,4 +145,19 @@ pub(crate) fn finish_download(
             state.images.expected.retain(|_, expected| expected != &url);
         });
     });
+}
+
+impl IosState {
+    /// Creates the native view of an image and starts loading it.
+    pub(crate) fn create_image(
+        &mut self,
+        props: &ImageProps,
+        node: &RenderNode,
+        mtm: MainThreadMarker,
+    ) -> ViewHandle {
+        let image = UIImageView::new(mtm);
+        self.load_image(node.id, &image, props);
+        let view = cast_view(image.clone());
+        ViewHandle::new(view, Content::Image(image), node)
+    }
 }

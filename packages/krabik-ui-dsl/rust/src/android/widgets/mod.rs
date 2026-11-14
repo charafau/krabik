@@ -1,6 +1,6 @@
 //! Per-widget configuration. A new view and an updated view both go through [`configure_view`].
 
-use crate::android::handles::get as jni_handles;
+use crate::android::handles::Ctor;
 use crate::android::rows::update_recycler;
 use crate::android::style::{apply_accessibility, apply_padding, apply_style};
 use crate::android::widgets::check::update_check;
@@ -15,11 +15,12 @@ use crate::android::widgets::tab_bar::update_tab_bar;
 use crate::android::widgets::text::update_text;
 use crate::android::widgets::text_field::update_text_field;
 use crate::render::RenderNode;
-use crate::tree::NodeKind;
+use crate::tree::{NodeId, NodeKind};
 use crate::widgets::Widget;
 use jni::errors::Result as JniResult;
-use jni::objects::JObject;
-use jni::sys::jint;
+use jni::objects::{JClass, JObject};
+use jni::refs::Global;
+use jni::sys::jlong;
 use jni::{Env, JValue};
 
 pub(crate) mod button;
@@ -77,15 +78,75 @@ pub(crate) fn configure_view(
         NodeKind::Widget(Widget::DatePicker(props)) => update_date_picker(env, view, props),
         NodeKind::Widget(Widget::Slider(props)) => update_slider(env, view, props),
         NodeKind::Widget(Widget::Progress(props)) => update_progress(env, view, props),
-        NodeKind::Widget(Widget::Spinner(props)) => {
-            let ids = jni_handles(env)?;
-            ids.update_spinner.call_void(
-                env,
-                &ids.krabik_views,
-                &[JValue::Object(view), JValue::Int(props.color as jint)],
-            )
-        }
+        NodeKind::Widget(Widget::Spinner(props)) => progress::update_spinner(env, view, props),
         NodeKind::Widget(Widget::Image(props)) => update_image(env, view, props),
         NodeKind::Recycler(props) => update_recycler(env, view, props, density),
+    }
+}
+
+/// Where a new native view is being created.
+pub(crate) struct Site<'a> {
+    /// The Android context views are constructed with.
+    pub(crate) context: &'a JObject<'a>,
+    /// The root view, which framework widgets report their events to.
+    pub(crate) root: &'a JObject<'a>,
+    /// The node the view is created for.
+    pub(crate) node: NodeId,
+}
+
+impl Site<'_> {
+    /// Constructs a stock Android view: `View(Context)`.
+    pub(crate) fn stock<'local>(
+        &self,
+        env: &mut Env<'local>,
+        class: &Global<JClass<'static>>,
+        ctor: &Ctor,
+    ) -> JniResult<JObject<'local>> {
+        ctor.construct(env, class, &[JValue::Object(self.context)])
+    }
+
+    /// Constructs a framework widget: `Widget(Context, RustRootView, nodeId)`.
+    ///
+    /// The widget keeps the root view and its node id, and reports its own
+    /// events through them.
+    pub(crate) fn framework<'local>(
+        &self,
+        env: &mut Env<'local>,
+        class: &Global<JClass<'static>>,
+        ctor: &Ctor,
+    ) -> JniResult<JObject<'local>> {
+        ctor.construct(
+            env,
+            class,
+            &[
+                JValue::Object(self.context),
+                JValue::Object(self.root),
+                JValue::Long(self.node.0 as jlong),
+            ],
+        )
+    }
+}
+
+/// Creates the native view of a widget. The view is configured afterwards by
+/// [`configure_view`], the same call an update makes.
+pub(crate) fn create_widget<'local>(
+    env: &mut Env<'local>,
+    site: &Site<'_>,
+    widget: &Widget,
+) -> JniResult<JObject<'local>> {
+    match widget {
+        Widget::Text(_) => text::create(env, site),
+        Widget::Button(_) => button::create(env, site),
+        Widget::TextField(_) => text_field::create(env, site),
+        Widget::Switch(_) => switch::create(env, site),
+        Widget::Checkbox(_) => check::create(env, site, false),
+        Widget::RadioButton(_) => check::create(env, site, true),
+        Widget::RadioGroup(_) => radio_group::create(env, site),
+        Widget::TabBar(_) => tab_bar::create(env, site),
+        Widget::DatePicker(_) => date_picker::create(env, site),
+        Widget::Slider(_) => slider::create(env, site),
+        Widget::Progress(_) => progress::create(env, site),
+        Widget::Spinner(_) => progress::create_spinner(env, site),
+        Widget::Image(_) => image::create(env, site),
     }
 }

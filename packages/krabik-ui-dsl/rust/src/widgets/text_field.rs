@@ -6,9 +6,12 @@ use crate::element::{Element, ElementKind, RawElement, style_builder, text_build
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
+use crate::message::Wrap;
 use crate::style::FontWeight;
 use crate::widgets::TextProps;
+use crate::widgets::TextStyleMut;
 use crate::widgets::Widget;
+use crate::widgets::WidgetProps;
 
 /// Which on-screen keyboard an input requests.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -195,10 +198,24 @@ impl<M> From<TextField<M>> for Element<M> {
 style_builder!(TextField);
 text_builder!(TextField);
 
-impl TextFieldProps {
+impl WidgetProps for TextFieldProps {
+    fn map_messages(&mut self, wrap: &Wrap) {
+        self.on_change.map(wrap);
+        self.on_submit.map(wrap);
+        self.on_focus.map(wrap);
+    }
+
+    fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
+        Some(TextStyleMut {
+            size: &mut self.size,
+            color: &mut self.color,
+            weight: &mut self.weight,
+        })
+    }
+
     /// The size of the typed text. An empty input is measured from its hint,
     /// so the field keeps a stable size before the user types.
-    pub(crate) fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
+    fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
         let content = if self.value.is_empty() {
             &self.placeholder
         } else {

@@ -1,6 +1,7 @@
 //! The `text` widget on Android.
 
 use crate::android::handles::get as jni_handles;
+use crate::android::widgets::Site;
 use crate::android::{COMPLEX_UNIT_SP, GRAVITY_CENTER_HORIZONTAL, GRAVITY_END, GRAVITY_START};
 use crate::tree::NodeKind;
 use crate::ui::{FontWeight, TextAlign};
@@ -106,4 +107,10 @@ pub(crate) fn text_properties(kind: &NodeKind) -> Option<(&str, f32, u32, FontWe
         }
         _ => None,
     }
+}
+
+/// Creates the native view of a text.
+pub(crate) fn create<'local>(env: &mut Env<'local>, site: &Site<'_>) -> JniResult<JObject<'local>> {
+    let ids = jni_handles(env)?;
+    site.stock(env, &ids.text_view, &ids.text_view_ctor)
 }

@@ -4,9 +4,12 @@ use std::marker::PhantomData;
 
 use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::engine::geometry::Size;
+use crate::engine::measure::Measure;
+use crate::message::Wrap;
 use crate::style::CONTROL_ACCENT;
 use crate::widgets::CONTROL_WIDTH;
 use crate::widgets::Widget;
+use crate::widgets::WidgetProps;
 
 /// Platform-independent properties of a progress indicator.
 #[derive(Clone, Debug, PartialEq)]
@@ -95,16 +98,20 @@ const PROGRESS_HEIGHT: f32 = 6.0;
 /// The side of an indeterminate spinner in logical points.
 const SPINNER_SIZE: f32 = 24.0;
 
-impl ProgressProps {
+impl WidgetProps for ProgressProps {
+    fn map_messages(&mut self, _wrap: &Wrap) {}
+
     /// A progress bar fills the width it is given.
-    pub(crate) fn intrinsic_size(&self, max_width: Option<f32>) -> Size {
+    fn intrinsic_size(&self, max_width: Option<f32>, _measurer: &dyn Measure) -> Size {
         Size::new(max_width.unwrap_or(CONTROL_WIDTH), PROGRESS_HEIGHT)
     }
 }
 
-impl SpinnerProps {
+impl WidgetProps for SpinnerProps {
+    fn map_messages(&mut self, _wrap: &Wrap) {}
+
     /// A spinner is a fixed square.
-    pub(crate) fn intrinsic_size(&self) -> Size {
+    fn intrinsic_size(&self, _max_width: Option<f32>, _measurer: &dyn Measure) -> Size {
         Size::new(SPINNER_SIZE, SPINNER_SIZE)
     }
 }

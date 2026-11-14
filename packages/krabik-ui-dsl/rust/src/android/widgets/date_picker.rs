@@ -1,11 +1,16 @@
 //! The `date_picker` widget on Android.
 
-use crate::android::handles::get as jni_handles;
+use crate::android::DATE_PICKER_CLASS;
+use crate::android::handles::{Method, VOID, class, get as jni_handles, method, widget_ctor};
+use crate::android::widgets::{Ctor, Site};
 use crate::ui::{DatePickerMode, DatePickerProps, DatePickerValue, FontWeight};
 use jni::errors::Result as JniResult;
-use jni::objects::JObject;
+use jni::objects::{JClass, JObject};
+use jni::refs::Global;
+use jni::signature::RuntimeMethodSignature;
 use jni::sys::jint;
 use jni::{Env, JValue};
+use jni::{jni_sig, jni_str};
 
 pub(crate) fn update_date_picker(
     env: &mut Env<'_>,
@@ -25,7 +30,7 @@ pub(crate) fn update_date_picker(
             time.minute as jint,
         ),
     };
-    ids.configure_date_picker.call_void(
+    ids.date_picker.configure.call_void(
         env,
         view,
         &[
@@ -45,7 +50,7 @@ pub(crate) fn update_date_picker(
         ),
         None => ([0; 3], [0; 3]),
     };
-    ids.date_picker_set_date_range.call_void(
+    ids.date_picker.set_date_range.call_void(
         env,
         view,
         &[
@@ -64,7 +69,7 @@ pub(crate) fn update_date_picker(
         ),
         None => ([-1; 2], [-1; 2]),
     };
-    ids.date_picker_set_time_range.call_void(
+    ids.date_picker.set_time_range.call_void(
         env,
         view,
         &[
@@ -74,7 +79,7 @@ pub(crate) fn update_date_picker(
             JValue::Int(max_time[1]),
         ],
     )?;
-    ids.date_picker_set_style.call_void(
+    ids.date_picker.set_style.call_void(
         env,
         view,
         &[
@@ -83,4 +88,37 @@ pub(crate) fn update_date_picker(
             JValue::Bool(matches!(props.weight, FontWeight::Bold)),
         ],
     )
+}
+
+/// Creates the native view of a date picker.
+pub(crate) fn create<'local>(env: &mut Env<'local>, site: &Site<'_>) -> JniResult<JObject<'local>> {
+    let ids = &jni_handles(env)?.date_picker;
+    site.framework(env, &ids.class, &ids.ctor)
+}
+
+/// The JNI handles this module uses, resolved once; see [`crate::android::handles`].
+pub(crate) struct Handles {
+    pub(crate) class: Global<JClass<'static>>,
+    pub(crate) ctor: Ctor,
+    pub(crate) configure: Method,
+    pub(crate) set_date_range: Method,
+    pub(crate) set_time_range: Method,
+    pub(crate) set_style: Method,
+}
+
+impl Handles {
+    pub(crate) fn load(
+        env: &mut Env<'_>,
+        widget_signature: &RuntimeMethodSignature,
+    ) -> JniResult<Self> {
+        let date_picker = class(env, DATE_PICKER_CLASS)?;
+        Ok(Self {
+            ctor: widget_ctor(env, &date_picker, widget_signature)?,
+            configure: method!(env, &date_picker, "configure", "(IIIIIIZ)V", VOID),
+            set_date_range: method!(env, &date_picker, "setDateRange", "(IIIIII)V", VOID),
+            set_time_range: method!(env, &date_picker, "setTimeRange", "(IIII)V", VOID),
+            set_style: method!(env, &date_picker, "setStyle", "(FIZ)V", VOID),
+            class: date_picker,
+        })
+    }
 }

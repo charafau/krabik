@@ -2,13 +2,17 @@
 
 use crate::ios::events::dispatch_selected;
 use crate::ios::widgets::check::update_check;
+use crate::ios::widgets::{Content, RenderNode, Site};
+use crate::ios::{ViewHandle, cast_view};
 use crate::ios::{add_action, schedule};
 use crate::tree::NodeId;
 use crate::ui::{CheckProps, RadioGroupProps};
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_foundation::NSString;
-use objc2_ui_kit::NSObjectUIAccessibility;
+use objc2_ui_kit::{
+    NSObjectUIAccessibility, UILayoutConstraintAxis, UIStackViewAlignment, UIStackViewDistribution,
+};
 use objc2_ui_kit::{UIButton, UIButtonType, UIControlEvents, UIStackView};
 
 #[allow(clippy::too_many_arguments)]
@@ -73,4 +77,34 @@ pub(crate) fn wire_radio_group_item(
         mtm,
         move |_| schedule(move || dispatch_selected(handle, host, id, index)),
     );
+}
+
+/// Creates the native view of a radio group.
+pub(crate) fn create(props: &RadioGroupProps, node: &RenderNode, site: &Site) -> ViewHandle {
+    let stack = UIStackView::new(site.mtm);
+    stack.setAxis(UILayoutConstraintAxis::Vertical);
+    stack.setAlignment(UIStackViewAlignment::Fill);
+    stack.setDistribution(UIStackViewDistribution::FillEqually);
+    let mut buttons = Vec::new();
+    let mut labels = Vec::new();
+    update_radio_group(
+        &stack,
+        &mut buttons,
+        &mut labels,
+        props,
+        site.handle,
+        site.host,
+        site.node,
+        site.mtm,
+    );
+    let view = cast_view(stack.clone());
+    ViewHandle::new(
+        view,
+        Content::RadioGroup {
+            stack,
+            buttons,
+            labels,
+        },
+        node,
+    )
 }

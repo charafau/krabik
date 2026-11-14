@@ -6,9 +6,12 @@ use crate::element::{Element, ElementKind, RawElement, style_builder, text_build
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
+use crate::message::Wrap;
 use crate::style::FontWeight;
 use crate::widgets::TextProps;
+use crate::widgets::TextStyleMut;
 use crate::widgets::Widget;
+use crate::widgets::WidgetProps;
 
 /// Platform-independent properties of a checkbox or radio button.
 #[derive(Clone, Debug, PartialEq)]
@@ -140,9 +143,21 @@ pub(crate) const CHECK_GAP: f32 = 28.0;
 /// The minimum touch height of a checkbox or radio button.
 pub(crate) const CHECK_HEIGHT: f32 = 48.0;
 
-impl CheckProps {
+impl WidgetProps for CheckProps {
+    fn map_messages(&mut self, wrap: &Wrap) {
+        self.on_toggle.map(wrap);
+    }
+
+    fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
+        Some(TextStyleMut {
+            size: &mut self.size,
+            color: &mut self.color,
+            weight: &mut self.weight,
+        })
+    }
+
     /// The indicator, the gap and the label, at least one touch target tall.
-    pub(crate) fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
+    fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
         let inner_width = max_width.map(|width| (width - CHECK_INDICATOR - CHECK_GAP).max(0.0));
         let label = TextProps {
             content: self.label.clone(),

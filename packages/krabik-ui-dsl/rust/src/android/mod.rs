@@ -96,6 +96,7 @@ pub(crate) const PROGRESS_BAR_CLASS: &JNIStr = jni_str!("android/widget/Progress
 pub(crate) const KRABIK_IMAGES_CLASS: &JNIStr = framework_class!("KrabikImages");
 pub(crate) const KRABIK_ROWS_CLASS: &JNIStr = framework_class!("KrabikRows");
 pub(crate) const KRABIK_VIEWS_CLASS: &JNIStr = framework_class!("KrabikViews");
+pub(crate) const HOST_CONTROLLER_CLASS: &JNIStr = framework_class!("KrabikHostController");
 pub(crate) const KRABIK_RECYCLERS_CLASS: &JNIStr = framework_class!("KrabikRecyclers");
 
 pub(crate) const MEASURE_UNSPECIFIED: jint = 0;
