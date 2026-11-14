@@ -14,6 +14,7 @@
 extern crate self as krabik_ui_dsl;
 
 pub mod app;
+pub mod command;
 pub(crate) mod element;
 pub mod engine;
 // Only the platform renderers drive a session; it stays compiled everywhere
@@ -79,4 +80,6 @@ mod documentation {
     pub struct Tutorial07ColoursAndDarkMode;
     #[doc = include_str!("../../docs/tutorial/08-the-view-macro.md")]
     pub struct Tutorial08TheViewMacro;
+    #[doc = include_str!("../../docs/tutorial/11-background-work-and-timers.md")]
+    pub struct Tutorial11BackgroundWorkAndTimers;
 }

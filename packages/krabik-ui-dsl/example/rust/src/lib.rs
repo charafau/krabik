@@ -10,14 +10,19 @@
 //! `../ios` links it and the Android shell in `../android` loads its cdylib.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
+use krabik_ui_dsl::command::{Command, Subscription};
 use krabik_ui_dsl::navigation::{Navigation, Route, ScreenTransition};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::scaffold::{AppBar, Scaffold};
 use krabik_ui_dsl::ui::{DatePickerValue, DateValue, Element, Icon, TimeValue};
+
+/// How long the Async page's pretend request takes.
+const LOAD_TIME: Duration = Duration::from_millis(2500);
 
 mod checklist;
 mod pages;
@@ -39,6 +44,14 @@ pub enum Msg {
     Drawer(bool),
     /// A drawer section was picked.
     DrawerGo(usize),
+    /// The Async page asked for its items; they arrive later as `Loaded`.
+    Load,
+    /// The background work finished with this many items.
+    Loaded(u32),
+    /// The clock on the Async page was switched on or off.
+    Clock(bool),
+    /// One second passed while the clock was on.
+    Tick,
     /// The system or toolbar back action.
     Back,
     /// Something happened on the checklist screen, a component of its own.
@@ -125,6 +138,12 @@ pub struct ShowcaseApp {
     /// The Scaffold page: items added with the floating action button.
     scaffold_items: u32,
     scaffold_snackbar: bool,
+    /// The Async page: whether a load is running, what the last one
+    /// returned, and the clock.
+    loading: bool,
+    loaded: Option<u32>,
+    clock_on: bool,
+    ticks: u32,
     drawer_open: bool,
     drawer_section: usize,
 }
@@ -178,6 +197,10 @@ impl ShowcaseApp {
             sheet_open: false,
             scaffold_items: 0,
             scaffold_snackbar: false,
+            loading: false,
+            loaded: None,
+            clock_on: false,
+            ticks: 0,
             drawer_open: false,
             drawer_section: 0,
         }
@@ -206,7 +229,7 @@ impl Component for ShowcaseApp {
         pages::home()
     }
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             Msg::Open("home") => self.stack.truncate(1),
             Msg::Open(key) => {
@@ -225,7 +248,29 @@ impl Component for ShowcaseApp {
                     self.stack.pop();
                 }
             }
-            Msg::Checklist(msg) => self.checklist.update(msg),
+            // A child component's commands are lifted like its messages.
+            Msg::Checklist(msg) => return self.checklist.update(msg).map(Msg::Checklist),
+
+            // Slow work never runs here: `update` is on the UI thread. It is
+            // described as a command, runs on another thread, and its result
+            // comes back as `Loaded`.
+            Msg::Load => {
+                if self.loading {
+                    return Command::none();
+                }
+                self.loading = true;
+                let round = self.loaded.map_or(1, |_| 2);
+                return Command::perform(move || {
+                    std::thread::sleep(LOAD_TIME);
+                    Msg::Loaded(3 * round)
+                });
+            }
+            Msg::Loaded(items) => {
+                self.loading = false;
+                self.loaded = Some(items);
+            }
+            Msg::Clock(on) => self.clock_on = on,
+            Msg::Tick => self.ticks += 1,
 
             Msg::Name(name) => {
                 self.name = name;
@@ -286,10 +331,24 @@ impl Component for ShowcaseApp {
             Msg::Volume(value) => self.volume = value,
             Msg::Stepped(value) => self.stepped = value,
         }
+        Command::none()
     }
 }
 
 impl App for ShowcaseApp {
+    /// The clock ticks only while it is switched on. The runtime starts and
+    /// stops the timer by comparing this list after every message, and
+    /// pauses it while the app is in the background.
+    fn subscriptions(&self) -> Vec<Subscription<Msg>> {
+        if self.clock_on {
+            vec![Subscription::every("clock", Duration::from_secs(1), || {
+                Msg::Tick
+            })]
+        } else {
+            Vec::new()
+        }
+    }
+
     fn navigation(&self) -> Option<Navigation<Self::Msg>> {
         let routes = self.stack.iter().map(|key| {
             Route::new(*key).transition(match *key {

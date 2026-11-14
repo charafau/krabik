@@ -319,6 +319,7 @@ written with the macro. Everything else is as in chapters 6 and 7. This is the c
 use std::sync::Arc;
 
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
+use krabik_ui_dsl::command::Command;
 use krabik_ui_dsl::navigation::{Navigation, Route, ScreenTransition};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::scaffold::{AppBar, Drawer, DrawerItem, Fab, Scaffold, Snackbar};
@@ -389,13 +390,14 @@ impl Composer {
 impl Component for Composer {
     type Msg = ComposerMsg;
 
-    fn update(&mut self, msg: ComposerMsg) {
+    fn update(&mut self, msg: ComposerMsg) -> Command<ComposerMsg> {
         match msg {
             ComposerMsg::Draft(text) => self.draft = text,
             // What a submitted draft becomes is the parent's decision;
             // see `NotesApp::update`.
             ComposerMsg::Submit => {}
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<ComposerMsg> {
@@ -585,7 +587,7 @@ impl NotesApp {
 impl Component for NotesApp {
     type Msg = Msg;
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             // The composer says when; the app decides what a note is.
             Msg::Composer(ComposerMsg::Submit) => {
@@ -595,7 +597,7 @@ impl Component for NotesApp {
                     Arc::make_mut(&mut self.notes).push(Note { id, text });
                 }
             }
-            Msg::Composer(msg) => self.composer.update(msg),
+            Msg::Composer(msg) => return self.composer.update(msg).map(Msg::Composer),
             Msg::Open(id) => {
                 if self.note(id).is_some() {
                     self.open = Some(id);
@@ -634,6 +636,7 @@ impl Component for NotesApp {
                 self.drawer_open = false;
             }
         }
+        Command::none()
     }
 
     /// Not shown: with navigation, the first screen is the root.

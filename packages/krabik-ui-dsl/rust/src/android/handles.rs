@@ -226,7 +226,9 @@ pub(crate) struct Jni {
     pub(crate) krabik_style: Global<JClass<'static>>,
     pub(crate) krabik_views: Global<JClass<'static>>,
     /// Only keeps `RustRootView` loaded for the cached `applyFrame` ID.
-    pub(crate) _rust_root_view: Global<JClass<'static>>,
+    pub(crate) rust_root_view: Global<JClass<'static>>,
+    /// `RustRootView.postWake`: asks the main thread to drain the mailbox.
+    pub(crate) post_wake: StaticMethod,
 
     // `android.view.View`, shared by every widget.
     pub(crate) set_padding: Method,
@@ -578,7 +580,8 @@ impl Jni {
 
             krabik_views,
 
-            _rust_root_view: rust_root_view,
+            post_wake: static_method!(env, &rust_root_view, "postWake", "(J)V", VOID),
+            rust_root_view,
         })
     }
 }

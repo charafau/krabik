@@ -5,7 +5,7 @@ use crate::host::ChromeEvent;
 use crate::host::HostKind;
 use crate::ios::controller::{IosController, IosSession};
 use crate::ios::host::IosState;
-use crate::ios::{guard, infallible, with_session};
+use crate::ios::{guard, infallible, schedule, with_session};
 use crate::style::ColorScheme;
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -48,6 +48,9 @@ pub unsafe extern "C" fn krabik_ios_create(
     main.viewport = Size::new(width.max(0.0) as f32, height.max(0.0) as f32);
     let mut session = IosSession::new(crate::app::create_app(), main);
     session.set_color_scheme(scheme(dark));
+    // Background work finishes on its own thread; the result is collected
+    // on the main queue.
+    session.set_waker(std::sync::Arc::new(move || schedule(move || drain(handle))));
     let mut cx = mtm;
     guard("create", || infallible(session.render_all(&mut cx)));
     states().lock().expect("ios states").insert(handle, session);
@@ -98,6 +101,28 @@ pub unsafe extern "C" fn krabik_ios_render(handle: u64, host: u64, width: f64, h
             }
             infallible(session.render_all(&mut mtm));
         });
+    });
+}
+
+/// Applies the messages background work has delivered.
+fn drain(handle: u64) {
+    // SAFETY: only ever scheduled on the main queue.
+    let mut mtm = unsafe { MainThreadMarker::new_unchecked() };
+    guard("wake", || {
+        with_session(handle, |session| infallible(session.drain(&mut mtm)));
+    });
+}
+
+/// The app came to the foreground or left it. Subscriptions only run in the
+/// foreground.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_set_active(handle: u64, active: bool) {
+    guard("set active", || {
+        with_session(handle, |session| session.set_active(active));
     });
 }
 

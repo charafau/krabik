@@ -81,6 +81,7 @@ pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
         "transition-none" => "transition-none",
         "bottom-sheet" => "bottom-sheet",
         "scaffold" => "scaffold",
+        "async" => "async",
         "pager" => "pager",
         "tabs-view" => "tabs-view",
         "bottom-navigation" => "bottom-navigation",
@@ -122,6 +123,7 @@ pub(crate) fn title(key: &str) -> &'static str {
         "transition-none" => "Instant",
         "bottom-sheet" => "Bottom sheet",
         "scaffold" => "Scaffold",
+        "async" => "Async",
         "pager" => "View pager",
         "tabs-view" => "Tabs view",
         "bottom-navigation" => "Bottom navigation",
@@ -163,6 +165,7 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element<Msg>> {
         "transition-none" => transition_demo_page("transition-none"),
         "bottom-sheet" => bottom_sheet_page(),
         "scaffold" => scaffold_page(app),
+        "async" => async_page(app),
         "pager" => pager_page(app),
         "tabs-view" => tabs_view_page(app),
         "bottom-navigation" => bottom_navigation_page(app),
@@ -259,6 +262,7 @@ pub(crate) fn home() -> Element<Msg> {
                 ("Dialog", "dialog:open"),
                 ("Bottom sheet", "page:bottom-sheet"),
                 ("Scaffold", "page:scaffold"),
+                ("Async", "page:async"),
             ],
         ),
     ];
@@ -818,6 +822,56 @@ fn bottom_sheet_page() -> Element<Msg> {
 
 /// The sections the Scaffold page's drawer switches between.
 pub(crate) const DRAWER_SECTIONS: [&str; 3] = ["Inbox", "Archive", "Settings"];
+
+/// Work that does not block the UI: a slow request and a clock.
+fn async_page(app: &ShowcaseApp) -> Element<Msg> {
+    let status = match (app.loading, app.loaded) {
+        (true, _) => "Loading…".to_string(),
+        (false, Some(items)) => format!("Loaded {items} items"),
+        (false, None) => "Nothing loaded yet".to_string(),
+    };
+    let mut status_row = Row::new()
+        .spacing(12)
+        .align_items(Align::Center)
+        .child(Text::new(status).size(16).color(COLOR_TEXT));
+    if app.loading {
+        status_row = status_row.child(
+            ProgressIndicator::indeterminate()
+                .color(COLOR_ACCENT)
+                .accessibility_label("Loading spinner")
+                .width(20)
+                .height(20),
+        );
+    }
+    page(
+        "Async",
+        "update returns a command for slow work; the result arrives as a message.",
+        body![
+            Button::new("Load")
+                .on_click(Msg::Load)
+                .enabled(!app.loading),
+            status_row,
+            // The screen stays live while the request runs.
+            Text::new(format!("Taps: {}", app.taps))
+                .size(16)
+                .color(COLOR_TEXT),
+            Button::new("Tap").on_click(Msg::Tap),
+            Row::new()
+                .width_percent(1.0)
+                .align_items(Align::Center)
+                .child(Text::new("Clock").size(18).color(COLOR_TEXT))
+                .child(Spacer::new())
+                .child(
+                    Switch::new(app.clock_on)
+                        .on_toggle(Msg::Clock)
+                        .accessibility_label("Clock"),
+                ),
+            Text::new(format!("Ticks: {}", app.ticks))
+                .size(16)
+                .color(COLOR_TEXT),
+        ],
+    )
+}
 
 fn scaffold_page(app: &ShowcaseApp) -> Element<Msg> {
     page(

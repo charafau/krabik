@@ -95,7 +95,7 @@ pub trait Component {
     type Msg: 'static;
 
     /// Applies a message to the state. The UI is rebuilt afterwards.
-    fn update(&mut self, msg: Self::Msg);
+    fn update(&mut self, msg: Self::Msg) -> Command<Self::Msg>;
 
     /// Describes the UI for the current state.
     fn view(&self) -> Element<Self::Msg>;
@@ -105,13 +105,18 @@ pub trait Component {
 (from `rust/src/app.rs`)
 
 Note the signatures. `view` takes `&self`: it cannot change anything, it can only describe.
-`update` takes `&mut self` and returns nothing: it can only change state, it cannot touch the
-screen. The framework connects the two.
+`update` takes `&mut self`: it can only change state, it cannot touch the screen. The framework
+connects the two.
+
+`update` returns a `Command`, which describes work to do off the UI thread, such as a network
+request. Nothing in the first ten chapters needs one, so every `update` you will see ends with
+`Command::none()`. Chapter 11 explains what else it can return.
 
 Here is the counter. Put it in `notes/rust/src/lib.rs`:
 
 ```rust
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
+use krabik_ui_dsl::command::Command;
 use krabik_ui_dsl::ui::{Button, Column, Element, Text};
 
 /// Everything the user can do in the app.
@@ -140,11 +145,12 @@ impl Counter {
 impl Component for Counter {
     type Msg = Msg;
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             Msg::Increment => self.count += 1,
             Msg::Reset => self.count = 0,
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<Msg> {
@@ -282,7 +288,7 @@ Steps 4 to 6 are three lines in the shared session code:
 ```rust,ignore
 /// Applies a message to the application and shows the result.
 fn update(&mut self, cx: &mut P::Cx<'_>, message: Message) -> Result<(), P::Error> {
-    self.app.update(message);
+    self.apply(message);
     self.render_all(cx)
 }
 ```
@@ -360,6 +366,7 @@ desktop only the platform-independent parts are built, and that is all a test ne
 
 ```rust
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
+use krabik_ui_dsl::command::Command;
 use krabik_ui_dsl::ui::{Button, Column, Element, Text};
 
 /// Everything the user can do in the app.
@@ -388,11 +395,12 @@ impl Counter {
 impl Component for Counter {
     type Msg = Msg;
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             Msg::Increment => self.count += 1,
             Msg::Reset => self.count = 0,
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<Msg> {

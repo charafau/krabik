@@ -504,6 +504,20 @@ siblings with the same key would hash to the same node identifier.
 - **Tests and builds.** A rotation test, appearance tests on both platforms, shared Android test
   helpers, iOS device builds, and CI jobs for the UI suites.
 
+### 8. State, navigation and background work ✅
+
+- **Controls follow state.** A control the user changed is updated from the state after its
+  event even when the description is unchanged, also inside recycled rows and for the bottom
+  navigation bar. Rows of a recycled list no longer share ids.
+- **Navigation.** `Navigation::on_back` names the back message; the iOS swipe-back gesture
+  works; `App::scaffold` gives a single-screen app native chrome; a repeated route key is
+  refused.
+- **Background work.** `update` returns a `Command` that runs off the UI thread and reports
+  back as a message; `App::subscriptions` declares timers, which pause in the background. Work
+  started before an Android activity is recreated delivers to the activity that replaces it.
+- **Logging.** Problems the framework can continue from go to logcat on Android
+  (`adb logcat -s krabik`).
+
 ---
 
 ## Remaining ❌

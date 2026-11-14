@@ -405,6 +405,7 @@ nothing.
 use std::sync::Arc;
 
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
+use krabik_ui_dsl::command::Command;
 use krabik_ui_dsl::ui::{
     Align, Button, Color, Column, EdgeInsets, Element, List, Row, Text, TextField,
 };
@@ -485,12 +486,13 @@ impl NotesApp {
 impl Component for NotesApp {
     type Msg = Msg;
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             Msg::Draft(text) => self.draft = text,
             Msg::Add => self.add(),
             Msg::Delete(id) => Arc::make_mut(&mut self.notes).retain(|note| note.id != id),
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<Msg> {

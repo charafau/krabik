@@ -1,5 +1,7 @@
 package dev.krabik.ui
 
+import android.os.Handler
+import android.os.Looper
 import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.Configuration
@@ -340,6 +342,31 @@ class RustRootView(
         /** Drops an application that was retained but never picked up again. */
         @JvmStatic
         external fun nativeDropRetainedApp(id: Long)
+
+        private val mainHandler = Handler(Looper.getMainLooper())
+
+        /**
+         * Called by Rust, from any thread, when background work has left a
+         * message for the application. The session is only touched on the
+         * main thread, so the collection is posted there.
+         */
+        @JvmStatic
+        fun postWake(handle: Long) {
+            mainHandler.post { nativeOnWake(handle) }
+        }
+
+        @JvmStatic
+        private external fun nativeOnWake(handle: Long)
+    }
+
+    /**
+     * Tells Rust whether the activity is in the foreground. Subscriptions
+     * such as timers only run while it is.
+     */
+    fun setActive(active: Boolean) {
+        if (handle != 0L && ownsSession) {
+            nativeSetActive(handle, active)
+        }
     }
 
     /** Forwards an edit of a native input back to Rust. */
@@ -581,6 +608,8 @@ class RustRootView(
     private external fun nativeOnScroll(handle: Long, host: Long, nodeId: Long, offset: Float)
 
     private external fun nativeOnBack(handle: Long): Boolean
+
+    private external fun nativeSetActive(handle: Long, active: Boolean)
 
     private external fun nativeSetController(handle: Long, controller: Any)
 

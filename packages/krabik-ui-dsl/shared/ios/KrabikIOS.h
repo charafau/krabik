@@ -51,6 +51,9 @@ double krabik_ios_content_height(uint64_t handle, uint64_t host);
 /// Dispatches a native back action. Returns whether the application handled it.
 bool krabik_ios_on_back(uint64_t handle);
 
+/// Tells Rust whether the app is in the foreground; timers only run while it is.
+void krabik_ios_set_active(uint64_t handle, bool active);
+
 /// The user completed the swipe-back gesture: the top screen is already gone.
 void krabik_ios_on_native_pop(uint64_t handle);
 

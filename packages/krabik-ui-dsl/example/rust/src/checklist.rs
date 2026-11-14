@@ -4,6 +4,7 @@
 //! switches, a notes input, dynamic rows and per-note delete actions.
 
 use krabik_ui_dsl::app::Component;
+use krabik_ui_dsl::command::Command;
 use krabik_ui_dsl::ui::{
     Align, Button, Column, EdgeInsets, Element, Row, ScrollView, Spacer, Switch, Text, TextField,
 };
@@ -207,7 +208,7 @@ impl Component for Checklist {
             .into()
     }
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             Msg::Draft(text) => self.draft = text,
             Msg::AddNote => {
@@ -226,5 +227,6 @@ impl Component for Checklist {
             }
             Msg::HideDone(hide) => self.hide_done = hide,
         }
+        Command::none()
     }
 }

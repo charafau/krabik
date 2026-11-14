@@ -7,6 +7,7 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.widget.ProgressBar
+import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.GeneralLocation
@@ -20,6 +21,7 @@ import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.isEnabled
+import androidx.test.espresso.matcher.ViewMatchers.isNotChecked
 import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.espresso.matcher.ViewMatchers.isSelected
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
@@ -230,6 +232,96 @@ class ShowcaseTest {
             tapBack()
             onView(withText("Krabik UI DSL")).check(matches(isDisplayed()))
         }
+    }
+
+    /**
+     * Slow work runs off the main thread: the screen stays usable while it
+     * runs, and the result arrives as a message.
+     */
+    @Test
+    fun backgroundWorkReportsBackWithoutBlockingTheScreen() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openPage("Async")
+            onView(withText("Nothing loaded yet")).check(matches(isDisplayed()))
+
+            onView(withText("Load")).perform(click())
+            onView(withText("Loading…")).check(matches(isDisplayed()))
+            // The request takes a couple of seconds; taps are handled meanwhile.
+            onView(withText("Tap")).perform(click())
+            onView(withText("Taps: 1")).check(matches(isDisplayed()))
+            onView(withText("Loading…")).check(matches(isDisplayed()))
+
+            awaitText("Loaded 3 items")
+        }
+    }
+
+    /**
+     * Work started before the activity is recreated delivers its result to
+     * the activity that replaces it.
+     */
+    @Test
+    fun backgroundWorkSurvivesRecreation() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            openPage("Async")
+            onView(withText("Load")).perform(click())
+            onView(withText("Loading…")).check(matches(isDisplayed()))
+
+            scenario.recreate()
+
+            // Same screen, and the request that was running still reports.
+            awaitText("Loaded 3 items")
+        }
+    }
+
+    /** A timer runs while the application asks for it and the app is in front. */
+    @Test
+    fun aSubscriptionTicksOnlyWhileItIsWanted() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            openPage("Async")
+            onView(withText("Ticks: 0")).check(matches(isDisplayed()))
+
+            onView(withContentDescription("Clock")).perform(click())
+            awaitText("Ticks: 2")
+
+            // In the background the clock stands still.
+            scenario.moveToState(Lifecycle.State.CREATED)
+            Thread.sleep(3500)
+            scenario.moveToState(Lifecycle.State.RESUMED)
+            val resumed = ticks()
+            assertTrue("the clock ran in the background: $resumed", resumed <= 4)
+
+            // Switched off, it stops. Right after the activity returns to the
+            // front a tap can still go to the window that covered it, so the
+            // tap is repeated until the switch has taken it.
+            for (attempt in 1..5) {
+                onView(withContentDescription("Clock")).perform(click())
+                Thread.sleep(400)
+                val off = try {
+                    onView(withContentDescription("Clock")).check(matches(isNotChecked()))
+                    true
+                } catch (_: Throwable) {
+                    false
+                }
+                if (off) break
+            }
+            onView(withContentDescription("Clock")).check(matches(isNotChecked()))
+            Thread.sleep(500)
+            val stopped = ticks()
+            Thread.sleep(2500)
+            val later = ticks()
+            assertTrue(
+                "the clock kept running after it was switched off: $stopped then $later",
+                later == stopped,
+            )
+        }
+    }
+
+    /** The number the Async page shows after "Ticks: ". */
+    private fun ticks(): Int {
+        for (count in 0..60) {
+            if (isVisible("Ticks: $count")) return count
+        }
+        throw AssertionError("no tick count on screen")
     }
 
     /**

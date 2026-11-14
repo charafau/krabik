@@ -12,6 +12,7 @@ use std::sync::Arc;
 use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
+use krabik_ui_dsl::command::Command;
 use krabik_ui_dsl::ui::{
     Align, Button, Checkbox, Color, Column, EdgeInsets, Element, List, ProgressIndicator,
     RadioButton, Row, Slider, Spacer, Switch, Text, TextField,
@@ -229,7 +230,7 @@ impl Default for TodoApp {
 impl Component for TodoApp {
     type Msg = Msg;
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             Msg::Draft(text) => self.draft = text,
             Msg::Add => {
@@ -251,6 +252,7 @@ impl Component for TodoApp {
             // The slider reports fractional values; priorities are whole.
             Msg::Priority(value) => self.priority = value.round().clamp(1.0, 5.0),
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<Msg> {

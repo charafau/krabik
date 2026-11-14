@@ -14,6 +14,7 @@ small platform entry points that call `set_app_factory`; those are in
 
 ```rust
 use krabik_ui_dsl::app::{App, Component};
+use krabik_ui_dsl::command::Command;
 use krabik_ui_dsl::ui::{Button, Column, Element, Text};
 
 #[derive(Clone)]
@@ -28,10 +29,11 @@ struct Counter {
 impl Component for Counter {
     type Msg = Msg;
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             Msg::Add => self.count += 1,
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<Msg> {
@@ -130,7 +132,7 @@ pub trait Component {
     type Msg: 'static;
 
     /// Applies a message to the state. The UI is rebuilt afterwards.
-    fn update(&mut self, msg: Self::Msg);
+    fn update(&mut self, msg: Self::Msg) -> Command<Self::Msg>;
 
     /// Describes the UI for the current state.
     fn view(&self) -> Element<Self::Msg>;
@@ -183,8 +185,10 @@ removed:
 // rust/src/app.rs
 pub(crate) trait AnyApp: Send {
     fn view(&self) -> RawElement;
-    fn update(&mut self, message: Message);
+    fn update(&mut self, message: Message) -> Jobs;
+    fn subscriptions(&self) -> Vec<Subscription<()>>;
     fn navigation(&self) -> Option<Vec<Route>>;
+    fn scaffold(&self) -> Option<(RawElement, Chrome)>;
     fn screen(&self, key: &str) -> Option<(RawElement, Chrome)>;
     fn dialog(&self) -> Option<Dialog>;
     fn sheet(&self) -> Option<BottomSheet>;
@@ -196,10 +200,11 @@ impl<A: App> AnyApp for A {
         Component::view(self).into_raw()
     }
 
-    fn update(&mut self, message: Message) {
+    fn update(&mut self, message: Message) -> Jobs {
         // Every handler in this app's tree was built from `A::Msg`.
-        if let Ok(message) = message.downcast::<A::Msg>() {
-            Component::update(self, *message);
+        match message.downcast::<A::Msg>() {
+            Ok(message) => Component::update(self, *message).into_jobs(),
+            Err(_) => Jobs::none(),
         }
     }
 

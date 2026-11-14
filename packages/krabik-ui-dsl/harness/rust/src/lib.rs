@@ -9,6 +9,7 @@ use std::sync::Arc;
 use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
+use krabik_ui_dsl::command::Command;
 use krabik_ui_dsl::ui::{
     Align, Button, Checkbox, Color, Column, CornerRadii, DatePicker, DatePickerValue, DateValue,
     EdgeInsets, Element, Gradient, Image, ImageScale, ImageSource, ImeAction, Justify,
@@ -1002,7 +1003,7 @@ impl Component for GalleryApp {
         }
     }
 
-    fn update(&mut self, msg: Msg) {
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
         match msg {
             Msg::Open(demo) => {
                 if demo == Demo::Counter {
@@ -1067,6 +1068,7 @@ impl Component for GalleryApp {
                 self.digits = text.chars().filter(char::is_ascii_digit).collect();
             }
         }
+        Command::none()
     }
 }
 
