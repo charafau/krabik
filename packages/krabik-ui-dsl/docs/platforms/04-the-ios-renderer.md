@@ -409,10 +409,21 @@ handles by removing and recreating the node, so that arm does nothing.
 - `date_picker.rs`: a `UIDatePicker`. Dates are built at local noon so a daylight-saving change
   cannot shift the calendar day.
 
-Some properties that Android applies are not applied on iOS: the date picker ignores text size,
-colour and weight, and the segmented control ignores text size and weight. A view can also show
-only one corner radius: `apply_style` uses the largest of the four and masks the corners whose
-radius is zero.
+Two notes on parity with Android. The segmented control takes its labels' size, weight and
+colour from the description (`setTitleTextAttributes` for the normal and the selected state).
+The date picker does not: `UIDatePicker` has no API for the size, weight or colour of its text.
+
+A layer has one corner radius. When a view's rounded corners all have the same radius,
+`apply_style` sets it and masks the corners whose radius is zero. When they differ, the view is
+clipped by a `CornerMask` instead, a `CAShapeLayer` whose path rounds each corner by its own
+radius; `LayoutFrames::apply_rect` refits the path whenever the view changes size. A border and
+a shadow are drawn by the layer along its single-radius outline and would not follow the shape,
+so a view that has either keeps the largest radius on every rounded corner.
+
+One more detail: a layer given a radius larger than half its shorter side draws nothing sensible
+(a "pill" written as `.corner_radius(999)` used to be invisible). The size is not known when the
+style is applied, so the wanted radius is kept on the `ViewHandle` and `fit_corner_radius`
+applies it, limited to half the shorter side, each time the view gets a frame.
 
 ## `events.rs`: why every event is deferred
 
@@ -672,8 +683,9 @@ next turn.
 - `IosController` retains the Swift controller, and the Swift controller's `deinit` is what
   destroys the session: a cycle (chapter 1).
 - The raw `objc_msgSend` calls in `text_field.rs`.
-- Padding changes on an existing view, per-corner radii, and some widget styling are not applied
-  (noted above).
+- Per-corner radii are drawn with a shape mask (`CornerMask` in `style.rs`), which a border and
+  a shadow do not follow; a view that has either falls back to the largest radius on every
+  rounded corner. The date picker has no text styling, because `UIDatePicker` offers none.
 - The image cache is never evicted.
 - The module comment of `mod.rs` calls the Swift side "a thin `UIView`", and the doc comment on
   `IosController` omits the floating action button, drawer and snackbar.

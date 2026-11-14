@@ -559,6 +559,12 @@ impl GalleryApp {
                             .align_items(Align::Center)
                             .child(chip("Rounded", COLOR_BLUE).corner_radius(999))
                             .child(chip("Faded", COLOR_TEAL).opacity(0.4))
+                            // No border and no shadow: each corner keeps
+                            // its own radius.
+                            .child(
+                                chip("Corners", COLOR_BLUE)
+                                    .corner_radii(CornerRadii::new(14.0, 2.0, 14.0, 2.0)),
+                            )
                             .child(
                                 chip("Outline", COLOR_AMBER)
                                     .color(COLOR_AMBER)

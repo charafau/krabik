@@ -14,6 +14,8 @@ final class KrabikHostController: UIViewController {
     private var navigation: UINavigationController!
     private let tabBar = UITabBar()
     private var tabLabels: [String] = []
+    /// The height the sheet's content needs, in points.
+    private var sheetContentHeight: CGFloat = 0
     /// How many pushed screens Rust believes are on the stack.
     private var expectedScreens = 0
     /// Whether Rust handles the back action right now.
@@ -129,13 +131,18 @@ final class KrabikHostController: UIViewController {
         vc.navigationItem.hidesBackButton = true
         expectedScreens += 1
         if navigation.viewControllers.count > 1 {
-            let back = UIBarButtonItem(
-                image: UIImage(systemName: "chevron.backward"),
-                style: .plain,
-                target: self,
-                action: #selector(backTapped)
-            )
-            back.accessibilityLabel = "Back"
+            // A chevron and a title, like the system's own back button. The
+            // title comes with the screen's app bar; see `krabikSetToolbar`.
+            var look = UIButton.Configuration.plain()
+            look.image = UIImage(systemName: "chevron.backward")
+            look.title = "Back"
+            look.imagePadding = 4
+            look.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: -8, bottom: 0, trailing: 0)
+            let button = UIButton(configuration: look)
+            button.addTarget(self, action: #selector(backTapped), for: .touchUpInside)
+            button.accessibilityLabel = "Back"
+            let back = UIBarButtonItem(customView: button)
+            back.tag = Self.backItemTag
             vc.navigationItem.leftBarButtonItem = back
         }
         switch transition {
@@ -205,9 +212,14 @@ final class KrabikHostController: UIViewController {
             top.navigationItem.titleView = stack
         }
 
-        if navigation.viewControllers.count > 1 {
-            navigation.viewControllers[navigation.viewControllers.count - 2]
-                .navigationItem.backButtonTitle = backTitle
+        // The back button is ours (see `krabikPush`), so its title is set
+        // here and not through the previous screen's `backButtonTitle`.
+        if let back = top.navigationItem.leftBarButtonItem, back.tag == Self.backItemTag,
+           let button = back.customView as? UIButton
+        {
+            button.configuration?.title = backTitle
+            button.accessibilityLabel = backTitle
+            button.sizeToFit()
         }
 
         var items: [UIBarButtonItem] = []
@@ -498,6 +510,9 @@ final class KrabikHostController: UIViewController {
 
     // What `krabik_ios_on_chrome_event` reports. The numbers are defined by
     // `ChromeEvent` in Rust, and a Rust test compares these with them.
+    /// Marks the bar item that is the back button, as opposed to the menu.
+    private static let backItemTag = 9001
+
     private static let eventFab: Int64 = 0
     private static let eventDrawerSelected: Int64 = 1
     private static let eventDrawerOpened: Int64 = 2
@@ -576,19 +591,34 @@ final class KrabikHostController: UIViewController {
             let hostView = RustHostView(frame: self.view.bounds)
             hostView.backgroundColor = .clear
             hostView.bindNow(session: self.session, host: UInt64(host))
-            let contentHeight = CGFloat(krabik_ios_content_height(self.session, UInt64(host)))
+            self.sheetContentHeight =
+                CGFloat(krabik_ios_content_height(self.session, UInt64(host)))
 
             let controller = self.hostController(hostView, background: .systemBackground)
             controller.modalPresentationStyle = .pageSheet
             if let presentation = controller.sheetPresentationController {
                 presentation.detents = [
-                    .custom { context in min(contentHeight, context.maximumDetentValue) },
+                    // Read each time the detent is resolved, so the sheet can
+                    // follow its content; see `krabikSetSheetHeight`.
+                    .custom { [weak self] context in
+                        min(self?.sheetContentHeight ?? 0, context.maximumDetentValue)
+                    },
                 ]
                 presentation.prefersGrabberVisible = true
             }
             controller.presentationController?.delegate = self
             self.sheet = controller
             self.topPresenter().present(controller, animated: true)
+        }
+    }
+
+    /// The content of the sheet on screen changed height: resize the sheet
+    /// to fit it.
+    @objc func krabikSetSheetHeight(_ height: Double) {
+        sheetContentHeight = CGFloat(height)
+        guard let presentation = sheet?.sheetPresentationController else { return }
+        presentation.animateChanges {
+            presentation.invalidateDetents()
         }
     }
 

@@ -29,6 +29,8 @@ pub enum Op {
         /// Implicit animation to apply, when the node already had a frame.
         animation: Option<Animation>,
     },
+    /// Move a scroll container to an offset along its axis, without animation.
+    ScrollTo { id: NodeId, offset: f32 },
 }
 
 pub struct RenderNode {
@@ -41,7 +43,8 @@ pub struct RenderNode {
 }
 ```
 
-Five instructions. A platform renderer is, at its core, a loop over a `Vec<Op>` with one arm per
+Six instructions. The first five come from the diff; `ScrollTo` is added by the runtime when it
+discards a list's scroll offset (chapter 7). A platform renderer is, at its core, a loop over a `Vec<Op>` with one arm per
 variant and a map from `NodeId` to native view.
 
 Some properties of this design:

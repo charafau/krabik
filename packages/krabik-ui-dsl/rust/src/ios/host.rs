@@ -11,7 +11,7 @@ use crate::ios::motion::{
 };
 use crate::ios::rows::RecyclerDataSource;
 use crate::ios::rows::create_recycler;
-use crate::ios::style::{apply_accessibility, apply_style};
+use crate::ios::style::{CornerMask, apply_accessibility, apply_style};
 use crate::ios::widgets::pager::PagerDelegate;
 use crate::ios::widgets::scroll::ScrollDelegate;
 use crate::ios::widgets::{Site, pager, scroll, update_content};
@@ -107,6 +107,11 @@ pub(crate) struct ViewHandle {
     pub(crate) content: Content,
     /// The gradient layer drawn behind the content, when the node has one.
     pub(crate) gradient: Option<Retained<CAGradientLayer>>,
+    /// The shape that clips the view when its corners have different radii.
+    pub(crate) corner_mask: Option<CornerMask>,
+    /// The corner radius the description asks for, before it is limited to
+    /// what fits the view's size.
+    pub(crate) corner_radius: f64,
     /// The nearest renderable ancestor the view lives under.
     pub(crate) parent: Option<NodeId>,
     /// The last relative frame applied to the view.
@@ -123,6 +128,8 @@ impl ViewHandle {
             view,
             content,
             gradient: None,
+            corner_mask: None,
+            corner_radius: 0.0,
             parent: node.parent,
             frame: None,
             padding: node.style.padding,
@@ -277,7 +284,13 @@ impl IosState {
                     // The layout operation that follows a padding change
                     // insets the content with this value.
                     handle.padding = node.style.padding;
-                    apply_style(&handle.view, &node, &mut handle.gradient);
+                    apply_style(
+                        &handle.view,
+                        &node,
+                        &mut handle.gradient,
+                        &mut handle.corner_mask,
+                        &mut handle.corner_radius,
+                    );
                     apply_accessibility(&handle.view, &node, mtm);
                     if let (Some(animation), Some(snapshot)) = (animation, snapshot) {
                         animate_style_change(
@@ -383,6 +396,14 @@ impl IosState {
                 content_size,
                 animation,
             } => IosState::apply_layout(views, id, frame, content_size, animation, mtm),
+            Op::ScrollTo { id, offset } => {
+                if let Some(handle) = views.get(&id)
+                    && let Content::Scroll { scroll, .. } = &handle.content
+                {
+                    // Lists scroll vertically.
+                    scroll.setContentOffset_animated(CGPoint::new(0.0, f64::from(offset)), false);
+                }
+            }
         }
     }
 
@@ -414,7 +435,13 @@ impl IosState {
         // The same call an update makes: a new view gets its properties
         // from the one function that also keeps them current.
         update_content(&mut handle.content, node, self.handle, self.host, mtm);
-        apply_style(&handle.view, node, &mut handle.gradient);
+        apply_style(
+            &handle.view,
+            node,
+            &mut handle.gradient,
+            &mut handle.corner_mask,
+            &mut handle.corner_radius,
+        );
         apply_accessibility(&handle.view, node, mtm);
         handle
     }
@@ -476,6 +503,8 @@ impl IosState {
                 _ => None,
             },
             gradient: handle.gradient.clone(),
+            corner_mask: handle.corner_mask.clone(),
+            corner_radius: handle.corner_radius,
             padding: handle.padding,
         };
 

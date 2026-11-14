@@ -3,12 +3,17 @@
 use crate::ios::events::dispatch_selected;
 use crate::ios::widgets::{Content, RenderNode, Site};
 use crate::ios::{ViewHandle, cast_view};
-use crate::ios::{add_action, color, schedule};
+use crate::ios::{add_action, color, schedule, system_font};
 use crate::tree::NodeId;
 use crate::ui::TabBarProps;
 use objc2::MainThreadMarker;
-use objc2_foundation::NSString;
-use objc2_ui_kit::{UIControlEvents, UISegmentedControl};
+use objc2::rc::Retained;
+use objc2::runtime::AnyObject;
+use objc2_foundation::{NSAttributedStringKey, NSDictionary, NSString};
+use objc2_ui_kit::{
+    NSFontAttributeName, NSForegroundColorAttributeName, UIControlEvents, UIControlState,
+    UISegmentedControl,
+};
 
 pub(crate) fn update_tab_bar(control: &UISegmentedControl, props: &TabBarProps) {
     let current: Vec<String> = (0..control.numberOfSegments())
@@ -33,8 +38,19 @@ pub(crate) fn update_tab_bar(control: &UISegmentedControl, props: &TabBarProps) 
     if control.selectedSegmentIndex() != selected {
         control.setSelectedSegmentIndex(selected);
     }
-    // SAFETY: the color is a valid `UIColor` for the lifetime of the call.
-    unsafe { control.setTintColor(Some(&color(props.color))) };
+    // The labels take the size, weight and colour of the description, in
+    // both the resting and the selected state.
+    let font: Retained<AnyObject> = system_font(props.size, props.weight).into();
+    let foreground: Retained<AnyObject> = color(props.color).into();
+    // SAFETY: the two keys are constant strings exported by UIKit.
+    let keys: [&NSAttributedStringKey; 2] =
+        unsafe { [NSFontAttributeName, NSForegroundColorAttributeName] };
+    let attributes = NSDictionary::from_retained_objects(&keys, &[font, foreground]);
+    for state in [UIControlState::Normal, UIControlState::Selected] {
+        // SAFETY: the dictionary maps attribute names to a font and a colour,
+        // which is what these two keys expect.
+        unsafe { control.setTitleTextAttributes_forState(Some(&attributes), state) };
+    }
 }
 
 pub(crate) fn wire_tab_bar(

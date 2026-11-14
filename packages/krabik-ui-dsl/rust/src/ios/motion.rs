@@ -3,6 +3,7 @@
 use crate::animation::ease_curve;
 use crate::geometry::Size;
 use crate::ios::inset;
+use crate::ios::style::{CornerMask, fit_corner_radius};
 use crate::render::RenderNode;
 use crate::ui::{Animation, AnimationCurve, EdgeInsets};
 use block2::RcBlock;
@@ -36,6 +37,8 @@ pub(crate) struct LayoutFrames {
     pub(crate) host: Option<Retained<UIView>>,
     pub(crate) scroll: Option<(Retained<UIScrollView>, Retained<UIView>, Size)>,
     pub(crate) gradient: Option<Retained<CAGradientLayer>>,
+    pub(crate) corner_mask: Option<CornerMask>,
+    pub(crate) corner_radius: f64,
     pub(crate) padding: EdgeInsets,
 }
 
@@ -69,6 +72,15 @@ impl LayoutFrames {
         if let Some(gradient) = &self.gradient {
             gradient.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), rect.size));
         }
+        if let Some(mask) = &self.corner_mask {
+            mask.fit(rect.size);
+        }
+        fit_corner_radius(
+            &self.view,
+            self.gradient.as_deref(),
+            self.corner_radius,
+            rect.size,
+        );
     }
 }
 

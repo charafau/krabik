@@ -184,6 +184,7 @@ fn print_ops() {
             Op::Reparent { id, parent } => println!("reparent {id:?} under {parent:?}"),
             Op::Remove { id, .. } => println!("remove {id:?}"),
             Op::Layout { id, frame, .. } => println!("layout {id:?} to {frame:?}"),
+            Op::ScrollTo { id, offset } => println!("scroll {id:?} to {offset}"),
         }
     }
 }
@@ -274,7 +275,11 @@ get a native view only when they paint something:
 ```rust,ignore
 // rust/src/style.rs
     pub fn needs_view(&self) -> bool {
-        self.background.is_some()
+        self.accessibility_label.is_some()
+            || self.animation.is_some()
+            || self.enter.is_some()
+            || self.exit.is_some()
+            || self.background.is_some()
             || self.gradient.is_some()
             || self.corner_radius > 0.0
             || self.corner_radii.is_some()
@@ -289,11 +294,10 @@ The diff skips everything else: the first line of its loop is
 
 Symptoms that come from this:
 
-- **A style property on a plain container has no effect.** The list above is complete. An
-  `.accessibility_label(...)` or `.enabled(false)` on an undecorated `Column` is stored in the
-  style and never reaches a platform, because no view is created to carry it. In a UI test, a
-  `withContentDescription` or an XCUITest query for that label finds nothing. Put the label on a
-  widget inside, or give the container a background.
+- **A property that is not about painting.** An `.accessibility_label(...)` or an animation
+  makes a plain container real, so the label is found by a UI test. `.enabled(false)` does not
+  create a view; it is passed down to every descendant when the tree is built, so the widgets
+  inside are the ones that are disabled.
 - **`opacity(1.0)` does not create a view, `opacity(0.99)` does.** So animating a container's
   opacity from 1.0 creates the view at the moment the animation starts.
 - **Adding a background changes more than the background.** The node becomes renderable, so the

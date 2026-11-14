@@ -525,6 +525,12 @@ siblings with the same key would hash to the same node identifier.
 - **Build.** A change in the macro crate rebuilds the Android library; debug and release
   libraries are packaged from separate folders; `jni` is an Android-only dependency of the
   framework; the Kotlin library ships keep rules for minified builds.
+- **Parity and behaviour.** iOS: the back button shows `back_title`, tab-bar labels take their
+  size, weight and colour, corners can have different radii, and a sheet follows its content's
+  height. Android: an alert with more than three buttons lists all of them. Both: a disabled
+  container disables what is in it, a labelled or animated container gets a view, a list is
+  windowed for its own height, a list whose content is replaced scrolls back to the top, and
+  `Snackbar::id` lets the same message be shown again.
 
 ---
 
@@ -638,23 +644,16 @@ source, not all reproduced on a device.
 
 ### Behaviour
 
-- **Style on an undecorated container can be dropped.** A plain `Column`, `Row` or `Spacer` has
-  no native view, so `enabled`, `accessibility_label` and animations set only on it reach
-  nothing, and `enabled(false)` is not inherited by children.
-- **An identical snackbar is not shown again**, because descriptions are compared. Put something
-  that changes in the message.
-- **A windowed list measures against the host's viewport**, not its own frame, so a list filling
-  half the screen materializes about twice the rows it needs.
-- **`reset_scroll` only clears Rust's stored offset**; the native scroll view is not told.
+- **A disabled container does not reach recycled rows.** `enabled(false)` is passed down while
+  the tree is built; the rows of a recycled list are built on demand outside it.
+- **A list is windowed for the whole screen on its first render**, because its own height is
+  only known after layout. From the second render on it materializes only its own rows.
 
 ### One platform does less
 
-- iOS: `AppBar::back_title` has no visible effect (the back button is a custom chevron); the
-  date picker ignores text size, colour and weight; the tab bar ignores size and weight; only
-  the largest of four corner radii is used; a sheet's height is fixed when it is presented; the
-  alert has no `cancelable` option.
-- Android: the alert shows at most three buttons and drops a second non-cancel, non-first one
-  beyond the neutral slot silently.
+- iOS: the date picker ignores text size, colour and weight (`UIDatePicker` has no API for
+  them); a view with a border or a shadow shows one radius on all its rounded corners; the alert
+  has no `cancelable` option (a UIKit alert cannot be dismissed by tapping outside).
 
 ### Safety nets that are missing
 

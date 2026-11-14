@@ -426,6 +426,36 @@ class ShowcaseTest {
         }
     }
 
+    /**
+     * An alert has three button slots. With more choices than that, all of
+     * them are offered as a list, and a sheet whose content grows shows
+     * the new rows.
+     */
+    @Test
+    fun manyChoicesAndAGrowingSheet() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openPage("Bottom sheet")
+            onView(withText("Label: none")).check(matches(isDisplayed()))
+
+            onView(withText("Choose a label")).perform(click())
+            awaitText("Every choice is offered, in this order.")
+            for (choice in listOf("Red", "Green", "Blue", "Yellow", "Cancel")) {
+                onView(withText(choice)).check(matches(isDisplayed()))
+            }
+            onView(withText("Blue")).perform(click())
+            awaitNoText("Every choice is offered, in this order.")
+            awaitText("Label: Blue")
+
+            openSheet()
+            onView(withText("More filters")).perform(click())
+            awaitText("From this week")
+            onView(withText("Fewer filters")).check(matches(isDisplayed()))
+            onView(withText("Close")).check(matches(isDisplayed())).perform(click())
+            awaitNoText("Filters")
+            tapBack()
+        }
+    }
+
     @Test
     fun poppingKeepsThePreviousScreenAlive() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->

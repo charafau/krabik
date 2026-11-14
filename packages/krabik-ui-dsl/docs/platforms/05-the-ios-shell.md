@@ -266,10 +266,9 @@ Each carries its index in `tag`, and `toolbarTapped` reports it with
 Icons are resolved by `toolbarImage`: an SF Symbol name first, then an image in the app's asset
 catalogue.
 
-One piece of this method has no visible effect: it sets `backButtonTitle` on the previous
-controller from `backTitle`, but the system back button that would show it is hidden. The custom
-back button always has the accessibility label "Back". So `AppBar`'s back title does nothing on
-iOS today.
+The back button is the framework's own (see `krabikPush`): a chevron with a title, like the
+system's. `krabikSetToolbar` sets that title from `backTitle`, so `AppBar::back_title` is what
+the user sees and what VoiceOver reads. Without one it says "Back".
 
 ### The tab bar
 
@@ -342,13 +341,16 @@ tapping outside it.
         let hostView = RustHostView(frame: self.view.bounds)
         hostView.backgroundColor = .clear
         hostView.bindNow(session: self.session, host: UInt64(host))
-        let contentHeight = CGFloat(krabik_ios_content_height(self.session, UInt64(host)))
+        self.sheetContentHeight =
+            CGFloat(krabik_ios_content_height(self.session, UInt64(host)))
 
         let controller = self.hostController(hostView, background: .systemBackground)
         controller.modalPresentationStyle = .pageSheet
         if let presentation = controller.sheetPresentationController {
             presentation.detents = [
-                .custom { context in min(contentHeight, context.maximumDetentValue) },
+                .custom { [weak self] context in
+                    min(self?.sheetContentHeight ?? 0, context.maximumDetentValue)
+                },
             ]
             presentation.prefersGrabberVisible = true
         }
@@ -370,8 +372,10 @@ should be exactly as tall as its content. The steps:
 
 Custom detents need iOS 16, which is the apps' deployment target.
 
-The height is measured once, at presentation. If the sheet's content grows later, the detent does
-not follow.
+The detent reads `sheetContentHeight` each time UIKit resolves it. When the sheet's content
+changes height later, Rust calls `krabikSetSheetHeight`, which stores the new value and asks the
+presentation controller to resolve its detents again inside `animateChanges`, so the sheet
+grows or shrinks to fit. (`Session::sync_sheet_height` decides when; internals chapter 8.)
 
 When the user swipes the sheet away or taps outside it, UIKit has already dismissed it;
 `presentationControllerDidDismiss` tells Rust with `krabik_ios_on_modal_dismiss`. The session
@@ -497,9 +501,7 @@ folders are `Resources/` (bundled assets, loaded by `load_asset` in `rust/src/io
 ## Rough edges in this directory
 
 - File name `RustRootView.swift`, class name `RustHostView`.
-- `AppBar`'s back title has no effect; the back button's accessibility label is fixed.
 - The value `krabik_ios_on_back` returns is discarded.
-- The sheet's height is fixed at presentation.
 - The snackbar and drawer are custom views.
 - In `KrabikSnackbarView.init`, the comment "Announced like an alert, so VoiceOver reads it when
   it appears" sits above `accessibilityViewIsModal = false`, which does not do that. The

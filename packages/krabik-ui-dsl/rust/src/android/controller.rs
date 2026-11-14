@@ -282,6 +282,11 @@ impl Controller<Android> for AndroidController {
             .call_void(env, self.0.as_obj(), &[])?;
         Ok(())
     }
+
+    fn sheet_resized(&self, _env: &mut Env<'_>, _height: f32) -> JniResult<()> {
+        // The bottom sheet wraps its content and follows it by itself.
+        Ok(())
+    }
 }
 
 /// The methods of the Kotlin `KrabikHostController`, resolved once; see

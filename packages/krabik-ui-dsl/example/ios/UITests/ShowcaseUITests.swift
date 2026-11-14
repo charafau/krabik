@@ -62,6 +62,7 @@ final class ShowcaseUITests: XCTestCase {
         open("Radio group")
         tapButton("Large")
         XCTAssertTrue(app.staticTexts["Selected: Large"].waitForExistence(timeout: 5))
+        capture("pushed-screen-back-button")
 
         // Abandoned: a short drag from the edge and back.
         let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.5))
@@ -310,6 +311,42 @@ final class ShowcaseUITests: XCTestCase {
         backToCatalog()
     }
 
+    /// More choices than an alert usually has are all offered, and a sheet
+    /// whose content grows is resized to show the new rows.
+    func testManyChoicesAndAGrowingSheet() throws {
+        open("Bottom sheet")
+        XCTAssertTrue(app.staticTexts["Label: none"].waitForExistence(timeout: 5))
+
+        tapButton("Choose a label")
+        let alert = app.alerts["Choose a label"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        for choice in ["Red", "Green", "Blue", "Yellow", "Cancel"] {
+            XCTAssertTrue(alert.buttons[choice].exists, "missing choice \(choice)")
+        }
+        alert.buttons["Blue"].tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Label: Blue"].waitForExistence(timeout: 5))
+
+        tapButton("Open bottom sheet")
+        let more = app.buttons["More filters"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        let closeBefore = app.buttons["Close"].frame.minY
+        more.tap()
+        let last = app.staticTexts["From this week"]
+        XCTAssertTrue(last.waitForExistence(timeout: 5))
+        sleep(1)
+        // The sheet grew upwards to make room: its rows and the Close button
+        // are on screen, not cut off below the edge.
+        XCTAssertTrue(last.isHittable)
+        let close = app.buttons["Close"]
+        XCTAssertTrue(close.isHittable)
+        XCTAssertLessThanOrEqual(close.frame.maxY, app.frame.maxY)
+        XCTAssertLessThan(app.staticTexts["Filters"].frame.minY, closeBefore)
+        close.tap()
+        XCTAssertTrue(more.waitForNonExistence(timeout: 5))
+        backToCatalog()
+    }
+
     func testContainerWidgets() throws {
         open("View pager")
         XCTAssertTrue(app.staticTexts["Page 1 of 3"].waitForExistence(timeout: 5))
@@ -322,6 +359,7 @@ final class ShowcaseUITests: XCTestCase {
         app.segmentedControls.firstMatch.buttons["Details"].tap()
         XCTAssertTrue(app.staticTexts["Selected: Details"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Details page content."].waitForExistence(timeout: 5))
+        capture("tabs-view")
         backToCatalog()
 
         open("Bottom navigation")
@@ -402,6 +440,14 @@ final class ShowcaseUITests: XCTestCase {
         app.buttons["Back"].tap()
         scrollToTop()
         XCTAssertTrue(app.staticTexts["Krabik UI DSL"].waitForExistence(timeout: 5))
+    }
+
+    /// Keeps a screenshot with the test result, for looking at by eye.
+    private func capture(_ name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func scrollToTop() {

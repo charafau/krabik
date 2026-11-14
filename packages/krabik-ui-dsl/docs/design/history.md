@@ -241,6 +241,33 @@ tests, which had been building a list with repeated keys all along. And under lo
 that had just rejected a character lost the next one typed: resetting the text with `setText`
 restarts the keyboard's input connection. The field's text is now edited in place.
 
+### Build
+
+The Gradle task that builds the Rust library now counts the macro crate among its inputs, writes
+debug and release libraries to separate folders, and the Kotlin library ships keep rules for
+minified builds. `jni` became an Android-only dependency of the framework. The keep rules were
+checked by driving a minified build of the showcase by hand, because the instrumented tests
+cannot run against a minified app.
+
+### Parity and behaviour
+
+The remaining rough edges, platform by platform. On iOS the back button shows the app bar's
+back title, tab-bar labels take their size, weight and colour, a view's corners can have
+different radii, and a sheet is resized when its content changes height. On Android an alert
+with more choices than button slots lists all of them. In the engine a disabled container
+disables everything in it, a container with an accessibility label or an animation gets a view,
+a list is windowed for its own height instead of the whole screen, and a list whose content is
+replaced tells the native scroll view to go back to the top. `Snackbar::id` lets the same
+message be shown again.
+
+Looking at the result on a simulator showed one more iOS bug, older than this work: a view
+whose corner radius was larger than half its height (a pill written as `corner_radius(999)`) was
+not drawn at all. The radius is now limited to what fits the view each time it is laid out.
+
+Two things were left as they are, with the reason recorded in `TODO.md`: `UIDatePicker` has no
+API for the size, weight or colour of its text, and a UIKit alert cannot be dismissed by tapping
+outside it.
+
 ## What is still open
 
 - Run the CI workflow for the first time and fix whatever the runner disagrees with.

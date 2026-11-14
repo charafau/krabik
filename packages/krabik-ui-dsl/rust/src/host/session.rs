@@ -52,6 +52,9 @@ pub(crate) struct Session<P: Platform> {
     navigation_synced: bool,
     /// The appearance every host resolves its colours for.
     scheme: ColorScheme,
+    /// The height the sheet's content had when the controller last heard
+    /// of it; `None` while no sheet host has rendered.
+    sheet_height: Option<f32>,
     /// The platform changed the screen stack by itself. The next sync sends
     /// the chrome even if it is equal, and shows a screen the application
     /// kept without animating it back in.
@@ -90,6 +93,7 @@ impl<P: Platform> Session<P> {
             navigation_synced: false,
             scheme: ColorScheme::Light,
             native_pop: false,
+            sheet_height: None,
         }
     }
 
@@ -254,7 +258,26 @@ impl<P: Platform> Session<P> {
             }
         }
         self.sync_subscriptions();
+        self.sync_sheet_height(cx)?;
         self.sync(cx)
+    }
+
+    /// Tells the controller when the content of the sheet on screen changed
+    /// height, so a sheet that is sized once at presentation can follow.
+    fn sync_sheet_height(&mut self, cx: &mut P::Cx<'_>) -> Result<(), P::Error> {
+        let height = self
+            .hosts
+            .values()
+            .find(|host| *host.kind() == HostKind::Sheet)
+            .map(|host| host.runtime().content_height());
+        if let (Some(before), Some(now)) = (self.sheet_height, height)
+            && (before - now).abs() > 0.5
+            && let Some(controller) = self.controller.as_ref()
+        {
+            controller.sheet_resized(cx, now)?;
+        }
+        self.sheet_height = height;
+        Ok(())
     }
 
     /// Reconciles the application's navigation, dialog and sheet with the
@@ -862,6 +885,12 @@ mod tests {
             self.0.borrow_mut().push("dismiss sheet".into());
             Ok(())
         }
+        fn sheet_resized(&self, _cx: &mut (), height: f32) -> Result<(), Infallible> {
+            self.0
+                .borrow_mut()
+                .push(format!("sheet height {height:.0}"));
+            Ok(())
+        }
     }
 
     /// What the test application currently wants on screen.
@@ -892,6 +921,10 @@ mod tests {
         stay: bool,
         /// The interval of the clock, while it runs. Each tick is a `Tap`.
         clock: Option<Duration>,
+        /// How many lines of text the sheet shows.
+        sheet_lines: usize,
+        /// Tells one "Deleted" snackbar from the next.
+        snackbar_id: u64,
     }
 
     /// An application whose state the test can also change from outside,
@@ -1024,6 +1057,7 @@ mod tests {
                     }))
                     .snackbar((state.snackbar && top).then(|| {
                         Snackbar::new("Deleted")
+                            .id(state.snackbar_id)
                             .action("Undo", Msg::Undo)
                             .on_dismiss(Msg::SnackbarGone)
                     })),
@@ -1045,9 +1079,16 @@ mod tests {
         }
 
         fn sheet(&self) -> Option<BottomSheet<Msg>> {
-            self.state()
-                .sheet
-                .then(|| BottomSheet::new().on_dismiss(Msg::CloseSheet))
+            let state = self.state();
+            state.sheet.then(|| {
+                let mut content = Column::new();
+                for line in 0..state.sheet_lines {
+                    content = content.child(Text::new(format!("line {line}")));
+                }
+                BottomSheet::new()
+                    .child(content)
+                    .on_dismiss(Msg::CloseSheet)
+            })
         }
 
         fn back(&self) -> Option<Msg> {
@@ -1753,5 +1794,49 @@ mod tests {
         next.drain(&mut ()).unwrap();
         assert_eq!(app.state().clicks, 100);
         assert_eq!(executor.running().len(), 1);
+    }
+
+    #[test]
+    fn a_snackbar_with_a_new_id_is_shown_again() {
+        let (mut session, app, log) = on_home(State {
+            snackbar: true,
+            ..State::default()
+        });
+
+        // The same snackbar returned again is the one already showing.
+        session.render_all(&mut ()).unwrap();
+        assert!(take(&log).is_empty());
+
+        // A second deletion while the first notice is still up.
+        app.state().snackbar_id = 1;
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(take(&log), ["snackbar Deleted"]);
+    }
+
+    #[test]
+    fn a_sheet_whose_content_grows_is_resized() {
+        let (mut session, app, log) = session(State {
+            sheet: true,
+            sheet_lines: 1,
+            ..State::default()
+        });
+        session.render_all(&mut ()).unwrap();
+        attach_pending(&mut session);
+        // Presenting it is not a resize: the platform measures it then.
+        assert!(
+            !take(&log)
+                .iter()
+                .any(|call| call.starts_with("sheet height"))
+        );
+
+        // Same content, no call.
+        session.render_all(&mut ()).unwrap();
+        assert!(take(&log).is_empty());
+
+        app.state().sheet_lines = 4;
+        session.render_all(&mut ()).unwrap();
+        let calls = take(&log);
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].starts_with("sheet height "), "{calls:?}");
     }
 }

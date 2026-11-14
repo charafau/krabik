@@ -163,7 +163,7 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element<Msg>> {
         "transition-slide" => transition_demo_page("transition-slide"),
         "transition-fade" => transition_demo_page("transition-fade"),
         "transition-none" => transition_demo_page("transition-none"),
-        "bottom-sheet" => bottom_sheet_page(),
+        "bottom-sheet" => bottom_sheet_page(app),
         "scaffold" => scaffold_page(app),
         "async" => async_page(app),
         "pager" => pager_page(app),
@@ -467,9 +467,22 @@ pub(crate) fn dialog() -> Dialog<Msg> {
         .destructive("Delete", Msg::CloseDialog)
 }
 
-/// The content of the native bottom sheet.
-pub(crate) fn sheet() -> BottomSheet<Msg> {
-    BottomSheet::new()
+/// An alert with more choices than an alert has button slots. Android
+/// stacks them as a list; iOS stacks its buttons by itself.
+pub(crate) fn choices() -> Dialog<Msg> {
+    Dialog::new("Choose a label")
+        .message("Every choice is offered, in this order.")
+        .button("Red", Msg::Choose("Red"))
+        .button("Green", Msg::Choose("Green"))
+        .button("Blue", Msg::Choose("Blue"))
+        .button("Yellow", Msg::Choose("Yellow"))
+        .cancel("Cancel", Msg::CloseChoices)
+}
+
+/// The content of the native bottom sheet. "More filters" adds rows, and
+/// the sheet grows to fit them.
+pub(crate) fn sheet(app: &ShowcaseApp) -> BottomSheet<Msg> {
+    let mut sheet = BottomSheet::new()
         .on_dismiss(Msg::CloseSheet)
         .child(Text::new("Filters").size(20).bold().color(COLOR_TEXT))
         .child(
@@ -477,7 +490,20 @@ pub(crate) fn sheet() -> BottomSheet<Msg> {
                 .size(15)
                 .color(COLOR_MUTED),
         )
-        .child(Button::new("Close").on_click(Msg::CloseSheet))
+        .child(
+            Button::new(if app.sheet_more {
+                "Fewer filters"
+            } else {
+                "More filters"
+            })
+            .on_click(Msg::SheetMore),
+        );
+    if app.sheet_more {
+        for filter in ["Unread only", "With attachments", "From this week"] {
+            sheet = sheet.child(Text::new(filter).size(16).color(COLOR_TEXT));
+        }
+    }
+    sheet.child(Button::new("Close").on_click(Msg::CloseSheet))
 }
 
 fn date_picker_page(app: &ShowcaseApp) -> Element<Msg> {
@@ -804,7 +830,7 @@ fn transition_demo_page(key: &'static str) -> Element<Msg> {
     )
 }
 
-fn bottom_sheet_page() -> Element<Msg> {
+fn bottom_sheet_page(app: &ShowcaseApp) -> Element<Msg> {
     page(
         "Bottom sheet",
         "A Rust button asks the session to present a platform-native bottom sheet.",
@@ -816,6 +842,10 @@ fn bottom_sheet_page() -> Element<Msg> {
                 "Android uses a Material BottomSheetDialogFragment; iOS uses UISheetPresentationController. Both size the sheet to its content.",
             ),
             caption("Close it with the sheet's button or drag it down."),
+            Button::new("Choose a label")
+                .on_click(Msg::OpenChoices)
+                .width_percent(1.0),
+            caption(&format!("Label: {}", app.label.unwrap_or("none"))),
         ],
     )
 }
