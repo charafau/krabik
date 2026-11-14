@@ -38,8 +38,9 @@ use std::sync::OnceLock;
 
 use crate::element::{Element, RawElement};
 use crate::message::Message;
-use crate::navigation::{Navigation, Screen};
+use crate::navigation::{Navigation, Route};
 use crate::presentation::{BottomSheet, Dialog};
+use crate::scaffold::{Chrome, Scaffold};
 
 /// A piece of UI with its own state and messages.
 pub trait Component {
@@ -63,12 +64,14 @@ pub trait App: Component + Send + 'static {
     /// The application owns this state; the runtime mirrors it with native
     /// navigation controllers. With navigation, [`Component::view`] is not
     /// shown: the first screen is the root.
-    fn navigation(&self) -> Option<Navigation<Self::Msg>> {
+    fn navigation(&self) -> Option<Navigation> {
         None
     }
 
-    /// The content of one navigation screen, by its key.
-    fn screen(&self, _key: &str) -> Option<Element<Self::Msg>> {
+    /// One navigation screen, by its key: its content and the native chrome
+    /// around it. Content alone converts into a screen without chrome:
+    /// `Some(self.page().into())`.
+    fn screen(&self, _key: &str) -> Option<Scaffold<Self::Msg>> {
         None
     }
 
@@ -95,8 +98,8 @@ pub trait App: Component + Send + 'static {
 pub(crate) trait AnyApp: Send {
     fn view(&self) -> RawElement;
     fn update(&mut self, message: Message);
-    fn navigation(&self) -> Option<Vec<Screen>>;
-    fn screen(&self, key: &str) -> Option<RawElement>;
+    fn navigation(&self) -> Option<Vec<Route>>;
+    fn screen(&self, key: &str) -> Option<(RawElement, Chrome)>;
     fn dialog(&self) -> Option<Dialog>;
     fn sheet(&self) -> Option<BottomSheet>;
     fn back(&self) -> Option<Message>;
@@ -114,13 +117,12 @@ impl<A: App> AnyApp for A {
         }
     }
 
-    fn navigation(&self) -> Option<Vec<Screen>> {
-        App::navigation(self)
-            .map(|navigation| navigation.screens.into_iter().map(Screen::erase).collect())
+    fn navigation(&self) -> Option<Vec<Route>> {
+        App::navigation(self).map(|navigation| navigation.routes)
     }
 
-    fn screen(&self, key: &str) -> Option<RawElement> {
-        App::screen(self, key).map(Element::into_raw)
+    fn screen(&self, key: &str) -> Option<(RawElement, Chrome)> {
+        App::screen(self, key).map(Scaffold::erase)
     }
 
     fn dialog(&self) -> Option<Dialog> {

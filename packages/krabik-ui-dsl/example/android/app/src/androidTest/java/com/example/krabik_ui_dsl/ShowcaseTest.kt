@@ -82,7 +82,7 @@ class ShowcaseTest {
             onView(withText("Overview: the first tab is selected by default."))
                 .check(matches(isDisplayed()))
             onView(withText("Settings")).perform(click())
-            onView(withText("Settings: tapping a tab reports Event::Selected."))
+            onView(withText("Settings: tapping a tab sends the selected index."))
                 .check(matches(isDisplayed()))
             tapBack()
 
@@ -143,6 +143,45 @@ class ShowcaseTest {
             openPage("Styling")
             onView(withText("Disabled action")).check(matches(not(isEnabled())))
             tapBack()
+        }
+    }
+
+    /** The native chrome a Scaffold adds around a screen's content. */
+    @Test
+    fun scaffoldFloatingButtonSnackbarAndDrawer() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openPage("Scaffold")
+            onView(withText("Items: 0")).check(matches(isDisplayed()))
+
+            // The floating action button adds an item and raises a snackbar,
+            // whose action takes the item back.
+            onView(withText("Add")).perform(click())
+            awaitText("Items: 1")
+            awaitText("Added item 1")
+            onView(withText("Undo")).perform(click())
+            awaitText("Items: 0")
+            awaitNoText("Added item 1")
+
+            // The drawer opens from state and a destination closes it again.
+            onView(withText("Open drawer")).perform(click())
+            awaitText("Archive")
+            onView(withText("Archive")).perform(click())
+            awaitText("Section: Archive")
+            Thread.sleep(600)
+            onView(withText("Archive")).check(matches(not(isDisplayed())))
+
+            // The system back action closes an open drawer before anything else.
+            onView(withText("Open drawer")).perform(click())
+            awaitText("Settings")
+            androidx.test.espresso.Espresso.pressBack()
+            Thread.sleep(600)
+            onView(withText("Settings")).check(matches(not(isDisplayed())))
+            onView(withText("Section: Archive")).check(matches(isDisplayed()))
+
+            // Leaving the screen takes its chrome with it.
+            tapBack()
+            onView(withText("Krabik UI DSL")).check(matches(isDisplayed()))
+            onView(withText("Add")).check(doesNotExist())
         }
     }
 

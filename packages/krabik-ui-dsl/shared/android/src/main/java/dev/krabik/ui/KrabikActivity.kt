@@ -2,6 +2,7 @@ package dev.krabik.ui
 
 import android.content.res.Configuration
 import android.os.Bundle
+import android.view.Gravity
 import android.view.ViewGroup
 import android.view.View
 import android.widget.FrameLayout
@@ -11,9 +12,12 @@ import androidx.activity.OnBackPressedCallback
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+import com.google.android.material.navigation.NavigationView
 
 /**
  * Hosts the Rust session full screen, edge to edge.
@@ -77,6 +81,7 @@ abstract class KrabikActivity : FragmentActivity() {
             )
         }
         val navContainer = FrameLayout(this)
+        val fab = ExtendedFloatingActionButton(this)
         // The root and the navigation container overlap, so revealing the root
         // during a pop does not resize the outgoing screen. The navigation
         // container is added last and therefore draws above the root.
@@ -94,6 +99,16 @@ abstract class KrabikActivity : FragmentActivity() {
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT,
                 ),
+            )
+            // Above both, in the bottom corner the screen's main action lives in.
+            val margin = (16 * resources.displayMetrics.density).toInt()
+            addView(
+                fab,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM or Gravity.END,
+                ).apply { setMargins(margin, margin, margin, margin) },
             )
         }
         val column = LinearLayout(this).apply {
@@ -124,8 +139,27 @@ abstract class KrabikActivity : FragmentActivity() {
         }
         drawEdgeToEdge(column, toolbar, content, bottomNavigation)
 
+        // The drawer slides over everything, bars included.
+        val drawer = NavigationView(this)
+        val drawerLayout = DrawerLayout(this).apply {
+            addView(
+                column,
+                DrawerLayout.LayoutParams(
+                    DrawerLayout.LayoutParams.MATCH_PARENT,
+                    DrawerLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            addView(
+                drawer,
+                DrawerLayout.LayoutParams(
+                    DrawerLayout.LayoutParams.WRAP_CONTENT,
+                    DrawerLayout.LayoutParams.MATCH_PARENT,
+                    Gravity.START,
+                ),
+            )
+        }
         setContentView(
-            column,
+            drawerLayout,
             ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -133,6 +167,23 @@ abstract class KrabikActivity : FragmentActivity() {
         )
 
         onBackPressedDispatcher.addCallback(this, backCallback)
+        // Added last, so it is asked first: back closes an open drawer before
+        // it does anything else.
+        val drawerBack = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                controller.closeDrawerForBack()
+            }
+        }
+        onBackPressedDispatcher.addCallback(this, drawerBack)
+        drawerLayout.addDrawerListener(object : DrawerLayout.SimpleDrawerListener() {
+            override fun onDrawerOpened(drawerView: View) {
+                drawerBack.isEnabled = true
+            }
+
+            override fun onDrawerClosed(drawerView: View) {
+                drawerBack.isEnabled = false
+            }
+        })
         controller = KrabikHostController(
             this,
             root.session,
@@ -141,6 +192,9 @@ abstract class KrabikActivity : FragmentActivity() {
             mainContainer,
             navContainer,
             root,
+            fab,
+            drawerLayout,
+            drawer,
             onBackEnabled = { enabled -> backCallback.isEnabled = enabled },
         )
     }

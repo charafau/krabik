@@ -14,8 +14,9 @@ use std::sync::Arc;
 use jni::EnvUnowned;
 use jni::objects::JObject;
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
-use krabik_ui_dsl::navigation::{Navigation, Screen, ScreenTransition, Toolbar};
+use krabik_ui_dsl::navigation::{Navigation, Route, ScreenTransition};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
+use krabik_ui_dsl::scaffold::{AppBar, Scaffold};
 use krabik_ui_dsl::ui::{DatePickerValue, DateValue, Element, Icon, TimeValue};
 
 mod checklist;
@@ -28,6 +29,16 @@ use checklist::Checklist;
 pub enum Msg {
     /// Opens the screen with this key; `home` returns to the catalog.
     Open(&'static str),
+    /// The Scaffold page's floating action button added an item.
+    FabAdd,
+    /// The snackbar's Undo took the last item back.
+    FabUndo,
+    /// The snackbar went away by itself.
+    SnackbarGone,
+    /// The drawer was opened or closed.
+    Drawer(bool),
+    /// A drawer section was picked.
+    DrawerGo(usize),
     /// The system or toolbar back action.
     Back,
     /// Something happened on the checklist screen, a component of its own.
@@ -111,6 +122,11 @@ pub struct ShowcaseApp {
     recycled_alt: bool,
     dialog_open: bool,
     sheet_open: bool,
+    /// The Scaffold page: items added with the floating action button.
+    scaffold_items: u32,
+    scaffold_snackbar: bool,
+    drawer_open: bool,
+    drawer_section: usize,
 }
 
 impl ShowcaseApp {
@@ -160,6 +176,10 @@ impl ShowcaseApp {
             recycled_alt: false,
             dialog_open: false,
             sheet_open: false,
+            scaffold_items: 0,
+            scaffold_snackbar: false,
+            drawer_open: false,
+            drawer_section: 0,
         }
     }
 
@@ -229,6 +249,20 @@ impl Component for ShowcaseApp {
             }
             Msg::OpenDialog => self.dialog_open = true,
             Msg::CloseDialog => self.dialog_open = false,
+            Msg::FabAdd => {
+                self.scaffold_items += 1;
+                self.scaffold_snackbar = true;
+            }
+            Msg::FabUndo => {
+                self.scaffold_items = self.scaffold_items.saturating_sub(1);
+                self.scaffold_snackbar = false;
+            }
+            Msg::SnackbarGone => self.scaffold_snackbar = false,
+            Msg::Drawer(open) => self.drawer_open = open,
+            Msg::DrawerGo(index) => {
+                self.drawer_section = index.min(pages::DRAWER_SECTIONS.len() - 1);
+                self.drawer_open = false;
+            }
             Msg::OpenSheet => self.sheet_open = true,
             Msg::CloseSheet => self.sheet_open = false,
 
@@ -256,41 +290,36 @@ impl Component for ShowcaseApp {
 }
 
 impl App for ShowcaseApp {
-    fn navigation(&self) -> Option<Navigation<Msg>> {
-        Some(Navigation::new(
-            self.stack
-                .iter()
-                .map(|key| {
-                    let transition = match *key {
-                        "transition-fade" => ScreenTransition::Fade,
-                        "transition-none" => ScreenTransition::None,
-                        _ => ScreenTransition::Slide,
-                    };
-                    let mut screen = Screen::new(*key, pages::title(key)).transition(transition);
-                    if *key == "bottom-navigation" {
-                        screen = screen.bottom_navigation(pages::bottom_navigation(self));
-                    }
-                    if *key == "toolbar" {
-                        screen = screen.toolbar(
-                            Toolbar::new()
-                                .subtitle("Host-level native chrome")
-                                .back_title("Back")
-                                .action("Refresh", Msg::Toolbar("Refresh"))
-                                .action_with_icon(
-                                    "Save",
-                                    Icon::new().drawable("ic_save").sf("square.and.arrow.down"),
-                                    Msg::Toolbar("Save"),
-                                ),
-                        );
-                    }
-                    screen
-                })
-                .collect(),
-        ))
+    fn navigation(&self) -> Option<Navigation> {
+        Some(Navigation::new(self.stack.iter().map(|key| {
+            Route::new(*key).transition(match *key {
+                "transition-fade" => ScreenTransition::Fade,
+                "transition-none" => ScreenTransition::None,
+                _ => ScreenTransition::Slide,
+            })
+        })))
     }
 
-    fn screen(&self, key: &str) -> Option<Element<Msg>> {
-        pages::screen(self, key)
+    fn screen(&self, key: &str) -> Option<Scaffold<Msg>> {
+        let body = pages::screen(self, key)?;
+        let mut app_bar = AppBar::new(pages::title(key));
+        if key == "toolbar" {
+            app_bar = app_bar
+                .subtitle("Host-level native chrome")
+                .back_title("Back")
+                .action("Refresh", Msg::Toolbar("Refresh"))
+                .action_with_icon(
+                    "Save",
+                    Icon::new().drawable("ic_save").sf("square.and.arrow.down"),
+                    Msg::Toolbar("Save"),
+                );
+        }
+        let scaffold = Scaffold::new().app_bar(app_bar).body(body);
+        Some(match key {
+            "bottom-navigation" => scaffold.bottom_navigation(pages::bottom_navigation(self)),
+            "scaffold" => pages::scaffold_chrome(self, scaffold),
+            _ => scaffold,
+        })
     }
 
     fn dialog(&self) -> Option<Dialog<Msg>> {
@@ -344,7 +373,7 @@ mod tests {
     fn starts_on_the_widget_catalog() {
         let app = app();
         assert_eq!(app.stack, vec!["home"]);
-        assert_eq!(app.navigation().unwrap().screens.len(), 1);
+        assert_eq!(app.navigation().unwrap().routes.len(), 1);
         assert!(app.screen("home").is_some());
         assert_eq!(app.size_choice, 1);
         assert_eq!(app.volume, 40.0);
@@ -384,9 +413,14 @@ mod tests {
     fn the_bottom_navigation_screen_declares_its_bar() {
         let mut app = app();
         app.update(Msg::Open("bottom-navigation"));
-        let screens = app.navigation().expect("navigation").screens;
-        assert!(screens[0].bottom_navigation.is_none());
-        let bar = screens[1].bottom_navigation.as_ref().expect("bar");
+        assert!(
+            app.screen("home")
+                .expect("home")
+                .bottom_navigation
+                .is_none()
+        );
+        let screen = app.screen("bottom-navigation").expect("screen");
+        let bar = screen.bottom_navigation.as_ref().expect("bar");
         assert_eq!(bar.items.len(), 3);
         assert!(bar.on_select.is_set());
     }
@@ -606,12 +640,11 @@ mod tests {
     fn toolbar_screen_exposes_native_actions() {
         let mut app = app();
         app.stack = vec!["home", "toolbar"];
-        let nav = app.navigation().expect("navigation");
-        let toolbar = nav
-            .screens
-            .last()
-            .and_then(|screen| screen.toolbar.as_ref())
-            .expect("toolbar");
+        let toolbar = app
+            .screen("toolbar")
+            .and_then(|screen| screen.app_bar)
+            .expect("app bar");
+        assert_eq!(toolbar.title, "Toolbar");
         assert_eq!(
             toolbar.subtitle.as_deref(),
             Some("Host-level native chrome")
@@ -636,21 +669,21 @@ mod tests {
         app.stack = vec!["home", "transition-fade"];
         let nav = app.navigation().expect("navigation");
         assert_eq!(
-            nav.screens.last().unwrap().transition,
+            nav.routes.last().unwrap().transition,
             ScreenTransition::Fade
         );
 
         app.stack = vec!["home", "transition-none"];
         let nav = app.navigation().expect("navigation");
         assert_eq!(
-            nav.screens.last().unwrap().transition,
+            nav.routes.last().unwrap().transition,
             ScreenTransition::None
         );
 
         app.stack = vec!["home", "text"];
         let nav = app.navigation().expect("navigation");
         assert_eq!(
-            nav.screens.last().unwrap().transition,
+            nav.routes.last().unwrap().transition,
             ScreenTransition::Slide
         );
     }
@@ -686,5 +719,46 @@ mod tests {
         assert_eq!(app.stack.last(), Some(&"checklist"));
         app.update(Msg::Checklist(checklist::Msg::SetTask(1, true)));
         assert!(app.checklist.summary().contains("2 of 3 tasks done"));
+    }
+
+    #[test]
+    fn the_scaffold_page_adds_items_and_undoes_them_from_the_snackbar() {
+        let mut app = app();
+        app.update(Msg::Open("scaffold"));
+        let screen = app.screen("scaffold").expect("screen");
+        assert!(screen.floating_action_button.is_some());
+        assert!(screen.snackbar.is_none());
+
+        app.update(Msg::FabAdd);
+        app.update(Msg::FabAdd);
+        let snackbar = app.screen("scaffold").unwrap().snackbar.expect("snackbar");
+        assert_eq!(snackbar.message, "Added item 2");
+
+        app.update(Msg::FabUndo);
+        assert_eq!(app.scaffold_items, 1);
+        assert!(app.screen("scaffold").unwrap().snackbar.is_none());
+
+        // A snackbar that times out keeps the item.
+        app.update(Msg::FabAdd);
+        app.update(Msg::SnackbarGone);
+        assert_eq!(app.scaffold_items, 2);
+        assert!(app.screen("scaffold").unwrap().snackbar.is_none());
+    }
+
+    #[test]
+    fn the_drawer_follows_state_and_picks_a_section() {
+        let mut app = app();
+        app.update(Msg::Open("scaffold"));
+        let drawer = |app: &ShowcaseApp| app.screen("scaffold").unwrap().drawer.expect("drawer");
+        assert!(!drawer(&app).open);
+
+        app.update(Msg::Drawer(true));
+        assert!(drawer(&app).open);
+
+        app.update(Msg::DrawerGo(2));
+        assert_eq!(drawer(&app).selected, Some(2));
+        assert!(!drawer(&app).open);
+        // Other screens have no drawer.
+        assert!(app.screen("home").unwrap().drawer.is_none());
     }
 }

@@ -2,9 +2,10 @@
 
 use crate::host::{Actions, Controller, Host, HostKind, Platform, Session};
 use crate::ios::host::IosState;
-use crate::navigation::{Screen, ScreenTransition};
+use crate::navigation::{Route, ScreenTransition};
 use crate::presentation::Dialog;
 use crate::runtime::Runtime;
+use crate::scaffold::{Chrome, Snackbar};
 use crate::tree::NodeId;
 use crate::ui::RawElement;
 use objc2::MainThreadMarker;
@@ -65,8 +66,8 @@ impl Host<Ios> for IosState {
 pub(crate) struct IosController(pub(crate) Retained<NSObject>);
 
 impl Controller<Ios> for IosController {
-    fn push(&self, _: &mut MainThreadMarker, host: u64, screen: &Screen) -> Result<(), Infallible> {
-        controller_push(&self.0, host, &screen.title, screen.transition.code());
+    fn push(&self, _: &mut MainThreadMarker, host: u64, route: &Route) -> Result<(), Infallible> {
+        controller_push(&self.0, host, route.transition.code());
         Ok(())
     }
 
@@ -85,25 +86,72 @@ impl Controller<Ios> for IosController {
         Ok(())
     }
 
-    fn set_chrome(
+    fn set_chrome(&self, _: &mut MainThreadMarker, chrome: &Chrome) -> Result<(), Infallible> {
+        // A screen without an app bar hides the navigation bar.
+        let bar = chrome.app_bar.as_ref();
+        controller_set_toolbar(
+            &self.0,
+            bar.map_or("", |bar| bar.title.as_str()),
+            bar.and_then(|bar| bar.subtitle.as_deref()).unwrap_or(""),
+            bar.and_then(|bar| bar.back_title.as_deref())
+                .unwrap_or("Back"),
+            bar.is_none(),
+            bar.map_or(&[][..], |bar| bar.actions.as_slice()),
+        );
+        controller_set_bottom_navigation(&self.0, chrome.bottom_navigation.as_ref());
+
+        let fab = chrome.floating_action_button.as_ref();
+        let label = NSString::from_str(fab.map_or("", |fab| fab.label.as_str()));
+        let icon = NSString::from_str(fab.and_then(|fab| fab.icon.ios_name()).unwrap_or(""));
+        // SAFETY: see `controller_push`.
+        let _: () = unsafe {
+            objc2::msg_send![
+                &*self.0,
+                krabikSetFab: &*label,
+                icon: &*icon,
+                visible: fab.is_some()
+            ]
+        };
+
+        let drawer = chrome.drawer.as_ref();
+        let items = drawer.map_or(&[][..], |drawer| drawer.items.as_slice());
+        let labels = string_array(items.iter().map(|item| item.label.as_str()));
+        let icons = string_array(items.iter().map(|item| item.icon.ios_name().unwrap_or("")));
+        // -1 highlights nothing.
+        let selected = drawer
+            .and_then(|drawer| drawer.selected)
+            .map_or(-1, |index| index as i64);
+        // SAFETY: see `controller_push`.
+        let _: () = unsafe {
+            objc2::msg_send![
+                &*self.0,
+                krabikSetDrawer: &*labels,
+                icons: &*icons,
+                selected: selected,
+                present: drawer.is_some(),
+                open: drawer.is_some_and(|drawer| drawer.open)
+            ]
+        };
+        Ok(())
+    }
+
+    fn show_snackbar(
         &self,
         _: &mut MainThreadMarker,
-        screen: Option<&Screen>,
+        snackbar: &Snackbar,
     ) -> Result<(), Infallible> {
-        let toolbar = screen.and_then(|screen| screen.toolbar.as_ref());
-        let title = screen.map_or("", |screen| screen.title.as_str());
-        let subtitle = toolbar.and_then(|t| t.subtitle.as_deref()).unwrap_or("");
-        let back_title = toolbar
-            .and_then(|t| t.back_title.as_deref())
-            .unwrap_or("Back");
-        // A screen shows the navigation bar unless it explicitly hides it.
-        let hidden = screen.is_none() || toolbar.is_some_and(|toolbar| toolbar.hidden);
-        let actions = toolbar.map_or(&[][..], |toolbar| toolbar.actions.as_slice());
-        controller_set_toolbar(&self.0, title, subtitle, back_title, hidden, actions);
-        controller_set_bottom_navigation(
-            &self.0,
-            screen.and_then(|screen| screen.bottom_navigation.as_ref()),
-        );
+        let message = NSString::from_str(&snackbar.message);
+        // An empty label means no action button.
+        let action = NSString::from_str(snackbar.action.as_deref().unwrap_or(""));
+        // SAFETY: see `controller_push`.
+        let _: () =
+            unsafe { objc2::msg_send![&*self.0, krabikShowSnackbar: &*message, action: &*action] };
+        Ok(())
+    }
+
+    fn dismiss_snackbar(&self, _: &mut MainThreadMarker) -> Result<(), Infallible> {
+        // SAFETY: see `controller_push`.
+        let _: () = unsafe { objc2::msg_send![&*self.0, krabikDismissSnackbar] };
         Ok(())
     }
 
@@ -134,14 +182,12 @@ impl Controller<Ios> for IosController {
     }
 }
 
-pub(crate) fn controller_push(controller: &NSObject, host: u64, title: &str, transition: i32) {
-    let title = NSString::from_str(title);
+pub(crate) fn controller_push(controller: &NSObject, host: u64, transition: i32) {
     // SAFETY: the controller is a live Swift object with this @objc method.
     let _: () = unsafe {
         objc2::msg_send![
             controller,
             krabikPush: host as i64,
-            title: &*title,
             transition: transition as i64
         ]
     };
@@ -153,7 +199,7 @@ pub(crate) fn controller_set_toolbar(
     subtitle: &str,
     back_title: &str,
     hidden: bool,
-    actions: &[crate::navigation::ToolbarAction],
+    actions: &[crate::scaffold::AppBarAction],
 ) {
     let title = NSString::from_str(title);
     let subtitle = NSString::from_str(subtitle);

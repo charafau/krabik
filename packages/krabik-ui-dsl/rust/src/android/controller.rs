@@ -4,9 +4,10 @@ use crate::android::HOST_CONTROLLER_CLASS;
 use crate::android::handles::{Method, VOID, class, get as jni_handles, method};
 use crate::android::host::AndroidState;
 use crate::host::{Actions, Controller, Host, HostKind, Platform};
-use crate::navigation::{Screen, ScreenTransition};
+use crate::navigation::{Route, ScreenTransition};
 use crate::presentation::Dialog;
 use crate::runtime::Runtime;
+use crate::scaffold::{Chrome, Snackbar};
 use crate::tree::NodeId;
 use jni::errors::Result as JniResult;
 use jni::objects::{JClass, JObject};
@@ -55,15 +56,13 @@ impl Host<Android> for AndroidState {
 pub(crate) struct AndroidController(pub(crate) Global<JObject<'static>>);
 
 impl Controller<Android> for AndroidController {
-    fn push(&self, env: &mut Env<'_>, host: u64, screen: &Screen) -> JniResult<()> {
-        let title = env.new_string(&screen.title)?;
+    fn push(&self, env: &mut Env<'_>, host: u64, route: &Route) -> JniResult<()> {
         jni_handles(env)?.controller.push.call_void(
             env,
             self.0.as_obj(),
             &[
                 JValue::Long(host as jlong),
-                JValue::Object(title.as_ref()),
-                JValue::Int(screen.transition.code()),
+                JValue::Int(route.transition.code()),
             ],
         )?;
         Ok(())
@@ -87,12 +86,12 @@ impl Controller<Android> for AndroidController {
         Ok(())
     }
 
-    fn set_chrome(&self, env: &mut Env<'_>, screen: Option<&Screen>) -> JniResult<()> {
-        let toolbar = screen.and_then(|screen| screen.toolbar.as_ref());
-        let actions = toolbar.map_or(&[][..], |toolbar| toolbar.actions.as_slice());
-        // A screen shows the toolbar unless it explicitly hides it.
-        let hidden = screen.is_none() || toolbar.is_some_and(|toolbar| toolbar.hidden);
+    fn set_chrome(&self, env: &mut Env<'_>, chrome: &Chrome) -> JniResult<()> {
+        let ids = &jni_handles(env)?.controller;
 
+        // A screen without an app bar hides the toolbar.
+        let bar = chrome.app_bar.as_ref();
+        let actions = bar.map_or(&[][..], |bar| bar.actions.as_slice());
         let action_labels = string_array!(env, actions.iter().map(|a| a.label.as_str()));
         let action_icons = string_array!(
             env,
@@ -100,36 +99,35 @@ impl Controller<Android> for AndroidController {
         );
         let title = jcall!(
             env,
-            env.new_string(screen.map_or("", |screen| screen.title.as_str()))
+            env.new_string(bar.map_or("", |bar| bar.title.as_str()))
         )?;
         let subtitle = jcall!(
             env,
-            env.new_string(toolbar.and_then(|t| t.subtitle.as_deref()).unwrap_or(""))
+            env.new_string(bar.and_then(|bar| bar.subtitle.as_deref()).unwrap_or(""))
         )?;
         let back_title = jcall!(
             env,
             env.new_string(
-                toolbar
-                    .and_then(|t| t.back_title.as_deref())
+                bar.and_then(|bar| bar.back_title.as_deref())
                     .unwrap_or("Back")
             )
         )?;
-        jni_handles(env)?.controller.set_toolbar.call_void(
+        ids.set_toolbar.call_void(
             env,
             self.0.as_obj(),
             &[
                 JValue::Object(title.as_ref()),
                 JValue::Object(subtitle.as_ref()),
                 JValue::Object(back_title.as_ref()),
-                JValue::Bool(hidden),
+                JValue::Bool(bar.is_none()),
                 JValue::Object(&action_labels),
                 JValue::Object(&action_icons),
             ],
         )?;
 
         // No items hides the bar.
-        let bar = screen.and_then(|screen| screen.bottom_navigation.as_ref());
-        let items = bar.map_or(&[][..], |bar| bar.items.as_slice());
+        let bottom = chrome.bottom_navigation.as_ref();
+        let items = bottom.map_or(&[][..], |bar| bar.items.as_slice());
         let labels = string_array!(env, items.iter().map(|item| item.label.as_str()));
         let icons = string_array!(
             env,
@@ -137,18 +135,86 @@ impl Controller<Android> for AndroidController {
                 .iter()
                 .map(|item| item.icon.android_name().unwrap_or(""))
         );
+        ids.set_bottom_navigation.call_void(
+            env,
+            self.0.as_obj(),
+            &[
+                JValue::Object(&labels),
+                JValue::Object(&icons),
+                JValue::Int(bottom.map_or(0, |bar| bar.selected) as jint),
+            ],
+        )?;
+
+        let fab = chrome.floating_action_button.as_ref();
+        let label = jcall!(
+            env,
+            env.new_string(fab.map_or("", |fab| fab.label.as_str()))
+        )?;
+        let icon = jcall!(
+            env,
+            env.new_string(fab.and_then(|fab| fab.icon.android_name()).unwrap_or(""))
+        )?;
+        ids.set_fab.call_void(
+            env,
+            self.0.as_obj(),
+            &[
+                JValue::Object(label.as_ref()),
+                JValue::Object(icon.as_ref()),
+                JValue::Bool(fab.is_some()),
+            ],
+        )?;
+
+        let drawer = chrome.drawer.as_ref();
+        let items = drawer.map_or(&[][..], |drawer| drawer.items.as_slice());
+        let labels = string_array!(env, items.iter().map(|item| item.label.as_str()));
+        let icons = string_array!(
+            env,
+            items
+                .iter()
+                .map(|item| item.icon.android_name().unwrap_or(""))
+        );
+        ids.set_drawer.call_void(
+            env,
+            self.0.as_obj(),
+            &[
+                JValue::Object(&labels),
+                JValue::Object(&icons),
+                // -1 highlights nothing.
+                JValue::Int(
+                    drawer
+                        .and_then(|drawer| drawer.selected)
+                        .map_or(-1, |index| index as jint),
+                ),
+                JValue::Bool(drawer.is_some()),
+                JValue::Bool(drawer.is_some_and(|drawer| drawer.open)),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn show_snackbar(&self, env: &mut Env<'_>, snackbar: &Snackbar) -> JniResult<()> {
+        let message = jcall!(env, env.new_string(&snackbar.message))?;
+        // An empty label means no action button.
+        let action = jcall!(
+            env,
+            env.new_string(snackbar.action.as_deref().unwrap_or(""))
+        )?;
+        jni_handles(env)?.controller.show_snackbar.call_void(
+            env,
+            self.0.as_obj(),
+            &[
+                JValue::Object(message.as_ref()),
+                JValue::Object(action.as_ref()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn dismiss_snackbar(&self, env: &mut Env<'_>) -> JniResult<()> {
         jni_handles(env)?
             .controller
-            .set_bottom_navigation
-            .call_void(
-                env,
-                self.0.as_obj(),
-                &[
-                    JValue::Object(&labels),
-                    JValue::Object(&icons),
-                    JValue::Int(bar.map_or(0, |bar| bar.selected) as jint),
-                ],
-            )?;
+            .dismiss_snackbar
+            .call_void(env, self.0.as_obj(), &[])?;
         Ok(())
     }
 
@@ -218,6 +284,10 @@ pub(crate) struct Handles {
     pub(crate) set_root_visible: Method,
     pub(crate) set_toolbar: Method,
     pub(crate) set_bottom_navigation: Method,
+    pub(crate) set_fab: Method,
+    pub(crate) set_drawer: Method,
+    pub(crate) show_snackbar: Method,
+    pub(crate) dismiss_snackbar: Method,
     pub(crate) set_back_enabled: Method,
     pub(crate) show_dialog: Method,
     pub(crate) dismiss_dialog: Method,
@@ -229,7 +299,7 @@ impl Handles {
     pub(crate) fn load(env: &mut Env<'_>) -> JniResult<Self> {
         let class = class(env, HOST_CONTROLLER_CLASS)?;
         Ok(Self {
-            push: method!(env, &class, "push", "(JLjava/lang/String;I)V", VOID),
+            push: method!(env, &class, "push", "(JI)V", VOID),
             pop: method!(env, &class, "pop", "(II)V", VOID),
             set_root_visible: method!(env, &class, "setRootVisible", "(Z)V", VOID),
             set_toolbar: method!(
@@ -246,6 +316,28 @@ impl Handles {
                 "([Ljava/lang/String;[Ljava/lang/String;I)V",
                 VOID
             ),
+            set_fab: method!(
+                env,
+                &class,
+                "setFab",
+                "(Ljava/lang/String;Ljava/lang/String;Z)V",
+                VOID
+            ),
+            set_drawer: method!(
+                env,
+                &class,
+                "setDrawer",
+                "([Ljava/lang/String;[Ljava/lang/String;IZZ)V",
+                VOID
+            ),
+            show_snackbar: method!(
+                env,
+                &class,
+                "showSnackbar",
+                "(Ljava/lang/String;Ljava/lang/String;)V",
+                VOID
+            ),
+            dismiss_snackbar: method!(env, &class, "dismissSnackbar", "()V", VOID),
             set_back_enabled: method!(env, &class, "setBackEnabled", "(Z)V", VOID),
             show_dialog: method!(
                 env,
