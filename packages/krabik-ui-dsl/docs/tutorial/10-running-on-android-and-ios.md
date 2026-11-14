@@ -161,7 +161,7 @@ Beyond Rust you need:
 ## The Android host
 
 The quickest way to create it is to copy `example-todo-minimal/android` to `notes/android`
-(without its `build/` directories and without `app/src/main/jniLibs`) and change the files
+(without its `build/` directories) and change the files
 below. The Gradle wrapper, `gradle.properties`, `gradle/libs.versions.toml`, the top-level
 `build.gradle.kts` and the launcher icons can stay as they are.
 
@@ -346,7 +346,9 @@ drawable has to exist in *your* app. Copy
 ```kotlin
 // Every build that packages native libraries first runs `cargo build` for the
 // selected Android ABIs and copies the resulting `.so` files into
-// `src/main/jniLibs`. The ABI defaults to the architecture of the machine
+// `build/rustJniLibs/<debug|release>`, which is registered as a native
+// library folder of that build type. Debug and release therefore never
+// package each other's library. The ABI defaults to the architecture of the machine
 // running Gradle, which matches local emulators; override it with
 // `-PkrabikAbis=arm64-v8a,x86_64` (or the KRABIK_ABIS environment variable).
 ```
@@ -360,7 +362,7 @@ In more detail:
   `assembleDebug` triggers the right one.
 - For each ABI it runs `cargo build --manifest-path ../rust/Cargo.toml --target <triple>` (plus
   `--release` for a release build) with the NDK's clang set as the linker, then copies
-  `lib<name>.so` into `app/src/main/jniLibs/<abi>/`.
+  `lib<name>.so` into `app/build/rustJniLibs/<debug|release>/<abi>/`.
 - The linker is chosen for the app's minimum API level, which is what
   `extra["krabikMinSdk"] = android.defaultConfig.minSdk` passes in.
 - It finds the NDK through `ANDROID_NDK_HOME` or `ANDROID_NDK_ROOT`, or takes the newest one in
@@ -648,7 +650,7 @@ you want:
 ```
 
 Several ABIs can be listed, separated by commas, to build one APK for both the emulator and a
-phone. The script deletes `jniLibs` directories of ABIs the current build does not target, so a
+phone. The script deletes the library directories of ABIs the current build does not target, so a
 stale library from an earlier build is never packaged.
 
 ## When it does not start

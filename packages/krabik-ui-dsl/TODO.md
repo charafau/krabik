@@ -522,6 +522,9 @@ siblings with the same key would hash to the same node identifier.
   stops the app; the derive finds colours in `Option`, `Vec` and qualified paths; duplicate list
   keys are caught; iOS creation and update share one function; row binding is one shared,
   host-tested `RowBinder`.
+- **Build.** A change in the macro crate rebuilds the Android library; debug and release
+  libraries are packaged from separate folders; `jni` is an Android-only dependency of the
+  framework; the Kotlin library ships keep rules for minified builds.
 
 ---
 
@@ -664,13 +667,11 @@ source, not all reproduced on a device.
 
 ### Build
 
-- `rust.gradle.kts` does not list `rust/macros/src` among its inputs, so a change only to the
-  macro crate may not rebuild the Android library.
-- Debug and release Rust builds write to the same `app/src/main/jniLibs`, and the default ABI is
-  the host's only: pass `-PkrabikAbis=...` for a release.
-- `jni` is an unconditional dependency, so it is compiled for iOS and the host as well.
-- No R8 keep rules: classes and methods are looked up by name, which only matters if an app turns
-  minification on.
+- The default ABI is the host's only: pass `-PkrabikAbis=...` for a release meant for phones.
+- The app crates still depend on `jni` on every platform, because their Android entry point is
+  not behind a `cfg`. The framework itself only does on Android.
+- Minified builds were checked by hand on the showcase; the instrumented suites cannot run
+  against a minified app. Resource shrinking would remove drawables that Rust names as icons.
 
 ## Nice-to-haves
 

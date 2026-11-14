@@ -11,7 +11,9 @@ import javax.inject.Inject
 
 // Every build that packages native libraries first runs `cargo build` for the
 // selected Android ABIs and copies the resulting `.so` files into
-// `src/main/jniLibs`. The ABI defaults to the architecture of the machine
+// `build/rustJniLibs/<debug|release>`, which is registered as a native
+// library folder of that build type. Debug and release therefore never
+// package each other's library. The ABI defaults to the architecture of the machine
 // running Gradle, which matches local emulators; override it with
 // `-PkrabikAbis=arm64-v8a,x86_64` (or the KRABIK_ABIS environment variable).
 
@@ -174,10 +176,13 @@ abstract class BuildRustLibs : DefaultTask() {
   @get:InputDirectory
   abstract val sources: DirectoryProperty
 
-  /** Sources of crates the rust crate statically includes, if any. */
-  @get:Optional
-  @get:InputDirectory
-  abstract val dependencySources: DirectoryProperty
+  /**
+   * Sources and manifests of the crates the rust crate statically includes:
+   * the framework and its macro crate. A change in any of them must rebuild
+   * the library.
+   */
+  @get:InputFiles
+  abstract val dependencySources: ConfigurableFileCollection
 
   @get:InputFile
   abstract val cargoToml: RegularFileProperty
@@ -238,8 +243,8 @@ abstract class BuildRustLibs : DefaultTask() {
 }
 
 val rustCrateDirectory = File(rootProject.projectDir.parentFile, "rust")
-/** The framework's Rust sources, next to this script's module. */
-val frameworkSources = File(project(":krabik-ui").projectDir.parentFile.parentFile, "rust/src")
+/** The framework's Rust crate, next to this script's module. */
+val frameworkCrate = File(project(":krabik-ui").projectDir.parentFile.parentFile, "rust")
 val rustManifest = File(rustCrateDirectory, "Cargo.toml")
 check(rustManifest.isFile) {
   "Rust crate not found at ${rustManifest.path}; this Android project expects it in ../rust"
@@ -259,7 +264,7 @@ val rustLinkerApi = (extra["krabikMinSdk"] as? Int) ?: 24
 fun registerRustBuildTask(name: String, buildProfile: String): TaskProvider<BuildRustLibs> =
   tasks.register<BuildRustLibs>(name) {
     group = "rust"
-    description = "Builds the Rust library ($buildProfile) and copies it into src/main/jniLibs."
+    description = "Builds the Rust library ($buildProfile) into build/rustJniLibs/$buildProfile."
     abis.set(rustAbis)
     triples.set(rustTargets.map { it.target })
     linkerVariables.set(rustTargets.map { it.linkerVariable })
@@ -268,20 +273,41 @@ fun registerRustBuildTask(name: String, buildProfile: String): TaskProvider<Buil
     manifest.set(rustManifest.path)
     libraryName.set(rustLibraryName)
     sources.set(File(rustCrateDirectory, "src"))
-    // An app crate statically includes the framework, so framework changes
-    // must also rebuild it.
-    frameworkSources.takeIf { it.isDirectory && it != File(rustCrateDirectory, "src") }
-      ?.let { dependencySources.set(it) }
+    // An app crate statically includes the framework and its macros, so a
+    // change in either must also rebuild it.
+    if (frameworkCrate.isDirectory && frameworkCrate != rustCrateDirectory) {
+      dependencySources.from(
+        fileTree(File(frameworkCrate, "src")),
+        fileTree(File(frameworkCrate, "macros/src")),
+        File(frameworkCrate, "Cargo.toml"),
+        File(frameworkCrate, "macros/Cargo.toml"),
+      )
+    }
     cargoToml.set(rustManifest)
     File(rustCrateDirectory, "build.rs").takeIf { it.isFile }?.let { buildScript.set(it) }
     File(rustCrateDirectory, "Cargo.lock").takeIf { it.isFile }?.let { cargoLock.set(it) }
-    outputDirectory.set(layout.projectDirectory.dir("src/main/jniLibs"))
+    outputDirectory.set(layout.buildDirectory.dir("rustJniLibs/$buildProfile"))
   }
 
 val rustBuildTasks = mapOf(
   "debug" to registerRustBuildTask("buildRustLibsDebug", "debug"),
   "release" to registerRustBuildTask("buildRustLibsRelease", "release"),
 )
+
+// Each build type packages the folder its own task writes. The Android
+// extension is reached by name because this script is applied, not a plugin,
+// and has no typed accessor for it.
+extensions.getByName("android").withGroovyBuilder {
+  val sourceSets = getProperty("sourceSets") as NamedDomainObjectContainer<*>
+  rustBuildTasks.keys.forEach { buildType ->
+    val sourceSet = sourceSets.getByName(buildType) ?: return@forEach
+    val jniLibs = sourceSet.withGroovyBuilder { getProperty("jniLibs") } ?: return@forEach
+    // A plain directory: the source-set API refuses providers. The task
+    // dependency comes from the hook on the merge tasks below.
+    val directory = layout.buildDirectory.dir("rustJniLibs/$buildType").get().asFile
+    jniLibs.withGroovyBuilder { "srcDir"(directory) }
+  }
+}
 
 // The folder merge runs before the native library merge, so hook both.
 tasks.matching {

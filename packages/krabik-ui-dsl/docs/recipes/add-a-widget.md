@@ -1050,9 +1050,9 @@ Rust function is missing or misnamed, the app starts and renders. It throws
 `UnsatisfiedLinkError` the first time the user presses the control. If the argument lists differ
 (say `Int` in Kotlin, `jfloat` in Rust), nothing fails; the value is garbage.
 
-**Minification.** Rust finds Kotlin classes and methods by name. The apps set
-`isMinifyEnabled = false` and the library ships no keep rules, so an app that turns R8 on would
-break every one of these lookups.
+**Minification.** Rust finds Kotlin classes and methods by name. The library ships
+`consumer-rules.pro`, which keeps the whole `dev.krabik.ui` package, so a new widget class in
+that package is covered without further work. A class you put in another package is not.
 
 **The derive matches types by their written name.** In `rust/macros/src/widget.rs`, a field is a
 colour when the last segment of its type is `Color`, directly or inside an `Option` or a `Vec`.

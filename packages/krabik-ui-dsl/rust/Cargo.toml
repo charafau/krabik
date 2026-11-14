@@ -8,8 +8,11 @@ edition = "2024"
 
 [dependencies]
 krabik-ui-dsl-macros = { path = "macros" }
-jni = "0.22"
 taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
+
+# Only the Android renderer talks to a JVM.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 block2 = "0.6"
