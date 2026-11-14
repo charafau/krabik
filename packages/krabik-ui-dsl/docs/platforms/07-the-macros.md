@@ -91,11 +91,13 @@ Two things need no attribute. A field of type `Handler<()>` gets an event method
 message. A field of type `Handler<T>` gets an event method that takes a function from `T` to a
 message. And every field of type `Color` is added to the generated `resolve_colors`.
 
-The macro recognises these types **by name**: `is_named(ty, "Color")` checks that the type is
-written as the bare identifier `Color`, and `generic_payload` looks at the last path segment for
-`Handler`, `Option` or `Vec`. It cannot resolve types; a type alias or a fully qualified
-`crate::style::Color` would not be recognised as a colour. That is a general limit of derive
-macros, which see tokens, not types.
+The macro recognises these types **by name**: `is_named(ty, "Color")` checks that the last path
+segment is `Color` with no type arguments, so `Color`, `style::Color` and `crate::style::Color`
+all count, and `generic_payload` looks at the last path segment for `Handler`, `Option` or `Vec`.
+A colour inside an `Option` or a `Vec` is resolved too. It cannot resolve types: a type alias
+(`type Tint = Color`) is not recognised, and an unrelated type that happens to be named `Color`
+is. That is a general limit of derive macros, which see tokens, not types. A field that holds a
+colour which must not follow the appearance is marked `#[widget(fixed_color)]`.
 
 ### A real input
 

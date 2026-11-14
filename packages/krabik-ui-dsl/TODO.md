@@ -517,6 +517,11 @@ siblings with the same key would hash to the same node identifier.
   started before an Android activity is recreated delivers to the activity that replaces it.
 - **Logging.** Problems the framework can continue from go to logcat on Android
   (`adb logcat -s krabik`).
+- **Safety nets.** Cross-language constants are compared by a Rust test; a new chrome field
+  must be handled by both controllers to compile; a failed JNI lookup is named in logcat and
+  stops the app; the derive finds colours in `Option`, `Vec` and qualified paths; duplicate list
+  keys are caught; iOS creation and update share one function; row binding is one shared,
+  host-tested `RowBinder`.
 
 ---
 
@@ -650,17 +655,12 @@ source, not all reproduced on a device.
 
 ### Safety nets that are missing
 
-- An exhaustive `match` can still be satisfied by adding a variant to a do-nothing arm. On iOS a
-  widget's `create` calls its update function only by convention; Android funnels both through
-  `configure_view`.
-- `#[derive(Widget)]` recognises `Color`, `Handler`, `Option`, `Vec` and `String` by the name as
-  written. `crate::style::Color` or `Option<Color>` would be skipped for dark mode.
-- Chrome event codes are kept in step by hand in four places (Rust, Kotlin, Swift, the C header),
-  and a new `Chrome` field that one platform's controller never sends still compiles.
-- A recycled list is only a recycler on Android and iOS, so no host test covers row binding.
-- One wrong JNI name or signature makes `nativeCreate` fail and nothing renders; the Rust-side
-  error is printed with `eprintln!`, which may not reach logcat.
-- Duplicate sibling keys are only asserted in debug builds.
+- A type alias for `Color` or `Handler` is invisible to `#[derive(Widget)]`, which matches types
+  by the name as written.
+- A `match` on widgets is exhaustive, but a new variant can still be added to an arm that does
+  nothing.
+- The chrome event codes and the transition duration are compared across Rust, Kotlin, Swift and
+  the C header by a Rust test that reads those files; nothing generates them from one source.
 
 ### Build
 
@@ -669,8 +669,6 @@ source, not all reproduced on a device.
 - Debug and release Rust builds write to the same `app/src/main/jniLibs`, and the default ABI is
   the host's only: pass `-PkrabikAbis=...` for a release.
 - `jni` is an unconditional dependency, so it is compiled for iOS and the host as well.
-- The slide and fade durations in `res/anim/krabik_*.xml` must match `TRANSITION_MS` in
-  `KrabikHostController` by hand.
 - No R8 keep rules: classes and methods are looked up by name, which only matters if an app turns
   minification on.
 

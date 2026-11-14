@@ -73,22 +73,21 @@ pub(crate) fn update_content(
             // Images are updated by `IosState::load_image`, which starts
             // downloads and therefore needs the state itself.
             (Widget::Image(_), _) => {}
-            // The stored content does not belong to this widget.
-            (
-                Widget::Text(_)
-                | Widget::TextField(_)
-                | Widget::Button(_)
-                | Widget::Switch(_)
-                | Widget::Checkbox(_)
-                | Widget::RadioButton(_)
-                | Widget::RadioGroup(_)
-                | Widget::DatePicker(_)
-                | Widget::TabBar(_)
-                | Widget::Slider(_)
-                | Widget::Progress(_)
-                | Widget::Spinner(_),
-                _,
-            ) => {}
+            // The stored content does not belong to this widget: the node
+            // changed kind, which the engine handles by recreating the view.
+            // Each widget is named, so a new one needs an arm of its own
+            // above before it can be listed here.
+            (Widget::Text(_), _)
+            | (Widget::TextField(_), _)
+            | (Widget::Button(_), _)
+            | (Widget::Switch(_), _)
+            | (Widget::Checkbox(_) | Widget::RadioButton(_), _)
+            | (Widget::RadioGroup(_), _)
+            | (Widget::DatePicker(_), _)
+            | (Widget::TabBar(_), _)
+            | (Widget::Slider(_), _)
+            | (Widget::Progress(_), _)
+            | (Widget::Spinner(_), _) => {}
         },
         NodeKind::Pager(props) => {
             if let Content::Pager {
@@ -149,8 +148,9 @@ pub(crate) struct Site {
 }
 
 impl IosState {
-    /// Creates the native view of a widget, configured and wired to its
-    /// events.
+    /// Creates the native view of a widget and wires it to its events. Its
+    /// properties are applied by the `update_content` call that follows
+    /// every creation, so creating and updating cannot drift apart.
     pub(crate) fn create_widget(
         &mut self,
         widget: &Widget,
@@ -158,18 +158,18 @@ impl IosState {
         site: &Site,
     ) -> ViewHandle {
         match widget {
-            Widget::Text(props) => text::create(props, node, site),
-            Widget::Button(props) => button::create(props, node, site),
-            Widget::TextField(props) => text_field::create(props, node, site),
-            Widget::Switch(props) => switch::create(props, node, site),
-            Widget::Checkbox(props) => check::create(props, node, site, false),
-            Widget::RadioButton(props) => check::create(props, node, site, true),
-            Widget::RadioGroup(props) => radio_group::create(props, node, site),
-            Widget::TabBar(props) => tab_bar::create(props, node, site),
-            Widget::DatePicker(props) => date_picker::create(props, node, site),
-            Widget::Slider(props) => slider::create(props, node, site),
-            Widget::Progress(props) => progress::create(props, node, site),
-            Widget::Spinner(props) => progress::create_spinner(props, node, site),
+            Widget::Text(_) => text::create(node, site),
+            Widget::Button(_) => button::create(node, site),
+            Widget::TextField(_) => text_field::create(node, site),
+            Widget::Switch(_) => switch::create(node, site),
+            Widget::Checkbox(_) => check::create(node, site, false),
+            Widget::RadioButton(_) => check::create(node, site, true),
+            Widget::RadioGroup(_) => radio_group::create(node, site),
+            Widget::TabBar(_) => tab_bar::create(node, site),
+            Widget::DatePicker(_) => date_picker::create(node, site),
+            Widget::Slider(_) => slider::create(node, site),
+            Widget::Progress(_) => progress::create(node, site),
+            Widget::Spinner(_) => progress::create_spinner(node, site),
             Widget::Image(props) => self.create_image(props, node, site.mtm),
         }
     }

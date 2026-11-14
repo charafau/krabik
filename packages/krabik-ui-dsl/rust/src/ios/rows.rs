@@ -1,7 +1,7 @@
 //! Recycled lists: the collection view data source and binding rows into its cells.
 
 use crate::geometry::Size;
-use crate::host::Actions;
+use crate::host::rows::Bind;
 use crate::ios::cast_view;
 use crate::ios::host::{Content, IosState, ViewHandle};
 use crate::ios::motion::{animation_is_enabled, run_animation};
@@ -9,9 +9,9 @@ use crate::ios::widgets::Site;
 use crate::ios::{guard, remove_subviews, schedule, with_state};
 use crate::layout::LayoutResult;
 use crate::render::RenderNode;
+use crate::tree;
 use crate::tree::{NodeId, RecyclerProps, UiNode};
 use crate::ui::{AnimationCurve, RawElement};
-use crate::{render, tree};
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -26,7 +26,6 @@ use objc2_ui_kit::{
     UICollectionViewDelegateFlowLayout, UICollectionViewLayout, UIScrollViewDelegate, UIView,
     UIViewAnimatingPosition,
 };
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// The reuse identifier of a recycled-list row cell.
@@ -238,22 +237,6 @@ impl RecyclerDataSource {
     }
 }
 
-/// One recycled row currently bound to a collection-view cell.
-///
-/// Cells are reused by UIKit, so the state is keyed by the cell's identity and
-/// diffed when that cell shows another item or new content.
-pub(crate) struct IosRowState {
-    pub(crate) list: NodeId,
-    pub(crate) index: usize,
-    /// The width the row was laid out for.
-    pub(crate) width: f64,
-    /// The measured row height.
-    pub(crate) height: f32,
-    pub(crate) tree: UiNode,
-    pub(crate) layout: LayoutResult,
-    pub(crate) views: HashMap<NodeId, ViewHandle>,
-}
-
 impl IosState {
     /// The element of one recycled row, or `None` when the item vanished.
     pub(crate) fn row_element(&self, list: NodeId, index: usize) -> Option<RawElement> {
@@ -332,6 +315,11 @@ impl IosState {
     /// Builds or updates one recycled row inside a collection-view cell.
     ///
     /// Returns whether the row's height differs from what the cell showed.
+    /// What to build, and what changed since the cell was last bound, is
+    /// decided by the shared [`RowBinder`]; this function applies the result
+    /// to the cell's views.
+    ///
+    /// [`RowBinder`]: crate::host::rows::RowBinder
     pub(crate) fn bind_row(
         &mut self,
         list: NodeId,
@@ -339,78 +327,34 @@ impl IosState {
         cell: &UICollectionViewCell,
         width: f64,
     ) -> bool {
-        let Some(element) = self.row_element(list, index) else {
-            return false;
-        };
-        let tree = self
-            .runtime
-            .build_subtree(&element, tree::row_root(list, index));
+        // Cells are reused by UIKit, so a row is keyed by its cell's identity.
         let key = cell as *const UICollectionViewCell as usize;
-
-        // A render rebinds every visible row. Most of them did not change:
-        // keep the widgets and frames, and only take over the new handlers.
-        let reapply = self.runtime.take_row_reapply(&tree);
-        if reapply.is_none()
-            && let Some(state) = self.row_states.get_mut(&key)
-            && state.list == list
-            && state.index == index
-            && state.width == width
-            && state.tree == tree
+        let mut pending = match self
+            .rows
+            .begin(&mut self.runtime, &key, list, index, width as f32)
         {
-            state.tree = tree;
-            self.clear_row_actions(list, index);
-            let actions = row_actions(&self.row_states[&key].tree);
-            self.store_row_actions(list, index, actions);
-            return false;
-        }
-
-        let layout = self.layout_row(&tree, width as f32);
-        let height = root_height(&layout, list, index);
-        let transition_ms = self
-            .runtime
-            .row_source(list)
-            .map_or(0, |props| props.row_transition_ms);
+            Bind::Missing | Bind::Unchanged { .. } => return false,
+            Bind::Changed(pending) => *pending,
+        };
         let content = cell.contentView();
 
-        let previous = self.row_states.remove(&key);
-        let had_previous = previous.is_some();
-        let resized = previous.as_ref().is_some_and(|state| {
-            state.list == list && state.index == index && (state.height - height).abs() > 0.5
-        });
-        let rebinding = previous
-            .as_ref()
-            .is_some_and(|state| state.list == list && state.index == index);
-        let (old_tree, old_layout, mut views) = if let Some(state) = previous {
-            self.clear_row_actions(state.list, state.index);
-            if !rebinding
-                && let Some(focus) = self.runtime.row_focus()
-                && tree::find(&state.tree, focus.field).is_some()
-            {
-                // The cell is about to show another item; keep the logical
-                // focus for when the row comes back.
-                self.runtime.park_row_focus(focus.field);
-            }
-            self.unregister_row_nodes(&state.tree);
-            (state.tree, state.layout, state.views)
-        } else {
-            // The cell was recycled behind our back; start from an empty tree.
+        if pending.fresh {
+            // The cell was recycled behind our back; start from nothing.
             remove_subviews(&content);
-            (UiNode::empty(), LayoutResult::default(), HashMap::new())
-        };
-
-        let mut ops = render::diff_reapplying(&old_tree, &tree, reapply);
-        ops.extend(render::diff_layout(&old_tree, &tree, &old_layout, &layout));
+        }
 
         // The snapshot shows the old content while the new widgets are laid
         // out underneath. The cell stays available for reuse immediately.
-        let snapshot = if animation_is_enabled(transition_ms) && had_previous && !ops.is_empty() {
-            content.snapshotViewAfterScreenUpdates(false)
-        } else {
-            None
-        };
+        let transition_ms = pending.transition_ms;
+        let snapshot =
+            if animation_is_enabled(transition_ms) && !pending.fresh && !pending.ops.is_empty() {
+                content.snapshotViewAfterScreenUpdates(false)
+            } else {
+                None
+            };
 
-        for op in ops {
-            self.apply_to(op, &mut views, &content, false);
+        for op in std::mem::take(&mut pending.ops) {
+            self.apply_to(op, &mut pending.views, &content, false);
         }
 
         if let Some(snapshot) = snapshot
@@ -432,20 +376,9 @@ impl IosState {
             );
         }
 
-        self.record_row_actions(list, index, &tree);
-        self.register_row_nodes(list, index, &tree);
-        self.row_states.insert(
-            key,
-            IosRowState {
-                list,
-                index,
-                width,
-                height,
-                tree,
-                layout,
-                views,
-            },
-        );
+        let rebinding = pending.rebinding;
+        let resized = pending.resized;
+        self.rows.finish(key, pending);
 
         if !rebinding
             && let Some(focus) = self.runtime.row_focus()
@@ -459,39 +392,18 @@ impl IosState {
 
     /// Releases the widgets and actions of the row a cell currently shows.
     pub(crate) fn unbind_row(&mut self, key: usize) {
-        if let Some(state) = self.row_states.remove(&key) {
-            for handle in state.views.values() {
+        if let Some(row) = self.rows.unbind(&mut self.runtime, &key) {
+            for handle in row.views.values() {
                 if let Some(link) = &handle.frame_link {
                     link.invalidate();
                 }
             }
-            if let Some(focus) = self.runtime.row_focus()
-                && tree::find(&state.tree, focus.field).is_some()
-            {
-                self.runtime.park_row_focus(focus.field);
-            }
-            self.unregister_row_nodes(&state.tree);
-            self.clear_row_actions(state.list, state.index);
-        }
-    }
-
-    /// Maps every node of a bound row back to its item.
-    pub(crate) fn register_row_nodes(&mut self, list: NodeId, index: usize, tree: &UiNode) {
-        for node in tree::preorder(tree) {
-            self.row_nodes.insert(node.id, (list, index));
-        }
-    }
-
-    /// Forgets the nodes of a row that is no longer bound.
-    pub(crate) fn unregister_row_nodes(&mut self, tree: &UiNode) {
-        for node in tree::preorder(tree) {
-            self.row_nodes.remove(&node.id);
         }
     }
 
     /// Whether a row field is still in a window, and so still really focused.
     pub(crate) fn field_attached(&self, id: NodeId) -> bool {
-        self.row_states.values().any(|row| {
+        self.rows.rows().any(|row| {
             row.views
                 .get(&id)
                 .is_some_and(|handle| match &handle.content {
@@ -503,7 +415,7 @@ impl IosState {
 
     /// Makes a row field the first responder, if it can be.
     pub(crate) fn focus_field(&self, id: NodeId) -> bool {
-        for row in self.row_states.values() {
+        for row in self.rows.rows() {
             if let Some(handle) = row.views.get(&id)
                 && let Content::Field(field) = &handle.content
             {
@@ -529,62 +441,8 @@ impl IosState {
 
     /// Forgets actions and rows whose list or item no longer exists.
     pub(crate) fn prune_rows(&mut self) {
-        let stale: Vec<((NodeId, usize), Vec<NodeId>)> = self
-            .row_action_ids
-            .iter()
-            .filter(|((list, index), _)| {
-                self.runtime
-                    .recycled_item_count(*list)
-                    .is_none_or(|count| *index >= count)
-            })
-            .map(|(key, ids)| (*key, ids.clone()))
-            .collect();
-        for (key, ids) in stale {
-            self.row_action_ids.remove(&key);
-            for id in ids {
-                self.row_actions.remove(&id);
-            }
-        }
-
-        let detached: Vec<usize> = self
-            .row_states
-            .iter()
-            .filter(|(_, row)| self.runtime.recycled_item_count(row.list).is_none())
-            .map(|(key, _)| *key)
-            .collect();
-        for key in detached {
-            if let Some(state) = self.row_states.remove(&key) {
-                self.unregister_row_nodes(&state.tree);
-            }
-        }
+        self.rows.prune(&self.runtime);
     }
-
-    /// Drops the actions recorded for one row binding.
-    pub(crate) fn clear_row_actions(&mut self, list: NodeId, index: usize) {
-        if let Some(ids) = self.row_action_ids.remove(&(list, index)) {
-            for id in ids {
-                self.row_actions.remove(&id);
-            }
-        }
-    }
-
-    pub(crate) fn record_row_actions(&mut self, list: NodeId, index: usize, tree: &UiNode) {
-        self.store_row_actions(list, index, row_actions(tree));
-    }
-
-    fn store_row_actions(&mut self, list: NodeId, index: usize, actions: Vec<(NodeId, Actions)>) {
-        let ids = actions.iter().map(|(id, _)| *id).collect();
-        self.row_actions.extend(actions);
-        self.row_action_ids.insert((list, index), ids);
-    }
-}
-
-/// The handlers of every widget in a row.
-fn row_actions(tree: &UiNode) -> Vec<(NodeId, Actions)> {
-    tree::preorder(tree)
-        .into_iter()
-        .filter_map(|node| Actions::of(node).map(|actions| (node.id, actions)))
-        .collect()
 }
 
 /// The measured height of a laid-out row.

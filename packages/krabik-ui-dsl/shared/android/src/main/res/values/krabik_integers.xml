@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        How long a screen transition takes. The animations in res/anim and
+        KrabikHostController both read it; iOS uses the same value
+        (KrabikHostController.transitionSeconds), which a Rust test checks.
+    -->
+    <integer name="krabik_transition_ms">280</integer>
+</resources>

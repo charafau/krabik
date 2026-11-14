@@ -80,30 +80,19 @@ pub(crate) fn wire_radio_group_item(
 }
 
 /// Creates the native view of a radio group.
-pub(crate) fn create(props: &RadioGroupProps, node: &RenderNode, site: &Site) -> ViewHandle {
+pub(crate) fn create(node: &RenderNode, site: &Site) -> ViewHandle {
     let stack = UIStackView::new(site.mtm);
     stack.setAxis(UILayoutConstraintAxis::Vertical);
     stack.setAlignment(UIStackViewAlignment::Fill);
     stack.setDistribution(UIStackViewDistribution::FillEqually);
-    let mut buttons = Vec::new();
-    let mut labels = Vec::new();
-    update_radio_group(
-        &stack,
-        &mut buttons,
-        &mut labels,
-        props,
-        site.handle,
-        site.host,
-        site.node,
-        site.mtm,
-    );
+    // The options are added by the update that follows creation.
     let view = cast_view(stack.clone());
     ViewHandle::new(
         view,
         Content::RadioGroup {
             stack,
-            buttons,
-            labels,
+            buttons: Vec::new(),
+            labels: Vec::new(),
         },
         node,
     )

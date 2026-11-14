@@ -45,9 +45,8 @@ pub(crate) fn wire_slider(
 }
 
 /// Creates the native view of a slider.
-pub(crate) fn create(props: &SliderProps, node: &RenderNode, site: &Site) -> ViewHandle {
+pub(crate) fn create(node: &RenderNode, site: &Site) -> ViewHandle {
     let slider = UISlider::new(site.mtm);
-    update_slider(&slider, props);
     wire_slider(&slider, site.handle, site.host, site.node, site.mtm);
     let view = cast_view(slider.clone());
     ViewHandle::new(view, Content::Slider(slider), node)

@@ -63,6 +63,9 @@ class KrabikHostController(
     private var drawerOpen = false
     private var backTitle = "Back"
     private var lastPopAnimated = false
+    /** The length of a screen transition, shared with the animations in `res/anim`. */
+    private val transitionMs =
+        activity.resources.getInteger(R.integer.krabik_transition_ms).toLong()
     private val hideNavigation = Runnable {
         navContainer.visibility = View.GONE
     }
@@ -206,7 +209,7 @@ class KrabikHostController(
             if (lastPopAnimated && navContainer.visibility == View.VISIBLE) {
                 // Keep the navigation container above the root until the last
                 // screen has animated out, then reveal the root underneath.
-                navContainer.postDelayed(hideNavigation, TRANSITION_MS + 40L)
+                navContainer.postDelayed(hideNavigation, transitionMs + 40L)
             } else {
                 navContainer.visibility = View.GONE
             }
@@ -531,7 +534,6 @@ class KrabikHostController(
         const val EVENT_SNACKBAR_ACTION = 4
         const val EVENT_SNACKBAR_DISMISSED = 5
         const val SHEET_TAG = "krabik-sheet"
-        const val TRANSITION_MS = 280L
         const val TRANSITION_SLIDE = 0
         const val TRANSITION_FADE = 1
         const val ROLE_CANCEL = 1

@@ -67,14 +67,8 @@ pub(crate) fn wire_check(
 }
 
 /// Creates the native view of a checkbox, or of a radio button.
-pub(crate) fn create(
-    props: &CheckProps,
-    node: &RenderNode,
-    site: &Site,
-    radio: bool,
-) -> ViewHandle {
+pub(crate) fn create(node: &RenderNode, site: &Site, radio: bool) -> ViewHandle {
     let button = UIButton::buttonWithType(UIButtonType::Custom, site.mtm);
-    update_check(&button, props, radio);
     wire_check(&button, site.handle, site.host, site.node, site.mtm);
     let view = cast_view(button.clone());
     ViewHandle::new(view, Content::Check { button, radio }, node)

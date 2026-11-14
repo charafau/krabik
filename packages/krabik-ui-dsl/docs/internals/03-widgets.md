@@ -141,13 +141,14 @@ Three things the derive works out from field *types*, without an attribute:
 - Every field whose type is written `Handler<...>` gets an event method and a line in
   `map_messages`. A unit payload (`Handler<()>`) produces a method that takes a message value; any
   other payload produces a method that takes `impl Fn(A) -> M`.
-- Every field whose type is written exactly `Color` gets a line in `resolve_colors`.
+- Every field of type `Color`, `Option<Color>` or `Vec<Color>` gets its lines in `resolve_colors`.
 - A `String` argument or setter accepts `impl Into<String>`.
 
-These checks look at the type as written (`is_named(&field.ty, "Color")`), not at the resolved
-type. A field declared as `crate::style::Color`, or `Option<Color>`, would be skipped silently and
-its colour would never follow the dark theme. Today every colour field is a bare `Color`, so this
-is a trap for the next widget, not a current bug.
+These checks look at the type as written, not at the resolved type. `is_named` compares the last
+path segment, so `Color` and `crate::style::Color` are both colours, and a colour inside an
+`Option` or a `Vec` is resolved as well. What a macro cannot see through is a type alias: a
+field declared as `Tint`, where `type Tint = Color`, is skipped silently. `#[widget(fixed_color)]`
+opts a field out.
 
 The setters all start with `if let ElementKind::Widget(Widget::Button(props)) = &mut self.0.kind`.
 The pattern always matches, because the builder's constructor is the only way to make a `Button`

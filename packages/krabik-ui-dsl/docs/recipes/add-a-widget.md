@@ -747,9 +747,8 @@ pub(crate) fn wire_stepper(
 }
 
 /// Creates the native view of a stepper.
-pub(crate) fn create(props: &StepperProps, node: &RenderNode, site: &Site) -> ViewHandle {
+pub(crate) fn create(node: &RenderNode, site: &Site) -> ViewHandle {
     let stepper = UIStepper::new(site.mtm);
-    update_stepper(&stepper, props);
     wire_stepper(&stepper, site.handle, site.host, site.node, site.mtm);
     let view = cast_view(stepper.clone());
     ViewHandle::new(view, Content::Stepper(stepper), node)
@@ -758,10 +757,11 @@ pub(crate) fn create(props: &StepperProps, node: &RenderNode, site: &Site) -> Vi
 
 The differences from Android are structural, not cosmetic:
 
-- `create` receives the properties and must call `update_stepper` itself. There is no shared
-  "configure after create" step on iOS; `IosState::create_handle` in `rust/src/ios/host.rs` only
-  applies style and accessibility afterwards. Every existing iOS `create` calls its own update
-  function first. If yours does not, the control starts with UIKit's defaults.
+- `create` only builds the view and wires its events. `IosState::create_handle` in
+  `rust/src/ios/host.rs` calls `update_content` right after it, the same function a later change
+  goes through, so the properties are applied in one place. What you must not forget is the arm
+  for your widget in `update_content` (`rust/src/ios/widgets/mod.rs`); without it the control
+  keeps UIKit's defaults.
 - `wire_stepper` attaches the event closure once, at creation. The closure captures the session
   handle, host and node id from the `Site`.
 - `schedule(...)` defers the dispatch to the next main-queue turn. The comment on `schedule` in
@@ -1031,17 +1031,19 @@ exhaustive match was introduced to prevent on Android, and on iOS it is one care
 the `check` CI job see only step 1 to 3. A widget can pass every host test with no platform code
 at all.
 
-**iOS creation and update are two paths.** Android funnels both through `configure_view`. On iOS,
-`create` calling `update_stepper` is a convention each widget follows by hand.
+**iOS creation and update share one path, like Android's.** `create_handle` calls
+`update_content` after every `create`, so a widget's properties are applied by one function. The
+arm in `update_content` is still yours to add.
 
 **Every JNI name and signature is a string.** `"configure"`, `"(IIIII)V"`, `"KrabikStepper"`, the
 constructor signature. A mismatch with the Kotlin source is found at run time, and the failure is
 far from the cause: `Jni::load` resolves all handles for all widgets inside `nativeCreate`. If one
 lookup fails, `run` in `rust/src/android/mod.rs` logs and returns the default value, which for
-`nativeCreate` is the handle `0`. `RustRootView` treats `0` as "no session", so the whole app
-shows nothing, not only the new widget. Look for the described Java exception (`NoSuchMethodError`
-or `ClassNotFoundException`) in logcat. The Rust half of the message is written with `eprintln!`,
-which as far as I know does not reach logcat on Android by default.
+`nativeCreate` is the handle `0`. `RustRootView` refuses to continue with `0` and throws, so the
+app stops at launch with a message pointing at the log, not only the new widget. Run
+`adb logcat -s krabik`: the failed lookup is named there ("JNI lookup failed for method
+setValueSilently (F)V"), next to the Java exception (`NoSuchMethodError` or
+`ClassNotFoundException`).
 
 **The `external fun` and its Rust symbol.** If `nativeOnStepperChanged` exists in Kotlin but the
 Rust function is missing or misnamed, the app starts and renders. It throws
@@ -1053,8 +1055,8 @@ Rust function is missing or misnamed, the app starts and renders. It throws
 break every one of these lookups.
 
 **The derive matches types by their written name.** In `rust/macros/src/widget.rs`, a field is a
-colour when its type `is_named(&field.ty, "Color")`, which means the bare path `Color`. A field
-typed `crate::style::Color` or `Option<Color>` is not resolved for dark mode, silently. A handler
+colour when the last segment of its type is `Color`, directly or inside an `Option` or a `Vec`.
+A type alias for `Color` is not recognised and is not resolved for dark mode, silently. A handler
 is recognised by the last path segment being `Handler`, so a type alias for a handler is not
 mapped by `Element::map`, silently. Spell the types the way the existing widgets do.
 

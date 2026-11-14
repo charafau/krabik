@@ -797,7 +797,8 @@ mod tests {
     fn variable_rows_are_measured_and_scrollable() {
         let element: Element = List::new(Arc::new(
             (0..200)
-                .map(|index| "word ".repeat(1 + index % 5))
+                // The number makes every item, and so every key, different.
+                .map(|index| format!("{}{index}", "word ".repeat(1 + index % 5)))
                 .collect::<Vec<_>>(),
         ))
         .buffer(2)

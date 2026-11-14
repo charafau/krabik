@@ -157,9 +157,8 @@ pub(crate) fn wire_date_picker(
 }
 
 /// Creates the native view of a date picker.
-pub(crate) fn create(props: &DatePickerProps, node: &RenderNode, site: &Site) -> ViewHandle {
+pub(crate) fn create(node: &RenderNode, site: &Site) -> ViewHandle {
     let picker = UIDatePicker::new(site.mtm);
-    update_date_picker(&picker, props);
     wire_date_picker(&picker, site.handle, site.host, site.node, site.mtm);
     let view = cast_view(picker.clone());
     ViewHandle::new(view, Content::DatePicker(picker), node)

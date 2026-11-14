@@ -41,7 +41,14 @@ class RustRootView(
     private var handle: Long = if (ownsSession) {
         val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
             Configuration.UI_MODE_NIGHT_YES
-        nativeCreate(context, resources.displayMetrics.density, night, retainedApp)
+        nativeCreate(context, resources.displayMetrics.density, night, retainedApp).also {
+            // Zero means Rust could not set itself up, almost always because
+            // a class or method it looks up by name is missing. Failing here
+            // beats an empty screen with no explanation.
+            check(it != 0L) {
+                "krabik: the Rust session could not be created; see `adb logcat -s krabik`"
+            }
+        }
     } else {
         sessionHandle
     }

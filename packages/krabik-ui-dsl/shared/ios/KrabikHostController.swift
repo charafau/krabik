@@ -259,7 +259,7 @@ final class KrabikHostController: UIViewController {
 
     private func addFadeTransition() {
         let transition = CATransition()
-        transition.duration = 0.28
+        transition.duration = Self.transitionSeconds
         transition.type = .fade
         transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         navigation.view.layer.add(transition, forKey: kCATransition)
@@ -493,6 +493,11 @@ final class KrabikHostController: UIViewController {
 
     // What `krabik_ios_on_chrome_event` reports; Rust decodes the same
     // numbers in `ChromeEvent::from_code`.
+    /// The length of a fade between screens; Android's `krabik_transition_ms`.
+    private static let transitionSeconds: CFTimeInterval = 0.28
+
+    // What `krabik_ios_on_chrome_event` reports. The numbers are defined by
+    // `ChromeEvent` in Rust, and a Rust test compares these with them.
     private static let eventFab: Int64 = 0
     private static let eventDrawerSelected: Int64 = 1
     private static let eventDrawerOpened: Int64 = 2

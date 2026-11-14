@@ -346,10 +346,7 @@ pub(crate) struct AndroidState {
     pub(crate) root: Global<JObject<'static>>,
     pub(crate) context: Global<JObject<'static>>,
     pub(crate) views: HashMap<NodeId, ViewHandle>,
-    pub(crate) row_actions: HashMap<NodeId, Actions>,
-    pub(crate) row_action_ids: HashMap<(NodeId, usize), Vec<NodeId>>,
-    pub(crate) row_states: HashMap<(NodeId, i64), RowState>,
-    pub(crate) row_nodes: HashMap<NodeId, (NodeId, usize)>,
+    pub(crate) rows: RowBinder<(NodeId, i64), ViewHandle>,
     pub(crate) density: f32,
     pub(crate) viewport: Size,
 }
@@ -657,74 +654,110 @@ element), and rows are built on demand when the recycler asks for them.
  returns the row height in pixels
 ```
 
-A *holder* is one reusable row container. Kotlin gives each holder a numeric id. Rust keeps, per
-`(list node, holder id)`, a `RowState`: the item index it shows, the width it was laid out for,
-its height, the row's tree and layout, and the row's own `views` map.
+A *holder* is one reusable row container. Kotlin gives each holder a numeric id. What a holder
+shows is remembered by a `RowBinder` keyed by `(list node, holder id)`.
 
-### `bind_row`
+### `bind_row` and the shared `RowBinder`
+
+Deciding what a row needs is the same on both platforms, so it lives in one place:
+`RowBinder` in `rust/src/host/rows.rs`. Android's `bind_row` asks it and applies the answer:
 
 ```rust,ignore
 // rust/src/android/rows.rs (trimmed)
-let root = tree::row_root(list, index);
-let tree = self.runtime.build_subtree(&element, root);
+let key = (list, holder);
+let width = width_px.max(1) as f32 / self.density;
+let mut pending = match self.rows.begin(&mut self.runtime, &key, list, index, width) {
+    Bind::Missing => return Ok(0),
+    Bind::Unchanged { height } => return Ok(self.row_height_px(height)),
+    Bind::Changed(pending) => *pending,
+};
+
+if pending.fresh {
+    // The holder's previous widgets are unknown; the ops build the row from nothing.
+    jni_handles(env)?.remove_all_views.call_void(env, host, &[])?;
+}
+// ... snapshot for the row transition
+for op in std::mem::take(&mut pending.ops) {
+    self.apply_op(env, op, &mut pending.views, host, false, None)?;
+}
+// ... fade the snapshot out
+let height_px = self.row_height_px(pending.height);
+self.rows.finish(key, pending);
+```
+
+`RowBinder::begin` does the thinking:
+
+```rust,ignore
+// rust/src/host/rows.rs (trimmed)
+let tree = runtime.build_subtree(&element, tree::row_root(list, index));
+let reapply = runtime.take_row_reapply(&tree);
 
 // A render rebinds every attached row. Most of them did not change:
 // keep the widgets and frames, and only take over the new handlers.
-if let Some(state) = self.row_states.get_mut(&(list, holder))
-    && state.index == index
-    && state.width_px == width_px
-    && state.tree == tree
+if reapply.is_none()
+    && let Some(row) = self.rows.get_mut(key)
+    && row.list == list && row.index == index && row.width == width && row.tree == tree
 {
-    let height = state.height_px;
-    state.tree = tree;
+    row.tree = tree;
     // ... re-record the row's actions
-    return Ok(height);
+    return Bind::Unchanged { height };
 }
 ```
 
 This is the **unchanged-row fast path**. After every app message the recycler is told to rebind
 its attached rows (the Kotlin adapter does this when the list's `revision` changes), because any
 row might have changed. Most have not. If the same holder is asked for the same item at the same
-width and the new tree equals the old one, the function returns at once: no layout, no diff, no
-JNI calls.
+width and the new tree equals the old one, `begin` returns `Unchanged`: no layout, no diff, no
+JNI calls. The one exception is `reapply`: a control in this row that the user just changed is
+updated even when the description is equal (see the session chapter).
 
-Why is `state.tree = tree` assigned when the two are equal? Because handlers compare equal by
+Why is `row.tree = tree` assigned when the two are equal? Because handlers compare equal by
 presence only (a re-created closure does not count as a change), so two "equal" trees can hold
 different closures. The new tree has the current ones. The row's actions are then recorded again
 from it, so a tap runs the closure built by the latest `view`.
 
-The slow path:
+The slow path, still inside `begin`:
 
 1. Lay the row out at the given width with an effectively unbounded height.
-2. Take the holder's previous `RowState`, if any. If there is none, the holder was recycled
-   without Rust hearing about it, so its contents are unknown: remove all its children and diff
-   against an empty tree.
-3. `render::diff` and `render::diff_layout` produce the ops; `apply_op` applies them into the
-   holder with `register = false` and no frame batch.
-4. If the list asked for a row transition, `KrabikRows.snapshot` captures the holder's old
-   appearance before the ops run and `KrabikRows.fadeOut` fades that overlay away afterwards.
-5. Record the row's actions and node ids, store the new `RowState`, return the height.
+2. Take what the holder showed before. If nothing is known (`fresh`), the holder was recycled
+   without Rust hearing about it: the diff runs against an empty tree and the platform removes
+   the holder's children first.
+3. `render::diff_reapplying` and `render::diff_layout` produce the ops. They are returned in a
+   `Pending` together with the holder's views.
 
-So a holder that is reused for a different item is *diffed* from the old item's row to the new
-one. Rows of the same shape reuse their views and only receive `Update`s.
+The platform then applies the ops with `apply_op` (`register = false`, no frame batch) and calls
+`finish`, which records the row's actions and node ids and stores the row. The split into
+`begin` and `finish` exists because applying the ops is the one part the binder cannot do.
+
+If the list asked for a row transition, `KrabikRows.snapshot` captures the holder's old
+appearance before the ops run and `KrabikRows.fadeOut` fades that overlay away afterwards.
+
+**A holder that is given another item gets new views.** Row node ids are derived from the list
+and the item index (`tree::row_root`), so two items never share ids and the diff between them is
+"remove the old row, create the new one". Views are reused when the *same* item is bound again,
+which is what every render does for the visible rows.
+
+Because the binder is ordinary Rust with no JNI in it, it is tested on the host
+(`rust/src/host/rows.rs`, from `a_first_bind_creates_the_row_and_records_its_handlers` on).
 
 ### Actions and focus for rows
 
 A widget inside a row is not in the main tree, so the session cannot find its handlers there.
-The host records them instead:
+The binder records them instead:
 
-- `row_actions`: node id to `Actions`, for every interactive widget in a bound row. The session
-  reads it through `Host::row_actions`.
-- `row_action_ids`: `(list, index)` to the node ids it contributed, so a rebind can clear them.
-- `row_nodes`: node id to `(list, index)`, used to route focus events (`Host::row_of`).
+- node id to `Actions`, for every interactive widget in a bound row. The session reads it
+  through `Host::row_actions`, which calls `RowBinder::actions`.
+- `(list, index)` to the node ids it contributed, so a rebind can clear them.
+- node id to `(list, index)`, used to route focus events (`Host::row_of`, `RowBinder::item_of`).
 
 Text-field focus needs care because a focused field can scroll off screen and its holder be
 reused. The runtime keeps a *logical* focus (`row_focus`). When a holder is about to show another
-item or is unbound while it contains the focused field, `park_row_focus` remembers it. When the
-row is attached again, `nativeRestoreRowFocus` gives the field focus back.
+item or is unbound while it contains the focused field, the binder calls `park_row_focus` to
+remember it. When the row is attached again, `nativeRestoreRowFocus` gives the field focus back.
 
-`prune_row_actions` runs after every render. It drops actions for item indexes that no longer
-exist and drops the `RowState`s of lists that left the tree, so their views can be collected.
+`prune_row_actions` runs after every render and calls `RowBinder::prune`. It drops actions for
+item indexes that no longer exist and drops the rows of lists that left the tree, so their views
+can be collected.
 
 ### Creating and updating the recycler
 

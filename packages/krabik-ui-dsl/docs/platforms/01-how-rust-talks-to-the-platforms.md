@@ -153,7 +153,8 @@ JNI specifies.
 The body always goes through `run` (`rust/src/android/mod.rs`). It converts the raw environment
 into a usable `Env`, runs the closure, and makes sure neither a Rust panic nor a pending Java
 exception escapes into the JVM in a broken state: on an error it prints and clears the Java
-exception, logs the Rust error with `eprintln!`, and returns `T::default()`.
+exception, reports the Rust error through `crate::log::error` (logcat, tag `krabik`), and returns
+`T::default()`.
 
 Why do all native methods hang off `RustRootView`, even ones about the toolbar or the dialog? One
 class means one mangled prefix and one place to look. The controller reports chrome events by

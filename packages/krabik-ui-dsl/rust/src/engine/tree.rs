@@ -428,27 +428,71 @@ fn build_node(element: &RawElement, parent: NodeId, index: usize, cx: &mut Build
 }
 
 fn build_children(element: &RawElement, parent: NodeId, cx: &mut BuildContext) -> Vec<UiNode> {
-    // Duplicate keys would hash two siblings to the same identifier, which
-    // silently aliases their native views. Fail loudly in debug builds.
-    #[cfg(debug_assertions)]
-    {
-        let mut keys = std::collections::HashSet::new();
-        for child in &element.children {
-            if let Some(key) = child.key() {
-                debug_assert!(
-                    keys.insert(key),
-                    "duplicate element key {key:?} among the children of {parent:?}"
-                );
-            }
-        }
-    }
-
-    element
+    let children: Vec<UiNode> = element
         .children
         .iter()
         .enumerate()
         .map(|(index, child)| build_node(child, parent, index, cx))
-        .collect()
+        .collect();
+    check_unique_siblings(&children, parent);
+    children
+}
+
+/// Reports two siblings that ended up with the same identifier.
+///
+/// That happens when two children of one parent, or two rows of one list,
+/// have the same key and kind. Their native views would alias: one view,
+/// two nodes. Debug builds stop there; release builds report it once and
+/// carry on, showing one of the two.
+fn check_unique_siblings(children: &[UiNode], parent: NodeId) {
+    let duplicate = if children.len() <= 16 {
+        // Most containers are small; comparing pairs allocates nothing.
+        children.iter().enumerate().any(|(index, child)| {
+            children[..index]
+                .iter()
+                .any(|earlier| earlier.id == child.id)
+        })
+    } else {
+        let mut seen = std::collections::HashSet::with_capacity(children.len());
+        children.iter().any(|child| !seen.insert(child.id))
+    };
+    if !duplicate {
+        return;
+    }
+    debug_assert!(
+        false,
+        "duplicate element key among the children of {parent:?}: two siblings of the same \
+         kind have the same key"
+    );
+    static REPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !REPORTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        crate::log::error(
+            "two siblings of the same kind have the same key; their native views alias. \
+             Keys must be unique among the children of one parent and the rows of one list.",
+        );
+    }
+}
+
+/// Whether a recycled list becomes a native recycler. Only Android and iOS
+/// have one; elsewhere the list is windowed like any other.
+fn recycles() -> bool {
+    #[cfg(test)]
+    if RECYCLE_IN_TESTS.with(std::cell::Cell::get) {
+        return true;
+    }
+    cfg!(any(target_os = "android", target_os = "ios"))
+}
+
+#[cfg(test)]
+thread_local! {
+    static RECYCLE_IN_TESTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Makes recycled lists build as recyclers on the test thread, so the row
+/// binding the platforms share can be tested without a device.
+#[cfg(test)]
+pub(crate) fn recycle_in_tests(on: bool) {
+    RECYCLE_IN_TESTS.with(|flag| flag.set(on));
 }
 
 /// Expands a list into a scroll container holding only the visible rows.
@@ -463,7 +507,7 @@ fn build_list(
     props: &ListProps,
     cx: &mut BuildContext,
 ) -> UiNode {
-    if props.mode == ListMode::Recycled && cfg!(any(target_os = "android", target_os = "ios")) {
+    if props.mode == ListMode::Recycled && recycles() {
         cx.info.recycled.insert(id, props.clone());
         return UiNode {
             id,
@@ -551,6 +595,7 @@ fn build_fixed_rows(
             cx,
         ));
     }
+    check_unique_siblings(&children, column_id);
 
     (content_column(column_id, children), Vec::new())
 }
@@ -705,6 +750,7 @@ fn build_variable_rows(
             cx,
         ));
     }
+    check_unique_siblings(&children, column_id);
 
     measurement.prefix = prefix;
     cx.measurements.insert(id, measurement);
@@ -1202,6 +1248,20 @@ mod tests {
             &Column::new()
                 .child(Text::new("a").key("dup"))
                 .child(Text::new("b").key("dup"))
+                .into(),
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "duplicate element key")]
+    fn duplicate_list_keys_panic() {
+        let items = std::sync::Arc::new(vec!["same", "same", "other"]);
+        build(
+            &crate::ui::List::new(items)
+                .item_height(40.0)
+                .key(|item| item.to_string())
+                .row(|item| Text::new(*item).into())
                 .into(),
         );
     }
