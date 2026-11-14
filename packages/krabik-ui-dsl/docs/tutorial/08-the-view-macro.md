@@ -643,7 +643,7 @@ impl Component for NotesApp {
 }
 
 impl App for NotesApp {
-    fn navigation(&self) -> Option<Navigation> {
+    fn navigation(&self) -> Option<Navigation<Self::Msg>> {
         let mut routes = vec![Route::new("notes")];
         if let Some(id) = self.open {
             routes.push(Route::new(format!("note:{id}")).transition(ScreenTransition::Slide));

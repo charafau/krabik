@@ -55,6 +55,48 @@ final class ShowcaseUITests: XCTestCase {
         return (Double(pixel[0]) + Double(pixel[1]) + Double(pixel[2])) / (3 * 255)
     }
 
+    /// The swipe-back gesture is UIKit's own: it removes the screen before
+    /// Rust hears about it. The application's stack has to follow, and a
+    /// gesture the user abandons has to change nothing.
+    func testSwipeBackKeepsTheStackInStep() throws {
+        open("Radio group")
+        tapButton("Large")
+        XCTAssertTrue(app.staticTexts["Selected: Large"].waitForExistence(timeout: 5))
+
+        // Abandoned: a short drag from the edge and back.
+        let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.5))
+        edge.press(
+            forDuration: 0.1,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.5)),
+            withVelocity: .slow,
+            thenHoldForDuration: 0.3
+        )
+        XCTAssertTrue(app.staticTexts["Selected: Large"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Back"].isHittable)
+
+        // Completed: the catalog is back.
+        edge.press(
+            forDuration: 0.1,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        )
+        scrollToTop()
+        XCTAssertTrue(app.staticTexts["Krabik UI DSL"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Selected: Large"].exists)
+
+        // Rust agrees about where it is: the next screen opens on top of the
+        // catalog and its back button returns there.
+        open("Switch")
+        XCTAssertTrue(app.navigationBars["Switch"].waitForExistence(timeout: 5))
+        backToCatalog()
+
+        // The catalog itself is never swiped away.
+        edge.press(
+            forDuration: 0.1,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        )
+        XCTAssertTrue(app.staticTexts["Krabik UI DSL"].waitForExistence(timeout: 5))
+    }
+
     /// The native chrome a Scaffold adds around a screen's content.
     func testScaffoldFloatingButtonSnackbarAndDrawer() throws {
         open("Scaffold")

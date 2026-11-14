@@ -17,7 +17,7 @@ screens that should exist right now:
 /// The application owns this state; the runtime mirrors it with native
 /// navigation controllers. With navigation, [`Component::view`] is not
 /// shown: the first screen is the root.
-fn navigation(&self) -> Option<Navigation> {
+fn navigation(&self) -> Option<Navigation<Self::Msg>> {
     None
 }
 ```
@@ -71,7 +71,7 @@ pub struct NotesApp {
 and the stack follows from it:
 
 ```rust,ignore
-fn navigation(&self) -> Option<Navigation> {
+fn navigation(&self) -> Option<Navigation<Self::Msg>> {
     let mut routes = vec![Route::new("notes")];
     if let Some(id) = self.open {
         routes.push(Route::new(format!("note:{id}")).transition(ScreenTransition::Slide));
@@ -236,9 +236,16 @@ when the user goes back it already shows the right content, and its scroll posit
 views were never torn down.
 
 Chrome is different: only the top screen's chrome is shown. `top_chrome` in the same file reads
-the scaffold of the last route. It also returns an empty chrome when there is no navigation, so
-**an app bar, a floating button and the rest only exist for apps that use `navigation()`**. A
-single-screen app that wants an app bar returns a one-route stack.
+the scaffold of the last route. An app without a navigation stack can have chrome too: it implements `App::scaffold`, which is
+used in place of `view()` for the one screen it has. The minimal todo app does this for its app
+bar:
+
+```rust,ignore
+// example-todo-minimal/rust/src/lib.rs
+fn scaffold(&self) -> Option<Scaffold<Msg>> {
+    Some(Scaffold::new().app_bar(AppBar::new("Todo")).body(self.view()))
+}
+```
 
 ## The app bar
 
@@ -312,7 +319,21 @@ fn back(&self) -> Option<Msg> {
 Msg::Back => self.open = None,
 ```
 
-Read the two halves separately.
+For the common case, "back leaves the top screen", there is a shorter form that needs no `back`
+method at all. Name the message on the stack:
+
+```rust,ignore
+fn navigation(&self) -> Option<Navigation<Msg>> {
+    Some(Navigation::new(self.routes()).on_back(Msg::Back))
+}
+```
+
+`on_back` applies while more than one route is on the stack; on the root screen the platform
+leaves the app. `App::back` is for other rules (close a dialog first, ask before discarding a
+draft) and wins when it returns a message. The showcase uses both: `on_back` for screens and
+`back` for an open dialog or sheet.
+
+Read the two halves of the longer form separately.
 
 `back()` answers "would you handle a back action right now, and with which message?". On the
 detail screen: yes, `Msg::Back`. On the list: `None`, there is nothing to go back to.
@@ -343,12 +364,14 @@ asks Rust:
   "Rust owns the stack, so the system back button (which pops on its own) is replaced by one that
   asks Rust."
 
-If you push a screen and forget to implement `back`, the arrow is there and does nothing.
+If you push a screen and neither set `Navigation::on_back` nor implement `back`, the arrow is
+there and does nothing.
 
-A related limit on iOS: the interactive swipe-from-the-edge pop gesture is turned off
-(`navigation.interactivePopGestureRecognizer?.isEnabled = false` in `viewDidLoad`), for the same
-reason. A gesture the system completes on its own cannot be vetoed by state that lives in Rust.
-iOS users will miss it; it is an honest cost of the design as it stands.
+The one exception is the iOS swipe-from-the-edge gesture, which UIKit completes by itself. It is
+enabled only while your app handles back, and when the user completes it the framework sends your
+back message so the stack follows. If your `update` keeps the route, the screen is put back
+(without animation), the same way a dialog you keep is shown again. A swipe the user abandons
+sends nothing.
 
 ## Bottom navigation
 
@@ -647,7 +670,7 @@ impl Component for NotesApp {
 }
 
 impl App for NotesApp {
-    fn navigation(&self) -> Option<Navigation> {
+    fn navigation(&self) -> Option<Navigation<Self::Msg>> {
         let mut routes = vec![Route::new("notes")];
         if let Some(id) = self.open {
             routes.push(Route::new(format!("note:{id}")).transition(ScreenTransition::Slide));

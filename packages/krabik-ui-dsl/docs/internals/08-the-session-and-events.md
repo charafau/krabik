@@ -375,11 +375,12 @@ push of one. There is no dedicated replace command.
 `set_root_visible(screens.is_empty())` tells the controller whether to show the main host (no
 navigation) or the stack.
 
-**Rough edge: keys must be unique within the stack.** Popped hosts are removed by kind,
-`HostKind::Screen(key)`, with `retain`. If the same key is on the stack twice (`[home, item,
-item]`), popping the top one removes the hosts of *both*. Nothing checks or documents that route
-keys must be unique; an application that pushes the same key twice needs to make the keys differ
-(`item-7`, `item-9`).
+**Keys must be unique within the stack.** Popped hosts are removed by kind,
+`HostKind::Screen(key)`, with `retain`. If the same key were on the stack twice (`[home, item,
+item]`), popping the top one would remove the hosts of *both*. So the stack is checked where the
+application hands it over (`unique_routes` in `rust/src/app.rs`): a debug build panics, a release
+build logs an error and ignores the repeated route. An application that shows the same kind of
+screen twice makes the keys differ (`item-7`, `item-9`).
 
 ### Step 2: chrome and snackbar
 
@@ -438,6 +439,15 @@ session only tells the controller *whether* there is one (`set_back_enabled`), a
 changes. When it is disabled, the platform's own back behaviour applies, which on Android includes
 the predictive "leaving the app" animation. That is why the flag is pushed ahead of time and the
 session is not asked at the moment of the gesture.
+
+The erased `AnyApp::back` has two sources. `App::back` wins when it returns a message; otherwise,
+with more than one route on the stack, it is the message given to `Navigation::on_back`.
+
+**A pop the platform made.** The iOS swipe-back gesture removes the top screen before Rust hears
+of it. `Session::native_pop` handles that like a dismissed dialog: it drops the top route and its
+host from what the session believes is shown, sets a flag, sends the back message and renders.
+The flag makes the next `sync` send the chrome even if it compares equal (the bar belongs to
+another screen now) and makes a screen the application kept come back without animation.
 
 ## Events: from a native callback to a message
 

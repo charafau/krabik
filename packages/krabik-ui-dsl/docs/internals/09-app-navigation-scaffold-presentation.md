@@ -137,7 +137,8 @@ pub trait Component {
 }
 
 pub trait App: Component + Send + 'static {
-    fn navigation(&self) -> Option<Navigation> { None }
+    fn navigation(&self) -> Option<Navigation<Self::Msg>> { None }
+    fn scaffold(&self) -> Option<Scaffold<Self::Msg>> { None }
     fn screen(&self, _key: &str) -> Option<Scaffold<Self::Msg>> { None }
     fn dialog(&self) -> Option<Dialog<Self::Msg>> { None }
     fn sheet(&self) -> Option<BottomSheet<Self::Msg>> { None }
@@ -219,10 +220,23 @@ impl<A: App> AnyApp for A {
     }
 
     fn back(&self) -> Option<Message> {
-        App::back(self).map(|message| Box::new(message) as Message)
+        if let Some(message) = App::back(self) {
+            return Some(Box::new(message));
+        }
+        let navigation = App::navigation(self)?;
+        if navigation.routes.len() > 1 {
+            navigation.on_back.message(())
+        } else {
+            None
+        }
     }
 }
 ```
+
+`back` has a fallback: an application that set `Navigation::on_back` does not need to implement
+`App::back`. `navigation` passes the routes through `unique_routes`, which refuses a stack with a
+repeated key (chapter 8). There is also `scaffold`, erased the same way as `screen`: the chrome
+and body of an application that has no navigation stack.
 
 This blanket implementation is the single boundary between typed and untyped code. Every method is
 one line that calls the typed hook and erases the result:
@@ -304,10 +318,16 @@ pub struct Route {
     pub transition: ScreenTransition,
 }
 
-pub struct Navigation {
+pub struct Navigation<M = ()> {
     pub routes: Vec<Route>,
+    pub on_back: Handler<()>,
+    marker: PhantomData<fn() -> M>,
 }
 ```
+
+`Navigation` carries the application's message type for one reason: `on_back(message)` stores the
+message to send for the back action, and the type parameter keeps that message the application's
+own `Msg`. That is why `App::navigation` returns `Option<Navigation<Self::Msg>>`.
 
 A navigation stack is a list of routes, root first. A route is a key and a transition. It contains
 no title and no content: those come from `App::screen(key)`, built on demand. The comment at the
@@ -318,7 +338,7 @@ In practice the application keeps a `Vec` of keys in its state and maps it:
 
 ```rust,ignore
 // example/rust/src/lib.rs
-fn navigation(&self) -> Option<Navigation> {
+fn navigation(&self) -> Option<Navigation<Self::Msg>> {
     Some(Navigation::new(self.stack.iter().map(|key| {
         Route::new(*key).transition(match *key {
             "transition-fade" => ScreenTransition::Fade,
@@ -344,7 +364,7 @@ Navigation carries no messages, so it has no type parameter and nothing to erase
 only place the numbering is defined on the Rust side.
 
 Two things to keep in mind, both from chapter 8: the key identifies a screen within the stack, so
-keys should be unique in a stack; and `screen(key)` is called for every screen on the stack on
+keys must be unique in a stack (this is checked); and `screen(key)` is called for every screen on the stack on
 every render, not only the top one.
 
 The file also defines `BottomNavigation<M>` and `BottomNavItem`. They are chrome and are

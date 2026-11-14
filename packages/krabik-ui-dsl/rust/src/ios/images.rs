@@ -78,7 +78,7 @@ pub(crate) fn load_asset(path: &str) -> Option<Retained<UIImage>> {
 /// to the main queue, where [`finish_download`] applies it.
 pub(crate) fn start_download(handle: u64, host: u64, id: NodeId, url: &str) {
     let Some(url_object) = NSURL::URLWithString(&NSString::from_str(url)) else {
-        eprintln!("krabik ios: invalid image URL: {url}");
+        crate::log::error(&format!("invalid image URL: {url}"));
         return;
     };
     let url = url.to_string();

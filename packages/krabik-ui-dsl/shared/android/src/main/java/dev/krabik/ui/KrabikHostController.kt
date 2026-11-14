@@ -295,7 +295,7 @@ class KrabikHostController(
                 item.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
             }
         }
-        toolbar.visibility = if (hidden || screens.isEmpty()) View.GONE else View.VISIBLE
+        toolbar.visibility = if (hidden) View.GONE else View.VISIBLE
         // The system-bar padding depends on which bars are showing.
         toolbar.rootView.requestApplyInsets()
     }
