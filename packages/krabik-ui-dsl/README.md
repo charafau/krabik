@@ -41,7 +41,7 @@ changed is applied to the native views.
 
 ## Documentation
 
-The [documentation](docs/README.md) is in four parts:
+The [documentation](docs/README.md) is in five parts:
 
 1. [Tutorial](docs/tutorial/README.md): build a Notes app step by step.
 2. How it works: [the engine](docs/internals/README.md) and
@@ -49,6 +49,9 @@ The [documentation](docs/README.md) is in four parts:
 3. Design: [why it is built this way](docs/design/decisions.md) and
    [what was done, in order](docs/design/history.md).
 4. [Recipes](docs/recipes/README.md): add a widget, add native chrome, write tests, debug a render.
+5. [Comparisons](docs/comparisons/README.md): the internals next to
+   [Flutter](docs/comparisons/01-compared-to-flutter.md) and
+   [React Native](docs/comparisons/02-compared-to-react-native.md).
 
 ## Apps in this directory
 

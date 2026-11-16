@@ -11,8 +11,12 @@ part that matches what you want to do.
 | Understand the Android and iOS halves, the build and the macros | [Part 2b: How the platforms work](platforms/README.md) |
 | Know why a decision was made, or what changed and when | [Part 3: Design](#part-3-design) |
 | Change the framework: add a widget, add chrome, test, debug | [Part 4: Recipes](recipes/README.md) |
+| Map it onto Flutter or React Native: which tree is which, what replaces `setState` | [Part 5: Comparisons](comparisons/README.md) |
 
 ## Suggested reading order
+
+If you know Flutter or React Native, start with [Part 5](comparisons/README.md): it explains the
+engine by comparison and then points back here.
 
 If you are new to the codebase and want the whole picture:
 
@@ -59,6 +63,15 @@ Checklists for changing the framework: [add a widget](recipes/add-a-widget.md),
 [add a piece of native chrome](recipes/add-a-chrome-slot.md),
 [write tests at each level](recipes/write-tests.md) and
 [find out why something renders wrongly](recipes/debug-a-render.md).
+
+## Part 5: Comparisons
+
+The framework next to two you may already know. [The index](comparisons/README.md) has the seven
+ideas that matter most and a three-way table of concepts.
+[Compared to Flutter](comparisons/01-compared-to-flutter.md) goes through the trees, one update
+step by step, identity and keys, state, layout, painting, threads, input and tooling.
+[Compared to React Native](comparisons/02-compared-to-react-native.md) does the same against
+Fiber, the shadow tree, Yoga, JSI and the mounting layer.
 
 ## How to trust what you read
 
