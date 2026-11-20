@@ -6,11 +6,11 @@ and are candidates for a later framework pass.
 
 ## Custom illustration pipeline
 
-- Missing: a blur effect on native views.
-- Current handling: onboarding uses native cards, simplified graphics and a
-  rasterized logo asset.
-- Now available: `.svg` assets (cargo feature `svg`), including SVG blur
+- Available now: `.svg` assets (cargo feature `svg`), including SVG blur
   filters, and `Stack` to put content over an illustration.
+- Still missing, on purpose: a blur style on native views. It was prototyped
+  and removed because Android and iOS cannot produce the same result; see
+  decision 12 in `docs/design/decisions.md`.
 
 ## Pixel-perfect Flutter parity
 

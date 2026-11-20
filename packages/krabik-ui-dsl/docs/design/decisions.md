@@ -229,6 +229,27 @@ because a timer for a screen nobody sees costs battery for nothing.
 threads must be `Send`. There is no cancellation, no thread pool and no HTTP client; see
 [Commands and the mailbox](../internals/11-commands-and-the-mailbox.md).
 
+## 12. No blur style; blur lives in the illustration
+
+A `.blur(radius)` style was built and tried on both platforms, then removed.
+
+**What the platforms offer.** Android 12 and later blur a view and its children with
+`View.setRenderEffect`: a real Gaussian blur at the radius asked for. Older versions have nothing,
+and the minimum here is Android 7. UIKit has no public blur of a view's own content. Its
+`UIVisualEffectView` blurs what is *behind* it, at the fixed strength of a system material.
+
+**What the prototype showed.** The iOS half laid an ultra-thin material over the view. With
+`blur(6)` on an image, Android showed a soft image that was still recognisable; iOS showed a grey
+wash in which the image could not be made out. With `blur(3)` on a text, Android blurred it and
+iOS erased it. The radius had no effect on iOS. One description, two different pictures: the
+opposite of what a shared style is for.
+
+**What to use instead.** Blur in an illustration belongs in the illustration: an `.svg` asset
+with an `feGaussianBlur` filter is drawn by the same renderer on both platforms (the `svg`
+feature), and a `Stack` puts content over it. A frosted panel over live content (the iOS
+material, on purpose) would be a widget of its own with platform-specific looks, in the spirit of
+the "platform-specific extensions" item in the backlog, and not a style value.
+
 ## Limits to keep in mind
 
 - The CI workflow has never run: the repository's remote is not GitHub. It parses, and every

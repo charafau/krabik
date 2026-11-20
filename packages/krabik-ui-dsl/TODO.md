@@ -612,6 +612,9 @@ The list in [MISSING.md](MISSING.md), closed one at a time.
   one-cell grid in Taffy.
 - **SVG assets.** An `.svg` asset is drawn by `resvg` in Rust at the size of its view, behind the
   cargo feature `svg`. Filters work; text and remote SVGs do not.
+- **Blur: tried, not kept.** A `.blur(radius)` style was prototyped and removed; the platforms
+  cannot draw the same thing ([decision 12](docs/design/decisions.md)). Illustration blur is an
+  SVG filter.
 
 ---
 
