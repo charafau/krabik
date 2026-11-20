@@ -381,6 +381,35 @@ final class ShowcaseUITests: XCTestCase {
         backToCatalog()
     }
 
+    func testAContainerReactsToTaps() throws {
+        open("Container")
+        XCTAssertTrue(app.staticTexts["Nothing tapped yet."].waitForExistence(timeout: 5))
+
+        // A tap on the card's text lands on the card.
+        app.staticTexts["Inbox"].tap()
+        XCTAssertTrue(app.staticTexts["Last tapped: Inbox (1 taps)"].waitForExistence(timeout: 5))
+
+        // The button inside the card keeps its own tap.
+        tapButton("Mute")
+        XCTAssertTrue(app.buttons["Unmute"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Last tapped: Inbox (1 taps)"].exists)
+
+        // A container that paints nothing is tappable too, and is announced
+        // as a button.
+        app.buttons["Archive row"].tap()
+        XCTAssertTrue(
+            app.staticTexts["Last tapped: Archive (2 taps)"].waitForExistence(timeout: 5))
+
+        // Disabled and plain containers ignore taps.
+        app.staticTexts["Disabled card"].tap()
+        app.staticTexts["A plain container ignores taps."].tap()
+        sleep(1)
+        XCTAssertTrue(app.staticTexts["Last tapped: Archive (2 taps)"].exists)
+        capture("container")
+
+        backToCatalog()
+    }
+
     func testPageTransitions() throws {
         open("Page transitions")
 

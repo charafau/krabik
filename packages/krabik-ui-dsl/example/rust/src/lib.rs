@@ -61,6 +61,10 @@ pub enum Msg {
     SubmitName,
     Tap,
     ResetTaps,
+    /// A container on the Container page was tapped.
+    ContainerTap(&'static str),
+    /// The button inside the tappable card.
+    ContainerMute,
     Progress(f32),
     RecycledTap,
     RecycledShuffle,
@@ -112,6 +116,11 @@ pub struct ShowcaseApp {
     name: String,
     submitted: String,
     taps: i64,
+    /// The Container page: what was tapped last, how often, and the state
+    /// of the button inside the card.
+    container_last: Option<&'static str>,
+    container_taps: usize,
+    container_muted: bool,
     notifications: bool,
     wifi: bool,
     bluetooth: bool,
@@ -169,6 +178,9 @@ impl ShowcaseApp {
             name: String::new(),
             submitted: String::new(),
             taps: 0,
+            container_last: None,
+            container_taps: 0,
+            container_muted: false,
             notifications: false,
             wifi: true,
             bluetooth: false,
@@ -296,6 +308,11 @@ impl Component for ShowcaseApp {
             Msg::SubmitName => self.submitted = self.name.clone(),
             Msg::Tap => self.taps += 1,
             Msg::ResetTaps => self.taps = 0,
+            Msg::ContainerTap(name) => {
+                self.container_last = Some(name);
+                self.container_taps += 1;
+            }
+            Msg::ContainerMute => self.container_muted = !self.container_muted,
             Msg::Progress(value) => self.progress = value,
             Msg::RecycledTap => self.recycled_taps += 1,
             Msg::RecycledShuffle => self.recycled_alt = !self.recycled_alt,

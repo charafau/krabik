@@ -9,11 +9,6 @@ and are candidates for a later framework pass.
 - Missing: a native pull-to-refresh container/gesture.
 - Current handling: explicit refresh action in the app bar.
 
-## Arbitrary tappable containers
-
-- Missing: tap handling on `Row`/`Column` and other arbitrary containers.
-- Current handling: row-shaped native `Button`s where a whole row must be tappable.
-
 ## Whole-app appearance override
 
 - Missing: an app-selected System/Light/Dark mode that updates the DSL colour

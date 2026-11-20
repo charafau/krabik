@@ -5,10 +5,10 @@ use krabik_ui_dsl::navigation::{BottomNavItem, BottomNavigation};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::scaffold::{Drawer, DrawerItem, Fab, Scaffold, Snackbar};
 use krabik_ui_dsl::ui::{
-    Align, AnimationCurve, Button, Checkbox, Color, Column, DatePicker, DatePickerMode, DateValue,
-    EdgeInsets, Element, Gradient, Icon, Image, ImageScale, ImageSource, Justify, List, Pager,
-    ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider, Spacer, Switch, TabBar,
-    Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
+    Align, AnimationCurve, Button, Checkbox, Color, Column, Container, DatePicker, DatePickerMode,
+    DateValue, EdgeInsets, Element, Gradient, Icon, Image, ImageScale, ImageSource, Justify, List,
+    Pager, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider, Spacer, Switch,
+    TabBar, Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
 };
 
 use crate::{Msg, ShowcaseApp};
@@ -64,6 +64,7 @@ pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
         "home" => "home",
         "text" => "text",
         "button" => "button",
+        "container" => "container",
         "text-field" => "text-field",
         "switch" => "switch",
         "checkbox" => "checkbox",
@@ -106,6 +107,7 @@ pub(crate) fn title(key: &str) -> &'static str {
         "home" => "Widgets",
         "text" => "Text",
         "button" => "Button",
+        "container" => "Container",
         "text-field" => "Text field",
         "switch" => "Switch",
         "checkbox" => "Checkbox",
@@ -148,6 +150,7 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element<Msg>> {
         "home" => home(),
         "text" => text_page(),
         "button" => button_page(app),
+        "container" => container_page(app),
         "text-field" => text_field_page(app),
         "switch" => switch_page(app),
         "checkbox" => checkbox_page(app),
@@ -201,6 +204,7 @@ pub(crate) fn home() -> Element<Msg> {
             &[
                 ("Text", "page:text"),
                 ("Button", "page:button"),
+                ("Container", "page:container"),
                 ("Text field", "page:text-field"),
                 ("Layouts", "page:layouts"),
             ],
@@ -344,6 +348,74 @@ fn button_page(app: &ShowcaseApp) -> Element<Msg> {
             Button::new("Add one").on_click(Msg::Tap),
             Button::new("Reset").on_click(Msg::ResetTaps),
             Button::new("Disabled").enabled(false),
+        ],
+    )
+}
+
+fn container_page(app: &ShowcaseApp) -> Element<Msg> {
+    let last = match app.container_last {
+        Some(name) => format!("Last tapped: {name} ({} taps)", app.container_taps),
+        None => "Nothing tapped yet.".to_string(),
+    };
+    let mute = if app.container_muted {
+        "Unmute"
+    } else {
+        "Mute"
+    };
+    page(
+        "Container",
+        "A box around its content. With on_tap the whole box reacts, not only a button in it.",
+        body![
+            Text::new(last).size(16).color(COLOR_TEXT),
+            // A card: the tap lands anywhere on it, except on the button,
+            // which keeps its own.
+            Container::new()
+                .padding(16)
+                .background(COLOR_SURFACE)
+                .corner_radius(12)
+                .width_percent(1.0)
+                .on_tap(Msg::ContainerTap("Inbox"))
+                .child(
+                    Row::new()
+                        .align_items(Align::Center)
+                        .width_percent(1.0)
+                        .child(
+                            Column::new()
+                                .spacing(4)
+                                .child(Text::new("Inbox").size(18).bold().color(COLOR_TEXT))
+                                .child(caption("Tap the card to open it")),
+                        )
+                        .child(Spacer::new())
+                        .child(Button::new(mute).on_click(Msg::ContainerMute)),
+                ),
+            // A row with nothing painted behind it is tappable all the same.
+            Container::new()
+                .padding_each(EdgeInsets::symmetric(0, 12))
+                .width_percent(1.0)
+                .on_tap(Msg::ContainerTap("Archive"))
+                .accessibility_label("Archive row")
+                .child(
+                    Row::new()
+                        .width_percent(1.0)
+                        .child(Text::new("Archive").size(16).color(COLOR_TEXT))
+                        .child(Spacer::new())
+                        .child(Text::new("›").size(16).color(COLOR_MUTED)),
+                ),
+            Container::new()
+                .padding(16)
+                .background(COLOR_SURFACE)
+                .corner_radius(12)
+                .width_percent(1.0)
+                .on_tap(Msg::ContainerTap("Disabled"))
+                .enabled(false)
+                .child(Text::new("Disabled card").size(16).color(COLOR_TEXT)),
+            // Without on_tap it is only a box.
+            Container::new()
+                .padding(16)
+                .border(1, COLOR_BORDER)
+                .corner_radius(12)
+                .width_percent(1.0)
+                .child(caption("A plain container ignores taps.")),
         ],
     )
 }

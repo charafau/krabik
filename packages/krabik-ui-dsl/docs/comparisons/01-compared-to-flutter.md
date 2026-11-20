@@ -604,7 +604,9 @@ event:
 
 There is no `GestureDetector`, no `Listener`, no raw pointer events. A widget reports the events
 its native control supports (click, text change, toggle, slider value, selection, scroll, focus)
-and nothing else.
+and nothing else. What `InkWell` or a `GestureDetector` with `onTap` does for a card or a list
+row is `Container::new().on_tap(msg)` here: a box with a native view, a native click listener on
+Android and a tap recognizer on iOS.
 
 ### Controls follow state
 

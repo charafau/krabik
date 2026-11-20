@@ -543,6 +543,32 @@ class ShowcaseTest {
     }
 
     @Test
+    fun aContainerReactsToTaps() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openPage("Container")
+            onView(withText("Nothing tapped yet.")).check(matches(isDisplayed()))
+
+            // A tap on the card's text lands on the card.
+            onView(withText("Inbox")).perform(click())
+            onView(withText("Last tapped: Inbox (1 taps)")).check(matches(isDisplayed()))
+
+            // The button inside the card keeps its own tap.
+            onView(withText("Mute")).perform(click())
+            onView(withText("Unmute")).check(matches(isDisplayed()))
+            onView(withText("Last tapped: Inbox (1 taps)")).check(matches(isDisplayed()))
+
+            // A container that paints nothing is tappable too.
+            onView(withContentDescription("Archive row")).perform(click())
+            onView(withText("Last tapped: Archive (2 taps)")).check(matches(isDisplayed()))
+
+            // Disabled and plain containers ignore taps.
+            onView(withText("Disabled card")).perform(click())
+            onView(withText("A plain container ignores taps.")).perform(click())
+            onView(withText("Last tapped: Archive (2 taps)")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
     fun systemBackReturnsToTheCatalog() {
         ActivityScenario.launch(MainActivity::class.java).use {
             openPage("Spinner")

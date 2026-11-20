@@ -159,6 +159,30 @@ pub fn needs_view(&self) -> bool {
 So nest containers as deeply as the layout needs. Unlike in an Android XML layout, depth costs
 nothing at draw time.
 
+### Container: a box that can be tapped
+
+`Container` is the one layout widget that always has a native view. It is a box around its
+content, takes the same padding and decoration as the others, and can report a tap:
+
+```rust,ignore
+Container::new()
+    .padding(16)
+    .background(SURFACE)
+    .corner_radius(12)
+    .on_tap(Msg::Open(note.id))
+    .child(
+        Row::new()
+            .child(Text::new(&note.title))
+            .child(Spacer::new())
+            .child(Button::new("Delete").on_click(Msg::Delete(note.id))),
+    )
+```
+
+A tap anywhere on the box sends `Msg::Open`. The button inside keeps its own tap, as does any
+other control. A container usually has one child; more than one are laid out as in a `Column`.
+Without `on_tap` it is only a box, and `.enabled(false)` stops the taps. On Android the box shows
+the theme's press ripple; iOS shows no highlight.
+
 ## Scrolling
 
 A `ScrollView` is a container whose content may be larger than itself. `ScrollView::new()` scrolls
@@ -240,6 +264,7 @@ field, such as `Draft(String)`, *is* such a function, which is why you rarely wr
 | ------ | ----------- | ------ | ---- |
 | `Text` | `Text::new("...")` | none | `text.rs` |
 | `Button` | `Button::new("label")` | `on_click(msg)` | `button.rs` |
+| `Container` | `Container::new()` plus `child` | `on_tap(msg)` | `containers.rs` |
 | `TextField` | `TextField::new(value)` | `on_change(\|String\| msg)`, `on_submit(msg)`, `on_focus(\|bool\| msg)` | `text_field.rs` |
 | `Switch` | `Switch::new(checked)` | `on_toggle(\|bool\| msg)` | `switch.rs` |
 | `Checkbox` | `Checkbox::new("label", checked)` | `on_toggle(\|bool\| msg)` | `check.rs` |
@@ -265,8 +290,8 @@ A few notes that save a trip to the source:
 - `Image` needs an explicit size or a stretching parent; its constructor's doc comment says
   intrinsic sizing is not available for remote images yet.
 - Only the widgets in the table report events. A `Row`, a `Column` or a `Text` has no tap handler
-  (`Actions::of` in `rust/src/host/events.rs` lists the cases exhaustively). To make something
-  tappable today, put a `Button` in it. This is a rough edge you will notice in list rows.
+  (`Actions::of` in `rust/src/host/events.rs` lists the cases exhaustively). To make a row of a
+  list or a card tappable, wrap it in a `Container` with `on_tap`.
 
 The showcase app has one page per widget. Its Rust side is `example/rust/src/pages.rs`; reading a
 page function there is the fastest way to see a widget used correctly.

@@ -7,7 +7,7 @@ use crate::android::style::{
     apply_accessibility, apply_content_size, apply_frame, apply_layouts, apply_padding,
     apply_style, set_tag,
 };
-use crate::android::widgets::{Site, configure_view, create_widget, pager, update_view};
+use crate::android::widgets::{Site, configure_view, container, create_widget, pager, update_view};
 use crate::frame_batch::FrameBatch;
 use crate::geometry::{Rect, Size};
 use crate::host::HostKind;
@@ -330,6 +330,7 @@ impl AndroidState {
         let view = match &node.kind {
             NodeKind::Widget(widget) => create_widget(env, &site, widget)?,
             NodeKind::Pager(_) => pager::create(env, &site)?,
+            NodeKind::Container(_) => container::create(env, &site)?,
             NodeKind::Scroll(props) => {
                 create_scroll(env, site.context, site.root, props.axis == Axis::Horizontal)?
             }

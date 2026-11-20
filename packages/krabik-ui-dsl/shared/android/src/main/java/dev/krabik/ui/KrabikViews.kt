@@ -46,6 +46,29 @@ object KrabikViews {
         return scroll
     }
 
+    /**
+     * Makes a container accept taps, or stops it. Rust set the root view as
+     * its click listener when it created the view; a tappable container also
+     * shows the theme's press highlight over its content.
+     */
+    @JvmStatic
+    fun setTappable(view: View, tappable: Boolean) {
+        if (view.isClickable == tappable && (view.foreground != null) == tappable) return
+        view.isClickable = tappable
+        view.isFocusable = tappable
+        view.foreground = if (tappable) pressHighlight(view.context) else null
+    }
+
+    private fun pressHighlight(context: Context): android.graphics.drawable.Drawable? {
+        val value = android.util.TypedValue()
+        val found = context.theme.resolveAttribute(
+            android.R.attr.selectableItemBackground,
+            value,
+            true,
+        )
+        return if (found && value.resourceId != 0) context.getDrawable(value.resourceId) else null
+    }
+
     /** Creates the horizontal progress bar used for `ProgressIndicator` nodes. */
     @JvmStatic
     fun createProgress(context: Context): ProgressBar =

@@ -298,6 +298,7 @@ fn content_size(
         | NodeKind::Column
         | NodeKind::Row
         | NodeKind::Spacer
+        | NodeKind::Container(_)
         | NodeKind::Scroll(_)
         | NodeKind::Pager(_)
         | NodeKind::Recycler(_) => Size::ZERO,

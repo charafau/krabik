@@ -3,7 +3,7 @@
 
 use crate::style::{FontWeight, Style};
 use crate::widgets::Widget;
-use crate::widgets::{Axis, ListProps, PagerProps, ScrollProps};
+use crate::widgets::{Axis, ContainerProps, ListProps, PagerProps, ScrollProps};
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -16,6 +16,8 @@ pub(crate) enum ElementKind {
     Column,
     Row,
     Spacer,
+    /// A box around its content that can be tapped.
+    Container(ContainerProps),
     Pager(PagerProps),
     /// A leaf widget; see [`Widget`].
     Widget(Widget),
@@ -33,6 +35,7 @@ impl ElementKind {
             Self::Column => 1,
             Self::Row => 2,
             Self::Spacer => 3,
+            Self::Container(_) => 21,
             Self::Pager(_) => 20,
             Self::Widget(widget) => widget.tag(),
             Self::Scroll(props) => match props.axis {
@@ -163,6 +166,7 @@ impl RawElement {
         match &mut self.kind {
             ElementKind::Widget(widget) => widget.map_messages(wrap),
             ElementKind::Pager(props) => props.on_select.map(wrap),
+            ElementKind::Container(props) => props.on_tap.map(wrap),
             ElementKind::List(props) => props.map_messages(wrap),
             ElementKind::Column
             | ElementKind::Row
@@ -409,6 +413,7 @@ impl RawElement {
             ElementKind::Column
             | ElementKind::Row
             | ElementKind::Spacer
+            | ElementKind::Container(_)
             | ElementKind::Pager(_)
             | ElementKind::Scroll(_)
             | ElementKind::List(_) => None,
@@ -487,6 +492,20 @@ mod tests {
         assert_eq!(
             click_messages(&parent),
             [ParentMsg::Child(ChildMsg::Increment), ParentMsg::Reset]
+        );
+    }
+
+    #[test]
+    fn a_container_tap_is_lifted_too() {
+        let child: Element<ChildMsg> = crate::ui::Container::new()
+            .on_tap(ChildMsg::Increment)
+            .child(Text::new("child"))
+            .into();
+        let parent: Element<ParentMsg> = Column::new().child(child.map(ParentMsg::Child)).into();
+
+        assert_eq!(
+            click_messages(&parent),
+            [ParentMsg::Child(ChildMsg::Increment)]
         );
     }
 

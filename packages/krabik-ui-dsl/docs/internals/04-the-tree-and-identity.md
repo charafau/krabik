@@ -222,7 +222,10 @@ tree itself":
 // rust/src/engine/tree.rs
 impl NodeKind {
     pub fn is_native(&self) -> bool {
-        matches!(self, Self::Widget(_) | Self::Pager(_) | Self::Scroll(_) | Self::Recycler(_))
+        matches!(
+            self,
+            Self::Widget(_) | Self::Container(_) | Self::Pager(_) | Self::Scroll(_) | Self::Recycler(_)
+        )
     }
 }
 
@@ -251,7 +254,7 @@ pub fn needs_view(&self) -> bool {
 }
 ```
 
-A widget, pager, scroll container or recycler always has a native view. A `Column`, `Row` or
+A widget, container, pager, scroll container or recycler always has a native view. A `Column`, `Row` or
 `Spacer` has one only if it paints something or carries a label or an animation of its own. A plain `Column` used for arranging children exists
 for layout and nowhere else: Taffy computes its frame, its children are positioned accordingly,
 and no native view is created for it. The children's native views are attached to the nearest

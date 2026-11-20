@@ -19,6 +19,7 @@ use objc2_core_foundation::CGPoint;
 
 pub(crate) mod button;
 pub(crate) mod check;
+pub(crate) mod container;
 pub(crate) mod date_picker;
 pub(crate) mod pager;
 pub(crate) mod progress;
@@ -122,6 +123,11 @@ pub(crate) fn update_content(
                         );
                     }
                 }
+            }
+        }
+        NodeKind::Container(props) => {
+            if let Content::Container { tap, .. } = content {
+                container::update_container(tap, props);
             }
         }
         // Containers have no properties of their own; a recycler is updated

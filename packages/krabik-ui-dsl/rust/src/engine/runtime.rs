@@ -550,7 +550,7 @@ mod tests {
     use crate::widgets::Widget;
     use std::sync::Arc;
 
-    use crate::ui::{Button, Column, Length, List, Switch, Text, TextField, TextProps};
+    use crate::ui::{Button, Column, Container, Length, List, Switch, Text, TextField, TextProps};
 
     /// What the widget `id` asks to be told about.
     fn actions(runtime: &Runtime, id: NodeId) -> Actions {
@@ -679,6 +679,40 @@ mod tests {
 
         assert!(actions(&runtime, button.id).click.is_set());
         assert_eq!(actions(&runtime, ROOT_ID), Actions::default());
+    }
+
+    #[test]
+    fn containers_report_taps() {
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        let element: Element = Column::new()
+            .child(
+                Container::new()
+                    .on_tap(())
+                    .child(Text::new("Open"))
+                    .child(Button::new("Delete").on_click(())),
+            )
+            .child(Container::new().child(Text::new("Plain")))
+            .into();
+        let update = runtime.update(&element, viewport());
+
+        let column = &runtime.tree().children[0];
+        let (tappable, plain) = (&column.children[0], &column.children[1]);
+        assert!(actions(&runtime, tappable.id).click.is_set());
+        // The button inside keeps a handler of its own.
+        assert!(actions(&runtime, tappable.children[1].id).click.is_set());
+        assert_eq!(actions(&runtime, plain.id), Actions::default());
+
+        // A container has a native view even when it paints nothing: the
+        // view is what receives the tap.
+        let created = |id| {
+            update
+                .ops
+                .iter()
+                .any(|op| matches!(op, Op::Create(node) if node.id == id))
+        };
+        assert!(created(tappable.id));
+        assert!(created(plain.id));
+        assert!(!created(column.id));
     }
 
     #[test]

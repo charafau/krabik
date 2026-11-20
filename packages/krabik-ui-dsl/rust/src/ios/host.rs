@@ -12,9 +12,10 @@ use crate::ios::motion::{
 use crate::ios::rows::RecyclerDataSource;
 use crate::ios::rows::create_recycler;
 use crate::ios::style::{CornerMask, apply_accessibility, apply_style};
+use crate::ios::widgets::container::TapTarget;
 use crate::ios::widgets::pager::PagerDelegate;
 use crate::ios::widgets::scroll::ScrollDelegate;
-use crate::ios::widgets::{Site, pager, scroll, update_content};
+use crate::ios::widgets::{Site, container, pager, scroll, update_content};
 use crate::ios::{cast_view, parent_host_in, schedule, with_session};
 use crate::render::{Op, RenderNode};
 use crate::runtime::Runtime;
@@ -28,8 +29,8 @@ use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
 use objc2_quartz_core::{CADisplayLink, CAGradientLayer};
 use objc2_ui_kit::{
     UIActivityIndicatorView, UIButton, UICollectionView, UIDatePicker, UIImageView, UILabel,
-    UIProgressView, UIScrollView, UISegmentedControl, UISlider, UIStackView, UISwitch, UITextField,
-    UIView, UIViewAnimatingPosition,
+    UIProgressView, UIScrollView, UISegmentedControl, UISlider, UIStackView, UISwitch,
+    UITapGestureRecognizer, UITextField, UIView, UIViewAnimatingPosition,
 };
 use std::collections::HashMap;
 
@@ -66,6 +67,13 @@ pub(crate) enum Content {
     Spinner(Retained<UIActivityIndicatorView>),
     Image(Retained<UIImageView>),
     Host(Retained<UIView>),
+    Container {
+        host: Retained<UIView>,
+        /// Enabled while the container has a tap handler.
+        tap: Retained<UITapGestureRecognizer>,
+        /// The recognizer does not retain its target, so the handle does.
+        _target: Retained<TapTarget>,
+    },
     Scroll {
         scroll: Retained<UIScrollView>,
         host: Retained<UIView>,
@@ -91,7 +99,7 @@ impl Content {
 
     pub(crate) fn children_host(&self, fallback: &Retained<UIView>) -> Retained<UIView> {
         match self {
-            Self::Host(host) => host.clone(),
+            Self::Host(host) | Self::Container { host, .. } => host.clone(),
             Self::Scroll { host, .. } => host.clone(),
             Self::Pager { scroll, .. } => cast_view(scroll.clone()),
             _ => fallback.clone(),
@@ -417,6 +425,7 @@ impl IosState {
         let mut handle = match &node.kind {
             NodeKind::Widget(widget) => self.create_widget(widget, node, &site),
             NodeKind::Pager(props) => pager::create(props, node, &site),
+            NodeKind::Container(_) => container::create(node, &site),
             NodeKind::Scroll(props) => scroll::create(props, node, &site),
             NodeKind::Recycler(props) => create_recycler(props, node, &site),
             NodeKind::Column | NodeKind::Row => {
@@ -491,7 +500,7 @@ impl IosState {
             view: handle.view.clone(),
             inset: handle.content.inset_handle(),
             host: match &handle.content {
-                Content::Host(host) => Some(host.clone()),
+                Content::Host(host) | Content::Container { host, .. } => Some(host.clone()),
                 _ => None,
             },
             scroll: match &handle.content {

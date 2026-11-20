@@ -12,7 +12,7 @@ use crate::geometry::Size;
 use crate::ui::{
     Axis, ElementKind, Length, ListMode, ListProps, PagerProps, RawElement, ScrollProps, Style,
 };
-use crate::widgets::Widget;
+use crate::widgets::{ContainerProps, Widget};
 
 /// The identifier of the synthetic root node.
 pub const ROOT_ID: NodeId = NodeId(0);
@@ -32,6 +32,9 @@ pub enum NodeKind {
     Row,
     /// Flexible empty space.
     Spacer,
+    /// A box around its content. It always has a native view, which is
+    /// what receives the tap.
+    Container(ContainerProps),
     /// A native swipeable page container.
     Pager(PagerProps),
     /// A leaf widget drawn by one native view; see [`Widget`].
@@ -47,7 +50,11 @@ impl NodeKind {
     pub fn is_native(&self) -> bool {
         matches!(
             self,
-            Self::Widget(_) | Self::Pager(_) | Self::Scroll(_) | Self::Recycler(_)
+            Self::Widget(_)
+                | Self::Container(_)
+                | Self::Pager(_)
+                | Self::Scroll(_)
+                | Self::Recycler(_)
         )
     }
 }
@@ -459,6 +466,7 @@ fn build_node_in(element: &RawElement, id: NodeId, cx: &mut BuildContext) -> UiN
         ElementKind::Column => NodeKind::Column,
         ElementKind::Row => NodeKind::Row,
         ElementKind::Spacer => NodeKind::Spacer,
+        ElementKind::Container(props) => NodeKind::Container(props.clone()),
         ElementKind::Pager(props) => NodeKind::Pager(PagerProps {
             pages: element.children.len(),
             ..props.clone()

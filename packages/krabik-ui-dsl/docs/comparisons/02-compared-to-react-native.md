@@ -260,8 +260,10 @@ the description did not change. If `update` rejected or altered the value, the c
 to what the state holds. Every input is controlled; there is no uncontrolled mode with a default
 value, except that a control with no handler is left as the user set it.
 
-Gestures are simpler than in React Native. There is no responder system, no `Pressable`, no
-gesture-handler library. Each widget reports the events of its native control and nothing else.
+Gestures are simpler than in React Native. There is no responder system and no gesture-handler
+library. Each widget reports the events of its native control and nothing else. The counterpart
+of `Pressable` around a card or a row is `Container::new().on_tap(msg)`, which reports a tap and
+nothing finer (no press-in, press-out or long press).
 
 ## 7. Lists, navigation, animation
 

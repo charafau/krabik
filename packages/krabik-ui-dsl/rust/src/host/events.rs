@@ -98,6 +98,7 @@ impl Actions {
                 Widget::Text(_) | Widget::Progress(_) | Widget::Spinner(_) | Widget::Image(_) => {}
             },
             NodeKind::Pager(props) => actions.select = props.on_select.clone(),
+            NodeKind::Container(props) => actions.click = props.on_tap.clone(),
             NodeKind::Root
             | NodeKind::Column
             | NodeKind::Row

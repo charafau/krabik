@@ -594,6 +594,9 @@ The list in [MISSING.md](MISSING.md), closed one at a time.
 
 - **Startup work.** `App::init` returns the command an application starts with. It runs once
   for an instance, before the first render, and not again when an Android activity is recreated.
+- **Tappable boxes.** `Container` is a box around its content that always has a native view;
+  `.on_tap(msg)` makes the whole of it react, while a control inside keeps its own taps. Android
+  shows the theme's press ripple. iOS shows no press highlight yet.
 
 ---
 

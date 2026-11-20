@@ -284,6 +284,10 @@ pub(crate) fn apply_accessibility(view: &UIView, node: &RenderNode, mtm: MainThr
         view.setAccessibilityLabel(None, mtm);
     }
 
+    if let NodeKind::Container(props) = &node.kind {
+        crate::ios::widgets::container::apply_traits(view, props, mtm);
+    }
+
     let enabled = node.style.enabled.unwrap_or(true);
     view.setUserInteractionEnabled(enabled);
     if let Some(control) = as_any(view).downcast_ref::<UIControl>() {

@@ -25,6 +25,7 @@ use jni::{Env, JValue};
 
 pub(crate) mod button;
 pub(crate) mod check;
+pub(crate) mod container;
 pub(crate) mod date_picker;
 pub(crate) mod image;
 pub(crate) mod pager;
@@ -75,6 +76,7 @@ pub(crate) fn configure_view(
         NodeKind::Widget(Widget::RadioGroup(props)) => update_radio_group(env, view, props),
         NodeKind::Widget(Widget::TabBar(props)) => update_tab_bar(env, view, props),
         NodeKind::Pager(props) => update_pager(env, view, props),
+        NodeKind::Container(props) => container::update_container(env, view, props),
         NodeKind::Widget(Widget::DatePicker(props)) => update_date_picker(env, view, props),
         NodeKind::Widget(Widget::Slider(props)) => update_slider(env, view, props),
         NodeKind::Widget(Widget::Progress(props)) => update_progress(env, view, props),
