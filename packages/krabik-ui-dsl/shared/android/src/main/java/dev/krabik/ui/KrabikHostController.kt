@@ -12,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toolbar
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.fragment.app.DialogFragment
@@ -230,6 +231,30 @@ class KrabikHostController(
      */
     fun setBackEnabled(enabled: Boolean) {
         onBackEnabled(enabled)
+    }
+
+    /**
+     * Makes the application light or dark whatever the device shows, or lets
+     * it follow the device again: 0 follows, 1 is light, 2 is dark.
+     *
+     * The setting belongs to the process. When it changes what is shown,
+     * AppCompat recreates the activity, the same way a change on the device
+     * does: the theme, the toolbar and the system bars come back in the new
+     * appearance and the application is kept.
+     */
+    fun setAppearance(appearance: Int) {
+        val mode = when (appearance) {
+            1 -> AppCompatDelegate.MODE_NIGHT_NO
+            2 -> AppCompatDelegate.MODE_NIGHT_YES
+            else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+        }
+        // Rust calls this in the middle of a render. Recreating the activity
+        // from here would destroy the session it is rendering with.
+        activity.window.decorView.post {
+            if (AppCompatDelegate.getDefaultNightMode() != mode) {
+                AppCompatDelegate.setDefaultNightMode(mode)
+            }
+        }
     }
 
     // endregion

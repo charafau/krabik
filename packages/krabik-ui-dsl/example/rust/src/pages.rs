@@ -5,10 +5,10 @@ use krabik_ui_dsl::navigation::{BottomNavItem, BottomNavigation};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::scaffold::{Drawer, DrawerItem, Fab, Scaffold, Snackbar};
 use krabik_ui_dsl::ui::{
-    Align, AnimationCurve, Button, Checkbox, Color, ColorScheme, Column, Container, DatePicker,
-    DatePickerMode, DateValue, EdgeInsets, Element, Gradient, Icon, Image, ImageScale, ImageSource,
-    Justify, List, Pager, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider,
-    Spacer, Switch, TabBar, Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
+    Align, AnimationCurve, Appearance, Button, Checkbox, Color, ColorScheme, Column, Container,
+    DatePicker, DatePickerMode, DateValue, EdgeInsets, Element, Gradient, Icon, Image, ImageScale,
+    ImageSource, Justify, List, Pager, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView,
+    Slider, Spacer, Switch, TabBar, Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
 };
 
 use crate::{Msg, ShowcaseApp};
@@ -1441,6 +1441,23 @@ fn environment_page(app: &ShowcaseApp) -> Element<Msg> {
             Text::new(format!("Appearance: {appearance}"))
                 .size(18)
                 .color(COLOR_TEXT),
+            Spacer::new().height(6),
+            Text::new("App appearance")
+                .size(18)
+                .bold()
+                .color(COLOR_TEXT),
+            caption(
+                "The app can show light or dark whatever the device shows. Native bars follow."
+            ),
+            RadioGroup::new(["Follow device", "Always light", "Always dark"])
+                .selected(match app.appearance {
+                    Appearance::System => 0,
+                    Appearance::Light => 1,
+                    Appearance::Dark => 2,
+                })
+                .on_select(Msg::Appearance)
+                .accessibility_label("App appearance")
+                .width_percent(1.0),
             // Strings live in Rust, so the app picks them by language.
             Text::new(match app.language.as_str() {
                 "pl" => "Dzień dobry",

@@ -570,6 +570,64 @@ class ShowcaseTest {
         }
     }
 
+    /**
+     * The application shows dark while the device is light. The activity is
+     * recreated for it, as for a change on the device, and comes back on the
+     * same page with the toolbar, the system bars and the colours Rust
+     * paints all dark.
+     */
+    @Test
+    fun theApplicationChoosesItsAppearance() {
+        fun screenBackground(scenario: ActivityScenario<MainActivity>): Int {
+            var color = 0
+            scenario.onActivity { activity ->
+                val screen = activity.supportFragmentManager.fragments
+                    .last { it.view != null && it is KrabikScreenFragment }
+                color = (screen.requireView().background as ColorDrawable).color
+            }
+            return color
+        }
+        fun nightResources(scenario: ActivityScenario<MainActivity>): Boolean {
+            var night = false
+            scenario.onActivity { activity ->
+                night = activity.resources.configuration.uiMode and
+                    Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+            }
+            return night
+        }
+
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            try {
+                openPage("Environment")
+                onView(withText("Appearance: light")).check(matches(isDisplayed()))
+
+                onView(withText("Always dark")).perform(click())
+                awaitText("Appearance: dark")
+                assertTrue("the theme is dark", nightResources(scenario))
+                assertTrue(
+                    "the screen is painted dark",
+                    Color.luminance(screenBackground(scenario)) < 0.5f,
+                )
+
+                onView(withText("Always light")).perform(click())
+                awaitText("Appearance: light")
+                assertTrue("the theme is light", !nightResources(scenario))
+
+                onView(withText("Follow device")).perform(click())
+                Thread.sleep(1000)
+                onView(withText("Appearance: light")).check(matches(isDisplayed()))
+            } finally {
+                // The choice belongs to the process; do not leak it into
+                // the tests that follow.
+                scenario.onActivity {
+                    androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+                        androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM,
+                    )
+                }
+            }
+        }
+    }
+
     @Test
     fun aContainerReactsToTaps() {
         ActivityScenario.launch(MainActivity::class.java).use {

@@ -13,7 +13,7 @@ use crate::message::Message;
 use crate::navigation::{Route, ScreenTransition};
 use crate::presentation::Dialog;
 use crate::scaffold::{Chrome, Snackbar};
-use crate::style::ColorScheme;
+use crate::style::{Appearance, ColorScheme};
 
 use super::{Actions, ChromeEvent, Controller, Host, HostKind, NodeEvent, Platform};
 
@@ -48,6 +48,8 @@ pub(crate) struct Session<P: Platform> {
     dialog: Option<Dialog>,
     /// Whether the controller was last told that back is handled here.
     back_enabled: bool,
+    /// The appearance the controller was last asked for.
+    appearance: Appearance,
     /// Whether the controller has been given a navigation stack yet.
     navigation_synced: bool,
     /// The device's language, and the appearance every host resolves its
@@ -96,6 +98,7 @@ impl<P: Platform> Session<P> {
             snackbar: None,
             dialog: None,
             back_enabled: false,
+            appearance: Appearance::System,
             navigation_synced: false,
             environment: Environment::default(),
             told: running.told,
@@ -343,6 +346,16 @@ impl<P: Platform> Session<P> {
                 controller.set_back_enabled(cx, back_enabled)?;
             }
             self.back_enabled = back_enabled;
+        }
+        // A session starts out following the device, which is also what a
+        // new activity or scene does. Asking again for what the platform
+        // already shows changes nothing there.
+        let appearance = self.app.appearance();
+        if appearance != self.appearance {
+            if let Some(controller) = self.controller.as_ref() {
+                controller.set_appearance(cx, appearance)?;
+            }
+            self.appearance = appearance;
         }
         Ok(())
     }
@@ -903,6 +916,12 @@ mod tests {
             self.0.borrow_mut().push(format!("back {enabled}"));
             Ok(())
         }
+        fn set_appearance(&self, _cx: &mut (), appearance: Appearance) -> Result<(), Infallible> {
+            self.0
+                .borrow_mut()
+                .push(format!("appearance {appearance:?}"));
+            Ok(())
+        }
         fn show_dialog(&self, _cx: &mut (), dialog: &Dialog) -> Result<(), Infallible> {
             self.0.borrow_mut().push(format!("dialog {}", dialog.title));
             Ok(())
@@ -961,6 +980,8 @@ mod tests {
         snackbar_id: u64,
         /// Starts the work of `Msg::Load` when the application starts.
         load_at_start: bool,
+        /// The appearance the application asks for.
+        appearance: Appearance,
         /// Asks to hear about the device's language and appearance.
         follows_environment: bool,
         /// Every environment the application was told about, in order.
@@ -1150,6 +1171,10 @@ mod tests {
         fn back(&self) -> Option<Msg> {
             let state = self.state();
             (!state.on_back && state.stack.len() > 1).then_some(Msg::Back)
+        }
+
+        fn appearance(&self) -> Appearance {
+            self.state().appearance
         }
     }
 
@@ -1922,6 +1947,36 @@ mod tests {
         // The user changed the device language, which recreates it too.
         recreate(session, "en-GB");
         assert_eq!(told(&app)[2..], [(en, ColorScheme::Dark)]);
+    }
+
+    #[test]
+    fn the_application_chooses_its_appearance() {
+        let (mut session, app, log) = session(State {
+            stack: vec!["home"],
+            ..State::default()
+        });
+        let asked = |log: &Log| {
+            take(log)
+                .into_iter()
+                .filter(|entry| entry.starts_with("appearance"))
+                .collect::<Vec<_>>()
+        };
+
+        // Following the device is what the platform does by itself.
+        session.render_all(&mut ()).unwrap();
+        assert!(asked(&log).is_empty());
+
+        app.state().appearance = Appearance::Dark;
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(asked(&log), ["appearance Dark"]);
+
+        // Asked once, not on every render.
+        session.render_all(&mut ()).unwrap();
+        assert!(asked(&log).is_empty());
+
+        app.state().appearance = Appearance::System;
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(asked(&log), ["appearance System"]);
     }
 
     #[test]

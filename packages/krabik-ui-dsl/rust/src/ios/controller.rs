@@ -6,6 +6,7 @@ use crate::navigation::{Route, ScreenTransition};
 use crate::presentation::Dialog;
 use crate::runtime::Runtime;
 use crate::scaffold::{Chrome, Snackbar};
+use crate::style::Appearance;
 use crate::tree::NodeId;
 use crate::ui::RawElement;
 use objc2::MainThreadMarker;
@@ -171,6 +172,17 @@ impl Controller<Ios> for IosController {
         // application handles back.
         // SAFETY: see `controller_push`.
         let _: () = unsafe { objc2::msg_send![&*self.0, krabikSetBackEnabled: enabled] };
+        Ok(())
+    }
+
+    fn set_appearance(
+        &self,
+        _: &mut MainThreadMarker,
+        appearance: Appearance,
+    ) -> Result<(), Infallible> {
+        let code = appearance.code() as isize;
+        // SAFETY: see `controller_push`.
+        let _: () = unsafe { objc2::msg_send![&*self.0, krabikSetAppearance: code] };
         Ok(())
     }
 

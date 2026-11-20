@@ -600,6 +600,10 @@ The list in [MISSING.md](MISSING.md), closed one at a time.
 - **Language and appearance.** `App::environment_changed` tells the application the device's
   language (a BCP 47 tag) and whether the screen is light or dark, before the first render and
   when either changes, so strings kept in Rust can follow the language without a restart.
+- **A light or dark app.** `App::appearance` returns `System`, `Light` or `Dark`; the colours
+  Rust paints and the native bars, alerts and sheets follow. `KrabikActivity` is an
+  `AppCompatActivity` for this. On Android a cold start shows the device's appearance until the
+  application has said what it wants.
 
 ---
 
@@ -715,6 +719,12 @@ platform does less than the other.
   nothing.
 - The chrome event codes and the transition duration are compared across Rust, Kotlin, Swift and
   the C header by a Rust test that reads those files; nothing generates them from one source.
+
+### Tests
+
+- Two Android showcase tests (`catalogsNewControls`, `rotationKeepsTheActivityTheStackAndTheState`)
+  assert that a view is on screen at a position that only holds on the emulator they were
+  written on. They fail on a shorter screen (seen on a Galaxy S24 AVD, API 37).
 
 ### Build
 

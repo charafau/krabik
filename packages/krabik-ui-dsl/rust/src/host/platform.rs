@@ -6,6 +6,7 @@ use crate::engine::tree::NodeId;
 use crate::navigation::{Route, ScreenTransition};
 use crate::presentation::Dialog;
 use crate::scaffold::{Chrome, Snackbar};
+use crate::style::Appearance;
 
 use super::Actions;
 
@@ -79,6 +80,10 @@ pub(crate) trait Controller<P: Platform> {
     /// system back action. When it does not, the platform's own behaviour
     /// (leaving the app, with its predictive animation) applies.
     fn set_back_enabled(&self, cx: &mut P::Cx<'_>, enabled: bool) -> Result<(), P::Error>;
+    /// Makes the whole application light or dark, or lets it follow the
+    /// device again. The platform reports the colour scheme that results
+    /// the way it reports a change on the device.
+    fn set_appearance(&self, cx: &mut P::Cx<'_>, appearance: Appearance) -> Result<(), P::Error>;
     /// Shows the system alert.
     fn show_dialog(&self, cx: &mut P::Cx<'_>, dialog: &Dialog) -> Result<(), P::Error>;
     /// Closes the system alert without reporting back.

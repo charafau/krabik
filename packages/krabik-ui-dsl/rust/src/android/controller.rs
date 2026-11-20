@@ -8,6 +8,7 @@ use crate::navigation::{Route, ScreenTransition};
 use crate::presentation::Dialog;
 use crate::runtime::Runtime;
 use crate::scaffold::{Chrome, Snackbar};
+use crate::style::Appearance;
 use crate::tree::NodeId;
 use jni::errors::Result as JniResult;
 use jni::objects::{JClass, JObject};
@@ -237,6 +238,15 @@ impl Controller<Android> for AndroidController {
         Ok(())
     }
 
+    fn set_appearance(&self, env: &mut Env<'_>, appearance: Appearance) -> JniResult<()> {
+        jni_handles(env)?.controller.set_appearance.call_void(
+            env,
+            self.0.as_obj(),
+            &[JValue::Int(appearance.code())],
+        )?;
+        Ok(())
+    }
+
     fn show_dialog(&self, env: &mut Env<'_>, dialog: &Dialog) -> JniResult<()> {
         let title = jcall!(env, env.new_string(&dialog.title))?;
         let message = jcall!(env, env.new_string(dialog.message.as_deref().unwrap_or("")))?;
@@ -304,6 +314,7 @@ pub(crate) struct Handles {
     pub(crate) show_snackbar: Method,
     pub(crate) dismiss_snackbar: Method,
     pub(crate) set_back_enabled: Method,
+    pub(crate) set_appearance: Method,
     pub(crate) show_dialog: Method,
     pub(crate) dismiss_dialog: Method,
     pub(crate) present_sheet: Method,
@@ -354,6 +365,7 @@ impl Handles {
             ),
             dismiss_snackbar: method!(env, &class, "dismissSnackbar", "()V", VOID),
             set_back_enabled: method!(env, &class, "setBackEnabled", "(Z)V", VOID),
+            set_appearance: method!(env, &class, "setAppearance", "(I)V", VOID),
             show_dialog: method!(
                 env,
                 &class,

@@ -47,7 +47,7 @@ use crate::message::Message;
 use crate::navigation::{Navigation, Route};
 use crate::presentation::{BottomSheet, Dialog};
 use crate::scaffold::{Chrome, Scaffold};
-use crate::style::ColorScheme;
+use crate::style::{Appearance, ColorScheme};
 
 /// What the device tells the application about itself: the user's language
 /// and whether the screen is light or dark.
@@ -147,6 +147,17 @@ pub trait App: Component + Send + 'static {
         None
     }
 
+    /// The appearance the application shows: the device's, or light or
+    /// dark whatever the device shows. This is how a System / Light / Dark
+    /// setting is implemented; the application keeps the choice in its
+    /// state and returns it here.
+    ///
+    /// The native chrome follows too. The colour scheme that results is
+    /// reported through [`App::environment_changed`].
+    fn appearance(&self) -> Appearance {
+        Appearance::System
+    }
+
     /// What should keep sending messages in the current state, such as a
     /// clock. Compared by key after every message; see [`Subscription`].
     fn subscriptions(&self) -> Vec<Subscription<Self::Msg>> {
@@ -182,6 +193,7 @@ pub(crate) trait AnyApp: Send {
     fn environment_changed(&self, environment: &Environment) -> Option<Message>;
     fn view(&self) -> RawElement;
     fn update(&mut self, message: Message) -> Jobs;
+    fn appearance(&self) -> Appearance;
     fn subscriptions(&self) -> Vec<Subscription<()>>;
     fn navigation(&self) -> Option<Vec<Route>>;
     fn screen(&self, key: &str) -> Option<(RawElement, Chrome)>;
@@ -212,6 +224,10 @@ impl<A: App> AnyApp for A {
 
     fn environment_changed(&self, environment: &Environment) -> Option<Message> {
         App::environment_changed(self, environment).map(|message| Box::new(message) as Message)
+    }
+
+    fn appearance(&self) -> Appearance {
+        App::appearance(self)
     }
 
     fn subscriptions(&self) -> Vec<Subscription<()>> {

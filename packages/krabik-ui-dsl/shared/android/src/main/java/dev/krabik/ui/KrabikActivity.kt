@@ -9,11 +9,11 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toolbar
 import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.drawerlayout.widget.DrawerLayout
-import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
@@ -27,11 +27,14 @@ import com.google.android.material.navigation.NavigationView
  * screen stack, alert and bottom sheet; Rust remains the source of truth for
  * what is shown.
  *
+ * It is an AppCompat activity so the application can choose light or dark by
+ * itself; see [KrabikHostController.setAppearance].
+ *
  * Subclasses load their native renderer and, if they provide one, register
  * their app factory. That ordering matters: the renderer must be loaded before
  * the root view is constructed, and the factory installed before it renders.
  */
-abstract class KrabikActivity : FragmentActivity() {
+abstract class KrabikActivity : AppCompatActivity() {
 
     private lateinit var root: RustRootView
     private lateinit var controller: KrabikHostController

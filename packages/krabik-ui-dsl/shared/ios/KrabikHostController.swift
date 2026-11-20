@@ -20,6 +20,8 @@ final class KrabikHostController: UIViewController {
     private var expectedScreens = 0
     /// Whether Rust handles the back action right now.
     private var backEnabled = false
+    /// The appearance the application chose; unspecified follows the device.
+    private var chosenAppearance: UIUserInterfaceStyle = .unspecified
     private var tabIcons: [String] = []
     private weak var alert: UIAlertController?
     private weak var sheet: UIViewController?
@@ -50,6 +52,12 @@ final class KrabikHostController: UIViewController {
         if previous?.userInterfaceStyle != traitCollection.userInterfaceStyle, session != 0 {
             krabik_ios_set_color_scheme(session, traitCollection.userInterfaceStyle == .dark)
         }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // An appearance chosen before the view had a window.
+        applyAppearance()
     }
 
     override func viewDidLoad() {
@@ -679,6 +687,27 @@ final class KrabikHostController: UIViewController {
 
     @objc private func backTapped() {
         _ = krabik_ios_on_back(session)
+    }
+
+    /// Makes the application light or dark whatever the device shows, or
+    /// lets it follow the device again: 0 follows, 1 is light, 2 is dark.
+    @objc func krabikSetAppearance(_ appearance: Int) {
+        switch appearance {
+        case 1: chosenAppearance = .light
+        case 2: chosenAppearance = .dark
+        default: chosenAppearance = .unspecified
+        }
+        // Rust calls this in the middle of a render. The override changes
+        // the traits, which reports the new colour scheme back to Rust, so
+        // it has to wait until the render is over.
+        DispatchQueue.main.async { [weak self] in self?.applyAppearance() }
+    }
+
+    /// The window carries the override, so alerts and sheets presented over
+    /// this controller follow it as well.
+    private func applyAppearance() {
+        overrideUserInterfaceStyle = chosenAppearance
+        view.window?.overrideUserInterfaceStyle = chosenAppearance
     }
 
     /// Whether Rust currently handles back. Arms the swipe-back gesture.

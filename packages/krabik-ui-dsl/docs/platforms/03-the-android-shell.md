@@ -41,8 +41,9 @@ KrabikRecyclers`, and `KrabikChecks.kt` declares `KrabikCheckBox` and `KrabikRad
 
 ## `KrabikActivity`
 
-An app's `MainActivity` extends this class. It is a `FragmentActivity` that builds its whole view
-hierarchy in code; there are no layout XML files.
+An app's `MainActivity` extends this class. It is an `AppCompatActivity` that builds its whole view
+hierarchy in code; there are no layout XML files. AppCompat is what lets the application choose
+light or dark by itself (`KrabikHostController.setAppearance`).
 
 ### Start-up order
 

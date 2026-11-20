@@ -19,7 +19,9 @@ use krabik_ui_dsl::command::{Command, Subscription};
 use krabik_ui_dsl::navigation::{Navigation, Route, ScreenTransition};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::scaffold::{AppBar, Scaffold};
-use krabik_ui_dsl::ui::{ColorScheme, DatePickerValue, DateValue, Element, Icon, TimeValue};
+use krabik_ui_dsl::ui::{
+    Appearance, ColorScheme, DatePickerValue, DateValue, Element, Icon, TimeValue,
+};
 
 /// How long the Async page's pretend request takes.
 const LOAD_TIME: Duration = Duration::from_millis(2500);
@@ -63,6 +65,8 @@ pub enum Msg {
     ResetTaps,
     /// The device's language or appearance, at startup and when it changes.
     Environment(Environment),
+    /// The Environment page's choice: follow the device, light or dark.
+    Appearance(usize),
     /// A container on the Container page was tapped.
     ContainerTap(&'static str),
     /// The button inside the tappable card.
@@ -127,6 +131,8 @@ pub struct ShowcaseApp {
     language: String,
     locale: String,
     color_scheme: ColorScheme,
+    /// The appearance chosen on the Environment page.
+    appearance: Appearance,
     notifications: bool,
     wifi: bool,
     bluetooth: bool,
@@ -190,6 +196,7 @@ impl ShowcaseApp {
             language: String::new(),
             locale: String::new(),
             color_scheme: ColorScheme::Light,
+            appearance: Appearance::System,
             notifications: false,
             wifi: true,
             bluetooth: false,
@@ -322,6 +329,13 @@ impl Component for ShowcaseApp {
                 self.container_taps += 1;
             }
             Msg::ContainerMute => self.container_muted = !self.container_muted,
+            Msg::Appearance(index) => {
+                self.appearance = match index {
+                    1 => Appearance::Light,
+                    2 => Appearance::Dark,
+                    _ => Appearance::System,
+                };
+            }
             Msg::Environment(environment) => {
                 self.language = environment.language();
                 self.locale = environment.locale;
@@ -394,6 +408,10 @@ impl Component for ShowcaseApp {
 }
 
 impl App for ShowcaseApp {
+    fn appearance(&self) -> Appearance {
+        self.appearance
+    }
+
     fn environment_changed(&self, environment: &Environment) -> Option<Msg> {
         Some(Msg::Environment(environment.clone()))
     }

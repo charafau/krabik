@@ -113,6 +113,7 @@ pub(crate) trait Controller<P: Platform> {
     fn show_snackbar(&self, cx: &mut P::Cx<'_>, snackbar: &Snackbar) -> Result<(), P::Error>;
     fn dismiss_snackbar(&self, cx: &mut P::Cx<'_>) -> Result<(), P::Error>;
     fn set_back_enabled(&self, cx: &mut P::Cx<'_>, enabled: bool) -> Result<(), P::Error>;
+    fn set_appearance(&self, cx: &mut P::Cx<'_>, appearance: Appearance) -> Result<(), P::Error>;
     fn show_dialog(&self, cx: &mut P::Cx<'_>, dialog: &Dialog) -> Result<(), P::Error>;
     fn dismiss_dialog(&self, cx: &mut P::Cx<'_>) -> Result<(), P::Error>;
     fn present_sheet(&self, cx: &mut P::Cx<'_>, host: u64) -> Result<(), P::Error>;

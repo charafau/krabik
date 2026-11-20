@@ -375,7 +375,7 @@ Each app adds one more, on its own bridge class: `install()`, which registers th
 | Receiver | Methods | Called from |
 | --- | --- | --- |
 | `RustRootView` | `applyFrame`, `applyLayouts`, `registerView`, `unregisterView`, `startEnter`, `startExit`, `ensureKeyboardShown` | `android/host.rs`, `android/style.rs`, `android/entry.rs` |
-| `KrabikHostController` | `push`, `pop`, `setRootVisible`, `setToolbar`, `setBottomNavigation`, `setFab`, `setDrawer`, `showSnackbar`, `dismissSnackbar`, `setBackEnabled`, `showDialog`, `dismissDialog`, `presentSheet`, `dismissSheet` | `android/controller.rs` |
+| `KrabikHostController` | `push`, `pop`, `setRootVisible`, `setToolbar`, `setBottomNavigation`, `setFab`, `setDrawer`, `showSnackbar`, `dismissSnackbar`, `setBackEnabled`, `setAppearance`, `showDialog`, `dismissDialog`, `presentSheet`, `dismissSheet` | `android/controller.rs` |
 | `KrabikStyle` (static) | `apply` | `android/style.rs` |
 | `KrabikViews` (static) | `createScroll`, `createProgress`, `updateProgress`, `updateSpinner` | `android/host.rs`, `android/widgets/progress.rs` |
 | `KrabikRecyclers` (static) | `create`, `update` | `android/rows.rs` |
@@ -425,6 +425,7 @@ All are `@objc` methods of `KrabikHostController`, sent from `rust/src/ios/contr
 | `krabikSetFab:icon:visible:` | Applies the floating action button. |
 | `krabikSetDrawer:icons:selected:present:open:` | Applies the drawer. |
 | `krabikShowSnackbar:action:` / `krabikDismissSnackbar` | Shows or removes the snackbar. |
+| `krabikSetAppearance:` | Makes the app light or dark, or lets it follow the device (0, 1, 2). |
 | `krabikShowDialog:message:labels:roles:` / `krabikDismissDialog` | Shows or closes the alert. |
 | `krabikPresentSheet:` / `krabikDismissSheet` | Presents or dismisses the sheet. |
 

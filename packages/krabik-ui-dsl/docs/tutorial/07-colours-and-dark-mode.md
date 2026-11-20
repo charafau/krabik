@@ -348,6 +348,32 @@ The two custom iOS views from chapter 6 are not painted by Rust, so they handle 
 themselves with UIKit dynamic colours. `KrabikSnackbarView` in `shared/ios/KrabikChrome.swift`
 inverts: a dark bar in light mode, a light bar in dark mode.
 
+## Letting the user choose
+
+A System / Light / Dark setting is application state. Keep the choice and return it from
+`App::appearance`:
+
+```rust,ignore
+impl App for Notes {
+    fn appearance(&self) -> Appearance {
+        self.settings.appearance        // Appearance::System, ::Light or ::Dark
+    }
+}
+```
+
+The runtime compares the answer after every message and tells the platform when it changes.
+Everything follows, not only the colours Rust paints: the app bar, the tab bar, alerts, sheets and
+the system bars.
+
+- **Android** sets AppCompat's night mode for the process. When that changes what is shown, the
+  activity is recreated exactly as for a change on the device, and the app is kept.
+- **iOS** sets `overrideUserInterfaceStyle` on the window. UIKit reports the new trait, and the
+  path from "What happens when the user switches" repaints.
+
+The choice is not stored by the framework. An app that wants it to survive a restart saves it
+with its other settings and returns it again; on Android a cold start then shows the device's
+appearance for a moment before the app's.
+
 ## Following the device yourself
 
 Adaptive colours cover most of dark mode without the app knowing which appearance is showing.

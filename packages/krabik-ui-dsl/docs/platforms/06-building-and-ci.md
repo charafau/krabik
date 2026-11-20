@@ -122,7 +122,7 @@ The Kotlin half of the framework is an Android *library* module. It is not publi
 each app includes the directory as a source module. Three details:
 
 - `api` versus `implementation`: an `api` dependency is visible to the app that uses the library.
-  Apps subclass `KrabikActivity`, a `FragmentActivity`, so they need those types. RecyclerView and
+  Apps subclass `KrabikActivity`, an `AppCompatActivity`, so they need those types. RecyclerView and
   Coil are internal.
 - The build directory is redirected into the *including* app's build directory. Four Gradle
   projects include this one source directory; without the redirect they would all write to

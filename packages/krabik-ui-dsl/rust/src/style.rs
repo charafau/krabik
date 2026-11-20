@@ -10,6 +10,35 @@ pub enum ColorScheme {
     Dark,
 }
 
+/// Which appearance the application shows.
+///
+/// Returned from [`App::appearance`](crate::app::App::appearance). It
+/// decides the colours Rust paints and the native chrome around them: app
+/// bars, tab bars, alerts, sheets and the system bars.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Appearance {
+    /// Whatever the device shows.
+    #[default]
+    System,
+    /// Light, whatever the device shows.
+    Light,
+    /// Dark, whatever the device shows.
+    Dark,
+}
+
+impl Appearance {
+    /// The number the native controllers know the appearance by: 0 follows
+    /// the device, 1 is light, 2 is dark.
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    pub(crate) fn code(self) -> i32 {
+        match self {
+            Self::System => 0,
+            Self::Light => 1,
+            Self::Dark => 2,
+        }
+    }
+}
+
 /// A colour, with a value for the light appearance and one for the dark.
 ///
 /// A plain ARGB number such as `0xFF21_96F3` converts into a colour that is

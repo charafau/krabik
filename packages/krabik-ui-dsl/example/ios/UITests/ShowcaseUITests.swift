@@ -402,6 +402,28 @@ final class ShowcaseUITests: XCTestCase {
         backToCatalog()
     }
 
+    /// The application shows dark while the device is light, and the
+    /// native bars follow.
+    func testTheApplicationChoosesItsAppearance() throws {
+        XCUIDevice.shared.appearance = .light
+        open("Environment")
+        XCTAssertTrue(app.staticTexts["Appearance: light"].waitForExistence(timeout: 20))
+        let light = brightness(of: app.screenshot())
+
+        tapButton("Always dark")
+        XCTAssertTrue(app.staticTexts["Appearance: dark"].waitForExistence(timeout: 10))
+        sleep(1)
+        let dark = brightness(of: app.screenshot())
+        XCTAssertGreaterThan(light, 0.7, "the light screen is mostly light")
+        XCTAssertLessThan(dark, 0.3, "the dark screen is mostly dark, bars included")
+        capture("appearance-always-dark")
+
+        tapButton("Follow device")
+        XCTAssertTrue(app.staticTexts["Appearance: light"].waitForExistence(timeout: 10))
+
+        backToCatalog()
+    }
+
     func testAContainerReactsToTaps() throws {
         open("Container")
         XCTAssertTrue(app.staticTexts["Nothing tapped yet."].waitForExistence(timeout: 5))
