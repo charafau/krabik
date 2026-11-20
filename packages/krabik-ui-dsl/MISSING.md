@@ -28,11 +28,6 @@ and are candidates for a later framework pass.
 - Current handling: English/Polish strings live in Rust and the initial
   language is supplied by the native host; changes apply after a cold start.
 
-## Startup hook
-
-- Missing: an init/mount hook for returning the initial command.
-- Current handling: a one-shot subscription triggers the initial rate refresh.
-
 ## Custom illustration pipeline
 
 - Missing: SVG rendering and effects such as blur.

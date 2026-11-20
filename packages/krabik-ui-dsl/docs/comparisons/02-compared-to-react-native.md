@@ -173,7 +173,7 @@ developers know from Redux, built in and without the store library:
 | `useState` for local UI state | a field in the app struct or in a child component's struct |
 | Context | pass arguments |
 | `useRef` to a host component | none; views are not reachable from app code |
-| `useEffect` on mount / unmount | none; nothing is mounted |
+| `useEffect` on mount / unmount | none for a component: nothing is mounted. `App::init` returns the work the app starts with |
 
 `useReducer` at the root of an app, with every component a pure function of props, is a fair
 picture of what an app here looks like. The reducer is `update`, and the compiler checks that

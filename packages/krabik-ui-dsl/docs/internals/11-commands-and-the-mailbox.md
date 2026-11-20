@@ -268,6 +268,24 @@ again before posting, so a tick that was due at the moment of stopping is droppe
 application's list again. The platforms call it from `onStart`/`onStop` and from the
 foreground/background notifications.
 
+## The command an application starts with
+
+`App::init` returns a command too, and there is no message to return it from. `Running::new`
+calls it when the factory has made a new instance and keeps the jobs:
+
+```rust,ignore
+pub(crate) struct Running {
+    pub(crate) app: Box<dyn AnyApp>,
+    pub(crate) mailbox: Arc<Mailbox>,
+    pub(crate) init: Jobs,
+}
+```
+
+`Session::with_executor` hands them to `command::run` before anything is rendered. No waker is
+connected at that point; a result that is posted early waits in the mailbox, and `set_waker`
+asks for a drain when it finds one. `Session::into_app` returns a `Running` with no jobs, which
+is why a recreated Android activity does not start the work again.
+
 ## Ending a session
 
 ```rust,ignore
@@ -365,7 +383,7 @@ itself again.
 ## Where this lives
 
 - `rust/src/command.rs`: everything in this chapter that is not session code, and its tests.
-- `rust/src/app.rs`: `Component::update`, `App::subscriptions`, `AnyApp`, `Running`.
+- `rust/src/app.rs`: `Component::update`, `App::init`, `App::subscriptions`, `AnyApp`, `Running`.
 - `rust/src/host/session.rs`: `apply`, `drain`, `set_waker`, `set_active`,
   `sync_subscriptions`, `Link`, `Timers`, and the tests from
   `the_result_of_a_command_comes_back_as_a_message` on.

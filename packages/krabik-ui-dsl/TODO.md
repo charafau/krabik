@@ -588,6 +588,13 @@ siblings with the same key would hash to the same node identifier.
   windowed for its own height, a list whose content is replaced scrolls back to the top, and
   `Snackbar::id` lets the same message be shown again.
 
+### 9. Gaps an application rewrite found ✅
+
+The list in [MISSING.md](MISSING.md), closed one at a time.
+
+- **Startup work.** `App::init` returns the command an application starts with. It runs once
+  for an instance, before the first render, and not again when an Android activity is recreated.
+
 ---
 
 ## Remaining ❌

@@ -380,7 +380,7 @@ If you use BLoC, the mapping is direct:
 | `StatefulWidget` for a bit of local state (is this panel expanded?) | A field in your app struct, or in a child component's struct that the parent owns |
 | `InheritedWidget`, `Provider`, `context.watch` | Pass the value as a function argument. `view` is plain Rust; helper functions take what they need |
 | `Theme.of(context)`, `MediaQuery.of(context)` | No context. Colours carry both appearances (`Color::adaptive`); see [section 9](#9-lists-navigation-chrome-animation-theming-accessibility) |
-| `initState` / `dispose` | None. Nothing is mounted. Start work from `update`; keep timers in `subscriptions()` |
+| `initState` / `dispose` | None for a widget: nothing is mounted. The app has `App::init` for the work it starts with; start other work from `update` and keep timers in `subscriptions()` |
 | `TextEditingController`, `ScrollController`, `FocusNode` | None. The text is a `String` in your state; scroll position belongs to the native view |
 | `ValueNotifier`, streams feeding a builder | A message that updates state |
 

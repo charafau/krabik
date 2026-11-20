@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::app::{AnyApp, Running};
-use crate::command::{self, Executor, Mailbox, Threads};
+use crate::command::{self, Executor, Jobs, Mailbox, Threads};
 use crate::engine::tree::{self, NodeId};
 use crate::message::Message;
 use crate::navigation::{Route, ScreenTransition};
@@ -75,6 +75,9 @@ impl<P: Platform> Session<P> {
     ) -> Self {
         let mut hosts = HashMap::new();
         hosts.insert(MAIN_HOST, main);
+        // What a new application asked for in `App::init`. The results wait
+        // in the mailbox until the platform connects its waker.
+        command::run(running.init, &running.mailbox, executor.as_ref());
         Self {
             app: running.app,
             mailbox: Link(running.mailbox),
@@ -107,6 +110,8 @@ impl<P: Platform> Session<P> {
             // Dropping the rest of the session stops its timers and its
             // wake-ups. Work already started keeps delivering here.
             mailbox: mailbox.0.clone(),
+            // The application has started; `init` is not run again.
+            init: Jobs::none(),
         }
     }
 
@@ -925,6 +930,8 @@ mod tests {
         sheet_lines: usize,
         /// Tells one "Deleted" snackbar from the next.
         snackbar_id: u64,
+        /// Starts the work of `Msg::Load` when the application starts.
+        load_at_start: bool,
     }
 
     /// An application whose state the test can also change from outside,
@@ -1011,6 +1018,14 @@ mod tests {
     }
 
     impl App for TestApp {
+        fn init(&mut self) -> Command<Msg> {
+            if self.state().load_at_start {
+                Command::perform(|| Msg::Loaded(100))
+            } else {
+                Command::none()
+            }
+        }
+
         fn navigation(&self) -> Option<Navigation<Msg>> {
             let state = self.state();
             let navigation = Navigation::new(&state.stack);
@@ -1794,6 +1809,33 @@ mod tests {
         next.drain(&mut ()).unwrap();
         assert_eq!(app.state().clicks, 100);
         assert_eq!(executor.running().len(), 1);
+    }
+
+    #[test]
+    fn the_application_starts_its_work_once() {
+        let (session, app, executor, wakes) = background(State {
+            load_at_start: true,
+            ..State::default()
+        });
+        // The result was waiting when the platform connected its waker.
+        assert_eq!(*wakes.lock().unwrap(), 1);
+        let mut session = session;
+        session.drain(&mut ()).unwrap();
+        assert_eq!(app.state().clicks, 100);
+
+        // The activity is recreated: the application is the same instance,
+        // so the session that continues with it starts nothing.
+        let mut next = Session::<Fake>::with_executor(
+            session.into_app(),
+            FakeHost::new(HostKind::Main),
+            executor,
+        );
+        let woken = Arc::new(Mutex::new(0));
+        let counter = woken.clone();
+        next.set_waker(Arc::new(move || *counter.lock().unwrap() += 1));
+        next.drain(&mut ()).unwrap();
+        assert_eq!(*woken.lock().unwrap(), 0);
+        assert_eq!(app.state().clicks, 100);
     }
 
     #[test]

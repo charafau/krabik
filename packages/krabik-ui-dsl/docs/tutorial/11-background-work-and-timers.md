@@ -103,6 +103,25 @@ Msg::Refresh => {
 A `Dispatcher<Msg>` can be cloned, kept, and used from any thread. Each `send` becomes one
 message. The framework does not ship an HTTP client; use whichever crate suits the app.
 
+## Work that starts with the app
+
+Some work has no message to start it: the first screen needs its data before the user has
+touched anything. `App::init` returns the command for that:
+
+```rust,ignore
+impl App for Notes {
+    fn init(&mut self) -> Command<Msg> {
+        self.loading = true;
+        Command::perform(|| Msg::Loaded(fetch_notes()))
+    }
+}
+```
+
+It is called once for every instance of the app, before the first render, so a change it makes
+to the state (`loading` here) is already on the first screen. The result arrives through
+`update` like any other. An Android activity that is recreated by a rotation or a theme change
+keeps the same instance, so `init` does not run a second time.
+
 ## Child components
 
 A child's `update` returns a `Command` of the child's message type. The parent lifts it the same

@@ -68,6 +68,17 @@ pub trait Component {
 /// Every method has a default, so a single-screen app only implements
 /// [`Component`].
 pub trait App: Component + Send + 'static {
+    /// The work to start when the application starts, such as loading what
+    /// the first screen shows. Its result arrives as a message, like the
+    /// result of a command returned from [`Component::update`].
+    ///
+    /// Called once for every instance of the application, before its first
+    /// render. An Android activity that is recreated (a rotation, a theme
+    /// change) keeps its instance, so this does not run again.
+    fn init(&mut self) -> Command<Self::Msg> {
+        Command::none()
+    }
+
     /// The native navigation stack, when the app uses one.
     ///
     /// The application owns this state; the runtime mirrors it with native
@@ -125,6 +136,7 @@ pub trait App: Component + Send + 'static {
 
 /// An [`App`] with its message type erased, as the runtime holds it.
 pub(crate) trait AnyApp: Send {
+    fn init(&mut self) -> Jobs;
     fn view(&self) -> RawElement;
     fn update(&mut self, message: Message) -> Jobs;
     fn subscriptions(&self) -> Vec<Subscription<()>>;
@@ -139,6 +151,10 @@ pub(crate) trait AnyApp: Send {
 }
 
 impl<A: App> AnyApp for A {
+    fn init(&mut self) -> Jobs {
+        App::init(self).into_jobs()
+    }
+
     fn view(&self) -> RawElement {
         Component::view(self).into_raw()
     }
@@ -231,13 +247,19 @@ pub fn set_app_factory<A: App>(factory: impl Fn() -> A + Send + Sync + 'static) 
 pub(crate) struct Running {
     pub(crate) app: Box<dyn AnyApp>,
     pub(crate) mailbox: Arc<Mailbox>,
+    /// The work [`App::init`] asked for, until the first session starts it.
+    /// Empty for an application that already had a session.
+    pub(crate) init: Jobs,
 }
 
 impl Running {
-    pub(crate) fn new(app: Box<dyn AnyApp>) -> Self {
+    /// A new instance of an application, which has not started yet.
+    pub(crate) fn new(mut app: Box<dyn AnyApp>) -> Self {
+        let init = app.init();
         Self {
             app,
             mailbox: Arc::new(Mailbox::default()),
+            init,
         }
     }
 }
