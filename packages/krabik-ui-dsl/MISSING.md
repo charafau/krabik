@@ -44,3 +44,8 @@ and are candidates for a later framework pass.
 - Missing: Flutter-specific layout, animation, gesture and image-cache behavior.
 - Current handling: native platform presentation with equivalent application
   behavior rather than pixel-identical UI.
+
+## Hot reload
+
+- Flutter and react native support hot reload, krabik doesn't.
+- Dioxus, framework in rust does support it. Check how it works.
