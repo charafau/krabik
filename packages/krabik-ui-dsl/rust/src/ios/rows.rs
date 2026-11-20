@@ -559,6 +559,7 @@ pub(crate) fn create_recycler(props: &RecyclerProps, node: &RenderNode, site: &S
     unsafe {
         collection.setDelegate(Some(ProtocolObject::from_ref(&*data_source)));
     }
+    crate::ios::widgets::refresh::attach(&collection, &props.refresh, site);
     let view = cast_view(collection.clone());
     ViewHandle::new(
         view,

@@ -25,11 +25,20 @@ use krabik_ui_dsl::ui::{
 
 /// How long the Async page's pretend request takes.
 const LOAD_TIME: Duration = Duration::from_millis(2500);
+/// How long a pull-to-refresh on the Pull to refresh page takes.
+const REFRESH_TIME: Duration = Duration::from_millis(1200);
 
 mod checklist;
 mod pages;
 
 use checklist::Checklist;
+
+/// Which container on the Pull to refresh page is being refreshed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefreshTarget {
+    Scroll,
+    List,
+}
 
 /// Everything that can happen in the showcase.
 #[derive(Clone, Debug, PartialEq)]
@@ -65,6 +74,10 @@ pub enum Msg {
     ResetTaps,
     /// The device's language or appearance, at startup and when it changes.
     Environment(Environment),
+    /// The user pulled a container down on the Pull to refresh page.
+    Refresh(RefreshTarget),
+    /// The refresh that pull started has finished.
+    Refreshed(RefreshTarget),
     /// The Environment page's choice: follow the device, light or dark.
     Appearance(usize),
     /// A container on the Container page was tapped.
@@ -127,6 +140,11 @@ pub struct ShowcaseApp {
     container_last: Option<&'static str>,
     container_taps: usize,
     container_muted: bool,
+    /// The Pull to refresh page: the container being refreshed, and how
+    /// often each has been. The list starts at one page of rows.
+    refreshing: Option<RefreshTarget>,
+    refresh_scroll_count: usize,
+    refresh_list_count: usize,
     /// What the device last reported; shown on the Environment page.
     language: String,
     locale: String,
@@ -193,6 +211,9 @@ impl ShowcaseApp {
             container_last: None,
             container_taps: 0,
             container_muted: false,
+            refreshing: None,
+            refresh_scroll_count: 0,
+            refresh_list_count: 1,
             language: String::new(),
             locale: String::new(),
             color_scheme: ColorScheme::Light,
@@ -329,6 +350,25 @@ impl Component for ShowcaseApp {
                 self.container_taps += 1;
             }
             Msg::ContainerMute => self.container_muted = !self.container_muted,
+            // The indicator shows while `refreshing` names the container;
+            // the work itself is a command, like any other.
+            Msg::Refresh(target) => {
+                if self.refreshing.is_some() {
+                    return Command::none();
+                }
+                self.refreshing = Some(target);
+                return Command::perform(move || {
+                    std::thread::sleep(REFRESH_TIME);
+                    Msg::Refreshed(target)
+                });
+            }
+            Msg::Refreshed(target) => {
+                self.refreshing = None;
+                match target {
+                    RefreshTarget::Scroll => self.refresh_scroll_count += 1,
+                    RefreshTarget::List => self.refresh_list_count += 1,
+                }
+            }
             Msg::Appearance(index) => {
                 self.appearance = match index {
                     1 => Appearance::Light,

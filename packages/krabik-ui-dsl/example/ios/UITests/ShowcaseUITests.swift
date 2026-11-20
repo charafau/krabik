@@ -424,6 +424,33 @@ final class ShowcaseUITests: XCTestCase {
         backToCatalog()
     }
 
+    /// The platform's pull-to-refresh on a scroll view and on a recycled list.
+    func testPullingDownRefreshes() throws {
+        open("Pull to refresh")
+        XCTAssertTrue(app.staticTexts["Scroll refreshes: 0"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["List refreshes: 0"].exists)
+
+        pullDown(app.staticTexts["Pull this box down"])
+        XCTAssertTrue(app.staticTexts["Scroll refreshes: 1"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["List refreshes: 0"].exists)
+
+        // The list grows by a page of rows with every refresh.
+        XCTAssertFalse(app.staticTexts["Message 6"].exists)
+        pullDown(app.staticTexts["Message 2"])
+        XCTAssertTrue(app.staticTexts["List refreshes: 1"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Message 6"].waitForExistence(timeout: 5))
+        capture("pull-to-refresh")
+
+        backToCatalog()
+    }
+
+    /// Drags an element far enough down for the refresh control to fire.
+    private func pullDown(_ element: XCUIElement) {
+        let start = element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = start.withOffset(CGVector(dx: 0, dy: 320))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+    }
+
     func testAContainerReactsToTaps() throws {
         open("Container")
         XCTAssertTrue(app.staticTexts["Nothing tapped yet."].waitForExistence(timeout: 5))

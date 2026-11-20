@@ -11,7 +11,7 @@ use krabik_ui_dsl::ui::{
     Slider, Spacer, Switch, TabBar, Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
 };
 
-use crate::{Msg, ShowcaseApp};
+use crate::{Msg, RefreshTarget, ShowcaseApp};
 
 pub(crate) const COLOR_TEXT: Color = Color::adaptive(0xFF20_2125, 0xFFE8_EAED);
 pub(crate) const COLOR_MUTED: Color = Color::adaptive(0xFF66_6666, 0xFFA0_A4A8);
@@ -94,6 +94,7 @@ pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
         "scroll" => "scroll",
         "list" => "list",
         "recycled-list" => "recycled-list",
+        "refresh" => "refresh",
         "layouts" => "layouts",
         "styling" => "styling",
         "environment" => "environment",
@@ -138,6 +139,7 @@ pub(crate) fn title(key: &str) -> &'static str {
         "scroll" => "Scroll view",
         "list" => "Windowed list",
         "recycled-list" => "Recycled list",
+        "refresh" => "Pull to refresh",
         "layouts" => "Layouts",
         "styling" => "Styling",
         "environment" => "Environment",
@@ -182,6 +184,7 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element<Msg>> {
         "scroll" => scroll_page(),
         "list" => list_page(app),
         "recycled-list" => recycled_list_page(app),
+        "refresh" => refresh_page(app),
         "layouts" => layouts_page(),
         "styling" => styling_page(),
         "environment" => environment_page(app),
@@ -259,6 +262,7 @@ pub(crate) fn home() -> Element<Msg> {
             &[
                 ("Windowed list", "page:list"),
                 ("Recycled list", "page:recycled-list"),
+                ("Pull to refresh", "page:refresh"),
             ],
         ),
         (
@@ -1328,6 +1332,73 @@ fn list_page(app: &ShowcaseApp) -> Element<Msg> {
         );
     column = column.child(caption("Scroll to keep discovering rows."));
     column.into()
+}
+
+/// A scroll view and a recycled list, each with the platform's own
+/// pull-to-refresh. The indicator stays for as long as the app says the
+/// refresh is going on.
+fn refresh_page(app: &ShowcaseApp) -> Element<Msg> {
+    let rows: Vec<String> = (1..=app.refresh_list_count * 5)
+        .map(|index| format!("Message {index}"))
+        .collect();
+    Column::new()
+        .padding(24)
+        .spacing(12)
+        .width_percent(1.0)
+        .height_percent(1.0)
+        .align_items(Align::Start)
+        .child(
+            Text::new("Pull to refresh")
+                .size(28)
+                .bold()
+                .color(COLOR_TEXT),
+        )
+        .child(
+            Text::new(format!("Scroll refreshes: {}", app.refresh_scroll_count))
+                .size(16)
+                .color(COLOR_ACCENT),
+        )
+        .child(
+            ScrollView::new()
+                .width_percent(1.0)
+                .height(150)
+                .background(COLOR_SURFACE)
+                .corner_radius(12)
+                .on_refresh(Msg::Refresh(RefreshTarget::Scroll))
+                .refreshing(app.refreshing == Some(RefreshTarget::Scroll))
+                .child(
+                    Column::new()
+                        .padding(16)
+                        .spacing(8)
+                        .child(Text::new("Pull this box down").size(16).color(COLOR_TEXT))
+                        .child(caption("A scroll view with on_refresh."))
+                        .child(caption("The spinner is the platform's own."))
+                        .child(Spacer::new().height(120))
+                        .child(caption("The end.")),
+                ),
+        )
+        .child(
+            Text::new(format!("List refreshes: {}", app.refresh_list_count - 1))
+                .size(16)
+                .color(COLOR_ACCENT),
+        )
+        .child(
+            List::new(rows)
+                .item_height(48)
+                .recycled()
+                .on_refresh(Msg::Refresh(RefreshTarget::List))
+                .refreshing(app.refreshing == Some(RefreshTarget::List))
+                .key(|row| row.clone())
+                .row(|row| {
+                    Row::new()
+                        .width_percent(1.0)
+                        .height(48)
+                        .align_items(Align::Center)
+                        .child(Text::new(row.clone()).size(16).color(COLOR_TEXT))
+                        .into()
+                }),
+        )
+        .into()
 }
 
 fn recycled_list_page(app: &ShowcaseApp) -> Element<Msg> {

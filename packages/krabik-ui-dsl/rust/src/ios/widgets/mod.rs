@@ -24,6 +24,7 @@ pub(crate) mod date_picker;
 pub(crate) mod pager;
 pub(crate) mod progress;
 pub(crate) mod radio_group;
+pub(crate) mod refresh;
 pub(crate) mod scroll;
 pub(crate) mod slider;
 pub(crate) mod switch;
@@ -130,14 +131,20 @@ pub(crate) fn update_content(
                 container::update_container(tap, props);
             }
         }
-        // Containers have no properties of their own; a recycler is updated
-        // through its data source by `IosState::apply_to`.
-        NodeKind::Root
-        | NodeKind::Column
-        | NodeKind::Row
-        | NodeKind::Spacer
-        | NodeKind::Scroll(_)
-        | NodeKind::Recycler(_) => {}
+        NodeKind::Scroll(props) => {
+            if let Content::Scroll { scroll, .. } = content {
+                refresh::update(scroll, &props.refresh);
+            }
+        }
+        // The rows of a recycler are updated through its data source by
+        // `IosState::apply_to`.
+        NodeKind::Recycler(props) => {
+            if let Content::Recycler { collection, .. } = content {
+                refresh::update(collection, &props.refresh);
+            }
+        }
+        // Containers have no properties of their own.
+        NodeKind::Root | NodeKind::Column | NodeKind::Row | NodeKind::Spacer => {}
     }
 }
 

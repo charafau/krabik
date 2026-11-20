@@ -1,6 +1,7 @@
 //! Per-widget configuration. A new view and an updated view both go through [`configure_view`].
 
 use crate::android::handles::Ctor;
+use crate::android::host::set_refreshing;
 use crate::android::rows::update_recycler;
 use crate::android::style::{apply_accessibility, apply_padding, apply_style};
 use crate::android::widgets::check::update_check;
@@ -61,11 +62,8 @@ pub(crate) fn configure_view(
     density: f32,
 ) -> JniResult<()> {
     match kind {
-        NodeKind::Root
-        | NodeKind::Column
-        | NodeKind::Row
-        | NodeKind::Spacer
-        | NodeKind::Scroll(_) => Ok(()),
+        NodeKind::Root | NodeKind::Column | NodeKind::Row | NodeKind::Spacer => Ok(()),
+        NodeKind::Scroll(props) => set_refreshing(env, view, &props.refresh),
         NodeKind::Widget(Widget::Text(_)) | NodeKind::Widget(Widget::Button(_)) => {
             update_text(env, view, kind)
         }
@@ -82,7 +80,10 @@ pub(crate) fn configure_view(
         NodeKind::Widget(Widget::Progress(props)) => update_progress(env, view, props),
         NodeKind::Widget(Widget::Spinner(props)) => progress::update_spinner(env, view, props),
         NodeKind::Widget(Widget::Image(props)) => update_image(env, view, props),
-        NodeKind::Recycler(props) => update_recycler(env, view, props, density),
+        NodeKind::Recycler(props) => {
+            update_recycler(env, view, props, density)?;
+            set_refreshing(env, view, &props.refresh)
+        }
     }
 }
 

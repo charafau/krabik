@@ -277,7 +277,6 @@ pub(crate) struct Jni {
     // `android.view.ViewGroup`.
     pub(crate) add_view: Method,
     pub(crate) remove_view: Method,
-    pub(crate) get_child_at: Method,
     pub(crate) remove_all_views: Method,
 
     // `android.widget.TextView`, shared by text, buttons and inputs.
@@ -306,6 +305,10 @@ pub(crate) struct Jni {
     pub(crate) make_measure_spec: StaticMethod,
     pub(crate) long_value_of: StaticMethod,
     pub(crate) create_scroll: StaticMethod,
+    /// `KrabikViews.contentHost`: where a scroll container's children go.
+    pub(crate) content_host: StaticMethod,
+    /// `KrabikViews.setRefreshing`: the pull-to-refresh indicator.
+    pub(crate) set_refreshing: StaticMethod,
     pub(crate) apply_style: StaticMethod,
     pub(crate) typeface_default: StaticField,
     pub(crate) typeface_default_bold: StaticField,
@@ -428,14 +431,6 @@ impl Jni {
                 VOID
             ),
 
-            get_child_at: method!(
-                env,
-                &view_group,
-                "getChildAt",
-                "(I)Landroid/view/View;",
-                OBJECT
-            ),
-
             remove_all_views: method!(env, &view_group, "removeAllViews", "()V", VOID),
 
             set_text: method!(
@@ -540,11 +535,27 @@ impl Jni {
                 id: env.get_static_method_id(
                     &krabik_views,
                     jni_str!("createScroll"),
-                    root_signature("(Landroid/content/Context;Z{root})Landroid/view/ViewGroup;")?
+                    root_signature("(Landroid/content/Context;Z{root}Z)Landroid/view/ViewGroup;")?
                         .method_signature(),
                 )?,
                 returns: OBJECT,
             },
+
+            content_host: static_method!(
+                env,
+                &krabik_views,
+                "contentHost",
+                "(Landroid/view/ViewGroup;)Landroid/view/View;",
+                OBJECT
+            ),
+
+            set_refreshing: static_method!(
+                env,
+                &krabik_views,
+                "setRefreshing",
+                "(Landroid/view/View;Z)V",
+                VOID
+            ),
 
             apply_style: static_method!(
                 env,

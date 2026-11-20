@@ -352,6 +352,12 @@ if props.mode == ListMode::Recycled && cfg!(any(target_os = "android", target_os
 
 That keeps unit tests working without any special case in your code.
 
+### Pull to refresh
+
+`List` has the same `.on_refresh(msg)` and `.refreshing(bool)` as `ScrollView` (chapter 2), for
+windowed and recycled lists alike. The showcase's "Pull to refresh" page
+(`refresh_page` in `example/rust/src/pages.rs`) has one of each.
+
 ### Three constraints worth knowing
 
 **The list sizes itself.** Converting a `List` into an element sets its width to 100% and its

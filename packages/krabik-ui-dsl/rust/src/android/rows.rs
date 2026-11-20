@@ -125,6 +125,7 @@ pub(crate) fn create_recycler<'local>(
                 JValue::Long(node_id.0 as jlong),
                 JValue::Int(props.item_count.min(i32::MAX as usize) as jint),
                 JValue::Int(height),
+                JValue::Bool(props.refresh.is_enabled()),
             ],
         )?
         .l()
@@ -179,8 +180,10 @@ impl Handles {
                 id: env.get_static_method_id(
                     &krabik_recyclers,
                     jni_str!("create"),
-                    root_signature("(Landroid/content/Context;{root}JII)Landroid/view/ViewGroup;")?
-                        .method_signature(),
+                    root_signature(
+                        "(Landroid/content/Context;{root}JIIZ)Landroid/view/ViewGroup;",
+                    )?
+                    .method_signature(),
                 )?,
                 returns: OBJECT,
             },

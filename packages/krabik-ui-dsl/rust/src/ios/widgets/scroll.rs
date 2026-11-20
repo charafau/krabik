@@ -113,6 +113,7 @@ pub(crate) fn create(props: &ScrollProps, node: &RenderNode, site: &Site) -> Vie
     // SAFETY: the delegate is owned by the view handle below and
     // only reads the scroll view's offset.
     unsafe { scroll.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
+    crate::ios::widgets::refresh::attach(&scroll, &props.refresh, site);
     let view = cast_view(scroll.clone());
     ViewHandle::new(
         view,

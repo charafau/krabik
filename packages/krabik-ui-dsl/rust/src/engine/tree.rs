@@ -12,7 +12,7 @@ use crate::geometry::Size;
 use crate::ui::{
     Axis, ElementKind, Length, ListMode, ListProps, PagerProps, RawElement, ScrollProps, Style,
 };
-use crate::widgets::{ContainerProps, Widget};
+use crate::widgets::{ContainerProps, Refresh, Widget};
 
 /// The identifier of the synthetic root node.
 pub const ROOT_ID: NodeId = NodeId(0);
@@ -60,7 +60,7 @@ impl NodeKind {
 }
 
 /// The configuration of a native recycler.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RecyclerProps {
     /// The number of items the recycler reports.
     pub item_count: usize,
@@ -76,15 +76,18 @@ pub struct RecyclerProps {
     /// the adapter to rebind the attached cells; the renderer diffs each row,
     /// so unchanged widgets are not touched.
     pub revision: u64,
+    /// Pull-to-refresh.
+    pub refresh: Refresh,
 }
 
 impl RecyclerProps {
     /// A recycler before the runtime stamps its revision.
-    pub fn new(item_count: usize, item_height: Option<f32>) -> Self {
+    pub fn new(item_count: usize, item_height: Option<f32>, refresh: Refresh) -> Self {
         Self {
             item_count,
             item_height,
             revision: 0,
+            refresh,
         }
     }
 }
@@ -472,7 +475,7 @@ fn build_node_in(element: &RawElement, id: NodeId, cx: &mut BuildContext) -> UiN
             ..props.clone()
         }),
         ElementKind::Widget(widget) => NodeKind::Widget(widget.clone()),
-        ElementKind::Scroll(props) => NodeKind::Scroll(*props),
+        ElementKind::Scroll(props) => NodeKind::Scroll(props.clone()),
         ElementKind::List(_) => unreachable!("lists are expanded before the node kind match"),
     };
 
@@ -570,7 +573,11 @@ fn build_list(
         cx.info.recycled.insert(id, props.clone());
         return UiNode {
             id,
-            kind: NodeKind::Recycler(RecyclerProps::new(props.item_count, props.item_height)),
+            kind: NodeKind::Recycler(RecyclerProps::new(
+                props.item_count,
+                props.item_height,
+                props.refresh.clone(),
+            )),
             style: element.style.clone(),
             children: Vec::new(),
         };
@@ -596,6 +603,7 @@ fn build_list(
         id,
         kind: NodeKind::Scroll(ScrollProps {
             axis: Axis::Vertical,
+            refresh: props.refresh.clone(),
         }),
         style: element.style.clone(),
         children: vec![column],
@@ -1434,11 +1442,11 @@ mod tests {
             style: Style::default(),
             children: vec![UiNode {
                 id: NodeId(10),
-                kind: NodeKind::Recycler(RecyclerProps::new(4, None)),
+                kind: NodeKind::Recycler(RecyclerProps::new(4, None, Refresh::default())),
                 style: Style::default(),
                 children: vec![UiNode {
                     id: NodeId(11),
-                    kind: NodeKind::Recycler(RecyclerProps::new(2, Some(10.0))),
+                    kind: NodeKind::Recycler(RecyclerProps::new(2, Some(10.0), Refresh::default())),
                     style: Style::default(),
                     children: Vec::new(),
                 }],

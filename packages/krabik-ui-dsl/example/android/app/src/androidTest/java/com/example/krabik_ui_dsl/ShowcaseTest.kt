@@ -628,6 +628,41 @@ class ShowcaseTest {
         }
     }
 
+    /** The platform's pull-to-refresh on a scroll view and on a recycled list. */
+    @Test
+    fun pullingDownRefreshes() {
+        // A drag from the middle of the view to well below it: far enough
+        // for the refresh layout, wherever the view sits on the screen.
+        val pullDown = GeneralSwipeAction(
+            Swipe.SLOW,
+            GeneralLocation.CENTER,
+            { view ->
+                val origin = IntArray(2).also(view::getLocationOnScreen)
+                val density = view.resources.displayMetrics.density
+                floatArrayOf(
+                    origin[0] + view.width / 2f,
+                    origin[1] + view.height / 2f + 320 * density,
+                )
+            },
+            Press.FINGER,
+        )
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openPage("Pull to refresh")
+            onView(withText("Scroll refreshes: 0")).check(matches(isDisplayed()))
+            onView(withText("List refreshes: 0")).check(matches(isDisplayed()))
+
+            onView(withText("Pull this box down")).perform(pullDown)
+            awaitText("Scroll refreshes: 1")
+            onView(withText("List refreshes: 0")).check(matches(isDisplayed()))
+
+            // The list grows by a page of rows with every refresh.
+            onView(withText("Message 6")).check(doesNotExist())
+            onView(withText("Message 2")).perform(pullDown)
+            awaitText("List refreshes: 1")
+            onView(withText("Message 6")).check(matches(isDisplayed()))
+        }
+    }
+
     @Test
     fun aContainerReactsToTaps() {
         ActivityScenario.launch(MainActivity::class.java).use {

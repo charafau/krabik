@@ -4,11 +4,6 @@ This rewrite intentionally uses the current Krabik APIs without modifying
 `krabik-ui-dsl`. The following gaps are handled with documented compromises
 and are candidates for a later framework pass.
 
-## Pull-to-refresh
-
-- Missing: a native pull-to-refresh container/gesture.
-- Current handling: explicit refresh action in the app bar.
-
 ## Custom illustration pipeline
 
 - Missing: SVG rendering and effects such as blur.

@@ -447,6 +447,20 @@ pub extern "system" fn native_on_tab_selected<'caller>(
     });
 }
 
+/// A scroll container or a list was pulled down to refresh.
+#[unsafe(export_name = native_name!("nativeOnRefresh"))]
+pub extern "system" fn native_on_refresh<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    host: jlong,
+    node_id: jlong,
+) {
+    run(&mut unenv, "nativeOnRefresh", |env| {
+        on_node_event(env, handle, host, node_id, NodeEvent::Refresh)
+    });
+}
+
 /// A scroll container moved to `offset_px`.
 #[unsafe(export_name = native_name!("nativeOnScroll"))]
 pub extern "system" fn native_on_scroll<'caller>(

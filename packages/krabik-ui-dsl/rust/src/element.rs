@@ -29,7 +29,9 @@ impl ElementKind {
     /// A stable tag used when hashing node identifiers.
     ///
     /// The scroll axis is part of the tag: switching it rebuilds the subtree,
-    /// because the native scroll container changes class.
+    /// because the native scroll container changes class. So is whether a
+    /// scroll container or a list can be pulled to refresh, because a
+    /// refreshable one is created inside the platform's refresh container.
     pub(crate) fn tag(&self) -> u64 {
         match self {
             Self::Column => 1,
@@ -39,9 +41,11 @@ impl ElementKind {
             Self::Pager(_) => 20,
             Self::Widget(widget) => widget.tag(),
             Self::Scroll(props) => match props.axis {
+                Axis::Vertical if props.refresh.is_enabled() => 22,
                 Axis::Vertical => 8,
                 Axis::Horizontal => 9,
             },
+            Self::List(props) if props.refresh.is_enabled() => 23,
             Self::List(_) => 11,
         }
     }
@@ -167,11 +171,9 @@ impl RawElement {
             ElementKind::Widget(widget) => widget.map_messages(wrap),
             ElementKind::Pager(props) => props.on_select.map(wrap),
             ElementKind::Container(props) => props.on_tap.map(wrap),
+            ElementKind::Scroll(props) => props.refresh.on_refresh.map(wrap),
             ElementKind::List(props) => props.map_messages(wrap),
-            ElementKind::Column
-            | ElementKind::Row
-            | ElementKind::Spacer
-            | ElementKind::Scroll(_) => {}
+            ElementKind::Column | ElementKind::Row | ElementKind::Spacer => {}
         }
         for child in &mut self.children {
             child.map_messages(wrap);

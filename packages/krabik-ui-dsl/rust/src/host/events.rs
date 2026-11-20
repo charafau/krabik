@@ -30,6 +30,8 @@ pub(crate) enum NodeEvent {
     Picker(DatePickerValue),
     /// A scroll container moved to an offset in logical points.
     Scroll(f32),
+    /// A scroll container or a list was pulled down to refresh.
+    Refresh,
 }
 
 /// What the application wants to hear about from one widget.
@@ -41,6 +43,7 @@ pub(crate) struct Actions {
     pub focus: Handler<bool>,
     pub toggle: Handler<bool>,
     pub select: Handler<usize>,
+    pub refresh: Handler<()>,
     pub slider: Option<SliderAction>,
     pub picker: Option<PickerAction>,
 }
@@ -99,12 +102,9 @@ impl Actions {
             },
             NodeKind::Pager(props) => actions.select = props.on_select.clone(),
             NodeKind::Container(props) => actions.click = props.on_tap.clone(),
-            NodeKind::Root
-            | NodeKind::Column
-            | NodeKind::Row
-            | NodeKind::Spacer
-            | NodeKind::Scroll(_)
-            | NodeKind::Recycler(_) => {}
+            NodeKind::Scroll(props) => actions.refresh = props.refresh.on_refresh.clone(),
+            NodeKind::Recycler(props) => actions.refresh = props.refresh.on_refresh.clone(),
+            NodeKind::Root | NodeKind::Column | NodeKind::Row | NodeKind::Spacer => {}
         }
         (actions != Self::default()).then_some(actions)
     }
@@ -118,6 +118,7 @@ impl Actions {
             NodeEvent::Focus { focused, .. } => self.focus.message(*focused),
             NodeEvent::Toggle(checked) => self.toggle.message(*checked),
             NodeEvent::Select(index) => self.select.message(*index),
+            NodeEvent::Refresh => self.refresh.message(()),
             NodeEvent::Slider(value) => self.slider.as_ref().and_then(|slider| {
                 let value = snap_slider_value(*value, slider.min, slider.max, slider.step);
                 slider.on_change.message(value)

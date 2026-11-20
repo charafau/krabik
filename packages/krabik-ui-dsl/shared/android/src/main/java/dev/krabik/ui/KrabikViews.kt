@@ -8,6 +8,7 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import kotlin.math.roundToInt
 
 /**
@@ -20,7 +21,12 @@ import kotlin.math.roundToInt
  */
 object KrabikViews {
     @JvmStatic
-    fun createScroll(context: Context, horizontal: Boolean, root: RustRootView): ViewGroup {
+    fun createScroll(
+        context: Context,
+        horizontal: Boolean,
+        root: RustRootView,
+        refreshable: Boolean,
+    ): ViewGroup {
         val scroll = if (horizontal) {
             KrabikHorizontalScrollView(context, root)
         } else {
@@ -43,7 +49,27 @@ object KrabikViews {
         scroll.setFadingEdgeLength(fadingEdge)
         scroll.isVerticalFadingEdgeEnabled = !horizontal
         scroll.isHorizontalFadingEdgeEnabled = horizontal
-        return scroll
+        return if (refreshable && !horizontal) KrabikRefreshLayout(context, root, scroll) else scroll
+    }
+
+    /**
+     * The view Rust adds a scroll container's children to: the content host
+     * inside the scroll view, which may itself be inside a refresh layout.
+     */
+    @JvmStatic
+    fun contentHost(view: ViewGroup): View = (scrolling(view) as ViewGroup).getChildAt(0)
+
+    /** The scroll view or recycler itself, without a refresh layout around it. */
+    @JvmStatic
+    fun scrolling(view: View): View = (view as? KrabikRefreshLayout)?.content ?: view
+
+    /** Shows or hides the refresh indicator of a refreshable container. */
+    @JvmStatic
+    fun setRefreshing(view: View, refreshing: Boolean) {
+        val layout = view as? KrabikRefreshLayout ?: return
+        if (layout.isRefreshing != refreshing) {
+            layout.isRefreshing = refreshing
+        }
     }
 
     /**
@@ -116,6 +142,43 @@ private class ScrollReporter(
             val id = view.tag as? Long ?: return@postOnAnimation
             root.onScrolled(id, latest)
         }
+    }
+}
+
+/**
+ * The platform's pull-to-refresh around a vertical scroll view or a recycler.
+ *
+ * To Rust this is the node's view: it gets the node's frame and tag. What
+ * belongs to the scrolling view inside is passed on.
+ */
+class KrabikRefreshLayout(
+    context: Context,
+    root: RustRootView,
+    val content: ViewGroup,
+) : SwipeRefreshLayout(context) {
+    init {
+        addView(
+            content,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        setOnRefreshListener {
+            val id = tag as? Long
+            if (id != null) root.onRefresh(id) else isRefreshing = false
+        }
+    }
+
+    /** The scroll view reports its offset under the node's id. */
+    override fun setTag(tag: Any?) {
+        super.setTag(tag)
+        content.tag = tag
+    }
+
+    /** Rust resets a list's offset on the node's view. */
+    override fun scrollTo(x: Int, y: Int) {
+        content.scrollTo(x, y)
     }
 }
 

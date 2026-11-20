@@ -519,6 +519,13 @@ class RustRootView(
         }
     }
 
+    /** The user pulled a scroll container or a list down to refresh. */
+    fun onRefresh(nodeId: Long) {
+        if (handle != 0L) {
+            nativeOnRefresh(handle, hostId, nodeId)
+        }
+    }
+
     /** Dispatches the system back button to Rust; returns whether it was handled. */
     fun onBackPressed(): Boolean = if (handle != 0L) nativeOnBack(handle) else false
 
@@ -616,6 +623,8 @@ class RustRootView(
     )
 
     private external fun nativeOnScroll(handle: Long, host: Long, nodeId: Long, offset: Float)
+
+    private external fun nativeOnRefresh(handle: Long, host: Long, nodeId: Long)
 
     private external fun nativeOnBack(handle: Long): Boolean
 

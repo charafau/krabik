@@ -202,6 +202,35 @@ A scroll view sized by its content is exactly as tall as that content and never 
 For long lists of similar rows use `List` instead (chapter 3). A `ScrollView` creates a native
 view for every child, visible or not.
 
+### Pull to refresh
+
+A vertical `ScrollView` and a `List` can be pulled down to refresh. The gesture and its spinner
+are the platform's own (`SwipeRefreshLayout` on Android, `UIRefreshControl` on iOS):
+
+```rust,ignore
+ScrollView::new()
+    .grow(1)
+    .on_refresh(Msg::Refresh)
+    .refreshing(self.refreshing)
+    .child(content)
+
+// in update:
+Msg::Refresh => {
+    self.refreshing = true;
+    return Command::perform(|| Msg::Loaded(fetch_notes()));
+}
+Msg::Loaded(notes) => {
+    self.refreshing = false;
+    self.notes = notes;
+}
+```
+
+`on_refresh` is the message for the pull; `refreshing` says whether the spinner shows. The app
+owns that flag: set it when the refresh starts and clear it when the data arrives (chapter 11 has
+`Command`). A pull whose message leaves `refreshing` false stops the spinner at once. Decide
+`on_refresh` once for a given container: adding or removing it recreates the native view, and
+the scroll position with it.
+
 ## Decoration
 
 The same shared builder has the methods that paint:

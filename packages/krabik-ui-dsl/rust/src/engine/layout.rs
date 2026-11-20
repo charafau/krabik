@@ -120,14 +120,14 @@ fn build_taffy(
 }
 
 fn taffy_style(node: &UiNode, scroll_child: bool, pager_child: bool) -> TaffyStyle {
-    let direction = match node.kind {
+    let direction = match &node.kind {
         NodeKind::Row => FlexDirection::Row,
         NodeKind::Pager(_) => FlexDirection::Row,
         NodeKind::Scroll(props) if props.axis == Axis::Horizontal => FlexDirection::Row,
         _ => FlexDirection::Column,
     };
 
-    let overflow = match node.kind {
+    let overflow = match &node.kind {
         NodeKind::Pager(_) => TaffyPoint {
             x: Overflow::Hidden,
             y: Overflow::Hidden,
@@ -338,7 +338,7 @@ fn collect_frames(
 /// padding-box corner. The native content host lives at the content-box corner,
 /// so the padding is subtracted before the two sizes are compared.
 fn scroll_content_size(node: &UiNode, layout: &Layout) -> Option<Size> {
-    let NodeKind::Scroll(props) = node.kind else {
+    let NodeKind::Scroll(props) = &node.kind else {
         return None;
     };
 

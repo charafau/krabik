@@ -83,7 +83,7 @@ macro_rules! widgets {
 }
 
 // Tags must never be reused: they are part of a node's identity. The
-// containers in `ElementKind` use 1, 2, 3, 8, 9, 11, 20 and 21.
+// containers in `ElementKind` use 1, 2, 3, 8, 9, 11 and 20 to 23.
 widgets! {
     /// A run of text rendered by a native label.
     Text(TextProps) = 4,
@@ -178,7 +178,7 @@ mod tests {
     use super::WIDGET_TAGS;
 
     /// Tags used by the containers in `ElementKind::tag`.
-    const CONTAINER_TAGS: [u64; 8] = [1, 2, 3, 8, 9, 11, 20, 21];
+    const CONTAINER_TAGS: [u64; 10] = [1, 2, 3, 8, 9, 11, 20, 21, 22, 23];
 
     /// A tag is part of a node's identity. Two kinds sharing one would get
     /// the same id at the same position, and the diff would update one

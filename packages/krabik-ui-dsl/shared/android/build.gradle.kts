@@ -37,6 +37,7 @@ dependencies {
   api(libs.material)
 
   implementation(libs.androidx.recyclerview)
+  implementation(libs.androidx.swiperefreshlayout)
   implementation(libs.coil)
   implementation(libs.coil.network.okhttp)
 }

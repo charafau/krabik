@@ -24,6 +24,7 @@ object KrabikRecyclers {
         nodeId: Long,
         count: Int,
         itemHeightPx: Int,
+        refreshable: Boolean,
     ): ViewGroup {
         val recycler = RecyclerView(context)
         recycler.layoutManager = LinearLayoutManager(context)
@@ -34,12 +35,12 @@ object KrabikRecyclers {
         recycler.adapter = adapter
         adapter.recycler = recycler
         recycler.setHasFixedSize(itemHeightPx > 0)
-        return recycler
+        return if (refreshable) KrabikRefreshLayout(context, root, recycler) else recycler
     }
 
     @JvmStatic
     fun update(view: ViewGroup, count: Int, itemHeightPx: Int, revision: Long) {
-        val recycler = view as? RecyclerView ?: return
+        val recycler = KrabikViews.scrolling(view) as? RecyclerView ?: return
         val adapter = recycler.adapter as? RowAdapter ?: return
         adapter.update(count, itemHeightPx, revision)
         recycler.setHasFixedSize(itemHeightPx > 0)

@@ -604,6 +604,10 @@ The list in [MISSING.md](MISSING.md), closed one at a time.
   Rust paints and the native bars, alerts and sheets follow. `KrabikActivity` is an
   `AppCompatActivity` for this. On Android a cold start shows the device's appearance until the
   application has said what it wants.
+- **Pull to refresh.** `ScrollView` (vertical) and `List` take `.on_refresh(msg)` and
+  `.refreshing(bool)`: `SwipeRefreshLayout` on Android, `UIRefreshControl` on iOS. On iOS a
+  spinner the application starts itself, without a pull, stays above the top edge until the user
+  scrolls there.
 
 ---
 
@@ -725,6 +729,9 @@ platform does less than the other.
 - Two Android showcase tests (`catalogsNewControls`, `rotationKeepsTheActivityTheStackAndTheState`)
   assert that a view is on screen at a position that only holds on the emulator they were
   written on. They fail on a shorter screen (seen on a Galaxy S24 AVD, API 37).
+- On the same AVD five of the ten harness tests fail for the same kind of reason: four list and
+  recycler tests in a `scrollTo` towards a gallery entry, and the slider test in `ControlsTest`.
+  The iOS suites pass.
 
 ### Build
 

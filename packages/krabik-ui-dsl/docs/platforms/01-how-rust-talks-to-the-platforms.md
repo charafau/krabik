@@ -359,6 +359,7 @@ says how the entry point takes the state map: `lock` blocks, `try` gives up when
 | `nativeOnTabSelected(..., index)` | try | A tab bar widget selected a tab. |
 | `nativeOnPageSelected(..., index)` | try | A pager settled on a page. |
 | `nativeOnScroll(..., offset)` | try | A scroll container moved. |
+| `nativeOnRefresh(...)` | try | A scroll container or a list was pulled down to refresh. |
 | `nativeBindRow(..., node, index, holder, host, w)` | lock | Builds one recycled row into a holder; returns its height. |
 | `nativeUnbindRow(..., node, holder)` | try | A holder was recycled. |
 | `nativeOnToolbarAction(handle, index)` | try | An app bar action was tapped. |
@@ -377,7 +378,7 @@ Each app adds one more, on its own bridge class: `install()`, which registers th
 | `RustRootView` | `applyFrame`, `applyLayouts`, `registerView`, `unregisterView`, `startEnter`, `startExit`, `ensureKeyboardShown` | `android/host.rs`, `android/style.rs`, `android/entry.rs` |
 | `KrabikHostController` | `push`, `pop`, `setRootVisible`, `setToolbar`, `setBottomNavigation`, `setFab`, `setDrawer`, `showSnackbar`, `dismissSnackbar`, `setBackEnabled`, `setAppearance`, `showDialog`, `dismissDialog`, `presentSheet`, `dismissSheet` | `android/controller.rs` |
 | `KrabikStyle` (static) | `apply` | `android/style.rs` |
-| `KrabikViews` (static) | `createScroll`, `createProgress`, `updateProgress`, `updateSpinner` | `android/host.rs`, `android/widgets/progress.rs` |
+| `KrabikViews` (static) | `createScroll`, `contentHost`, `setRefreshing`, `setTappable`, `createProgress`, `updateProgress`, `updateSpinner` | `android/host.rs`, `android/widgets/progress.rs` |
 | `KrabikRecyclers` (static) | `create`, `update` | `android/rows.rs` |
 | `KrabikRows` (static) | `snapshot`, `fadeOut` | `android/rows.rs` |
 | `KrabikImages` (static) | `load`, `size` | `android/widgets/image.rs`, `android/measure.rs` |

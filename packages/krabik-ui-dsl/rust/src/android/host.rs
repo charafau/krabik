@@ -136,9 +136,10 @@ impl AndroidState {
         }
 
         let children_host = if matches!(node.kind, NodeKind::Scroll(_)) {
-            let host = jni_handles(env)?
-                .get_child_at
-                .call(env, &view, &[JValue::Int(0)])?
+            let ids = jni_handles(env)?;
+            let host = ids
+                .content_host
+                .call(env, &ids.krabik_views, &[JValue::Object(&view)])?
                 .l()?;
             jcall!(env, env.new_global_ref(&host))?
         } else {
@@ -331,9 +332,13 @@ impl AndroidState {
             NodeKind::Widget(widget) => create_widget(env, &site, widget)?,
             NodeKind::Pager(_) => pager::create(env, &site)?,
             NodeKind::Container(_) => container::create(env, &site)?,
-            NodeKind::Scroll(props) => {
-                create_scroll(env, site.context, site.root, props.axis == Axis::Horizontal)?
-            }
+            NodeKind::Scroll(props) => create_scroll(
+                env,
+                site.context,
+                site.root,
+                props.axis == Axis::Horizontal,
+                props.refresh.is_enabled(),
+            )?,
             NodeKind::Recycler(props) => {
                 create_recycler(env, site.context, site.root, node.id, props, self.density)?
             }
@@ -395,6 +400,7 @@ pub(crate) fn create_scroll<'local>(
     context: &JObject<'_>,
     root: &JObject<'_>,
     horizontal: bool,
+    refreshable: bool,
 ) -> JniResult<JObject<'local>> {
     let ids = jni_handles(env)?;
     ids.create_scroll
@@ -405,7 +411,25 @@ pub(crate) fn create_scroll<'local>(
                 JValue::Object(context),
                 JValue::Bool(horizontal),
                 JValue::Object(root),
+                JValue::Bool(refreshable),
             ],
         )?
         .l()
+}
+
+/// Shows or hides the pull-to-refresh indicator of a refreshable container.
+pub(crate) fn set_refreshing(
+    env: &mut Env<'_>,
+    view: &JObject<'_>,
+    refresh: &crate::ui::Refresh,
+) -> JniResult<()> {
+    if !refresh.is_enabled() {
+        return Ok(());
+    }
+    let ids = jni_handles(env)?;
+    ids.set_refreshing.call_void(
+        env,
+        &ids.krabik_views,
+        &[JValue::Object(view), JValue::Bool(refresh.refreshing)],
+    )
 }

@@ -550,7 +550,9 @@ mod tests {
     use crate::widgets::Widget;
     use std::sync::Arc;
 
-    use crate::ui::{Button, Column, Container, Length, List, Switch, Text, TextField, TextProps};
+    use crate::ui::{
+        Button, Column, Container, Length, List, ScrollView, Switch, Text, TextField, TextProps,
+    };
 
     /// What the widget `id` asks to be told about.
     fn actions(runtime: &Runtime, id: NodeId) -> Actions {
@@ -713,6 +715,58 @@ mod tests {
         assert!(created(tappable.id));
         assert!(created(plain.id));
         assert!(!created(column.id));
+    }
+
+    #[test]
+    fn scroll_containers_and_lists_report_a_pull_to_refresh() {
+        let screen = |refreshable: bool, refreshing: bool| -> Element {
+            let mut scroll = ScrollView::new().height(200).child(Text::new("Content"));
+            let mut list = List::new(Arc::new(vec![0usize, 1, 2]))
+                .item_height(40)
+                .key(|index| index.to_string())
+                .row(|index| Text::new(index.to_string()).into());
+            if refreshable {
+                scroll = scroll.on_refresh(()).refreshing(refreshing);
+                list = list.on_refresh(()).refreshing(refreshing);
+            }
+            Column::new()
+                .child(scroll)
+                .child(list)
+                // A horizontal container has nothing to pull down.
+                .child(ScrollView::horizontal().on_refresh(()))
+                .into()
+        };
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&screen(true, false), viewport());
+        let ids: Vec<NodeId> = runtime.tree().children[0]
+            .children
+            .iter()
+            .map(|node| node.id)
+            .collect();
+        assert!(actions(&runtime, ids[0]).refresh.is_set());
+        assert!(actions(&runtime, ids[1]).refresh.is_set());
+        assert!(!actions(&runtime, ids[2]).refresh.is_set());
+
+        // The indicator is a property like any other.
+        let updated = |update: &Update, id| {
+            update
+                .ops
+                .iter()
+                .any(|op| matches!(op, Op::Update(node) if node.id == id))
+        };
+        let update = runtime.update(&screen(true, true), viewport());
+        assert!(updated(&update, ids[0]) && updated(&update, ids[1]));
+
+        // After a pull the platform's indicator is spinning whatever the
+        // description says, so the same description is applied again.
+        runtime.reapply(ids[0]);
+        let update = runtime.update(&screen(true, true), viewport());
+        assert!(updated(&update, ids[0]) && !updated(&update, ids[1]));
+
+        // A refreshable container is another native view: it is recreated.
+        runtime.update(&screen(false, false), viewport());
+        let plain = runtime.tree().children[0].children[0].id;
+        assert_ne!(plain, ids[0]);
     }
 
     #[test]

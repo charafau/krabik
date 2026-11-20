@@ -523,6 +523,9 @@ impl<P: Platform> Session<P> {
                 | NodeEvent::Slider(_)
                 | NodeEvent::Select(_)
                 | NodeEvent::Picker(_)
+                // The pull left the indicator spinning; it stops unless the
+                // application says the refresh is still going.
+                | NodeEvent::Refresh
         );
         if changes_value && message.is_some() {
             state.runtime_mut().reapply(id);

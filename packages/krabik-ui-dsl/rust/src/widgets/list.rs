@@ -3,8 +3,9 @@
 use std::marker::PhantomData;
 
 use crate::element::{Element, ElementKind, RawElement};
-use crate::message::Wrap;
+use crate::message::{Handler, Wrap};
 use crate::style::{IntoPoints, Length};
+use crate::widgets::Refresh;
 use std::fmt;
 use std::sync::Arc;
 
@@ -34,6 +35,8 @@ pub(crate) struct ListProps {
     pub(crate) revision: Option<u64>,
     /// Cross-fade duration for a holder rebind, in milliseconds.
     pub(crate) row_transition_ms: u32,
+    /// Pull-to-refresh.
+    pub(crate) refresh: Refresh,
     pub(crate) keys: Arc<dyn Fn(usize) -> String + Send + Sync>,
     pub(crate) rows: Arc<dyn Fn(usize) -> RawElement + Send + Sync>,
 }
@@ -60,6 +63,7 @@ impl PartialEq for ListProps {
             && self.buffer == other.buffer
             && self.revision == other.revision
             && self.row_transition_ms == other.row_transition_ms
+            && self.refresh == other.refresh
             && Arc::ptr_eq(&self.keys, &other.keys)
     }
 }
@@ -67,6 +71,7 @@ impl PartialEq for ListProps {
 impl ListProps {
     /// Re-wraps the messages of every row the list builds.
     pub(crate) fn map_messages(&mut self, wrap: &Wrap) {
+        self.refresh.on_refresh.map(wrap);
         let rows = Arc::clone(&self.rows);
         let wrap = Arc::clone(wrap);
         self.rows = Arc::new(move |index| {
@@ -101,6 +106,7 @@ pub struct List<T, M = ()> {
     buffer: usize,
     revision: Option<u64>,
     row_transition_ms: u32,
+    refresh: Refresh,
     key: Option<KeyBuilder<T>>,
     row: Option<RowBuilder<T>>,
 }
@@ -119,6 +125,7 @@ impl<T: Send + Sync + 'static, M> List<T, M> {
             buffer: 3,
             revision: None,
             row_transition_ms: 0,
+            refresh: Refresh::default(),
             key: None,
             row: None,
         }
@@ -192,6 +199,13 @@ impl<T: Send + Sync + 'static, M> List<T, M> {
         self
     }
 
+    /// Shows the refresh indicator while `refreshing` is true; see
+    /// [`on_refresh`](Self::on_refresh).
+    pub fn refreshing(mut self, refreshing: bool) -> Self {
+        self.refresh.refreshing = refreshing;
+        self
+    }
+
     /// Derives the stable, unique key of an item.
     pub fn key(mut self, key: impl Fn(&T) -> String + Send + Sync + 'static) -> Self {
         self.key = Some(Box::new(key));
@@ -201,6 +215,18 @@ impl<T: Send + Sync + 'static, M> List<T, M> {
     /// Builds the element of one item. Called only for visible items.
     pub fn row(mut self, row: impl Fn(&T) -> Element<M> + Send + Sync + 'static) -> Self {
         self.row = Some(Box::new(move |item| row(item).into_raw()));
+        self
+    }
+}
+
+impl<T: Send + Sync + 'static, M: Clone + Send + Sync + 'static> List<T, M> {
+    /// Sends `message` when the user pulls the list down past its top: the
+    /// platform's pull-to-refresh, for windowed and recycled lists alike.
+    ///
+    /// Show the indicator for as long as the refresh takes with
+    /// [`refreshing`](Self::refreshing).
+    pub fn on_refresh(mut self, message: M) -> Self {
+        self.refresh.on_refresh = Handler::new(move |()| message.clone());
         self
     }
 }
@@ -230,6 +256,7 @@ impl<T: Send + Sync + 'static, M> From<List<T, M>> for Element<M> {
             buffer: list.buffer,
             revision: list.revision,
             row_transition_ms: list.row_transition_ms,
+            refresh: list.refresh,
             keys,
             rows,
         }));
