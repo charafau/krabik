@@ -135,6 +135,17 @@ impl Measure for IosMeasure {
         {
             return cached;
         }
+        #[cfg(feature = "svg")]
+        if crate::svg::is_svg(path) {
+            // An SVG says its size in points; no image has to be decoded.
+            let size = crate::ios::images::asset_bytes(path)
+                .and_then(|data| crate::svg::natural_size(&data));
+            self.image_sizes
+                .lock()
+                .expect("image size cache")
+                .insert(path.clone(), size);
+            return size;
+        }
         let size = MainThreadMarker::new().and_then(|_| {
             load_asset(path).map(|image| {
                 // SAFETY: the image was just loaded on the main thread.

@@ -7,11 +7,13 @@
 use std::collections::HashMap;
 
 use taffy::Overflow;
-use taffy::geometry::{Point as TaffyPoint, Rect as TaffyRect, Size as TaffySize};
+use taffy::geometry::{Line, Point as TaffyPoint, Rect as TaffyRect, Size as TaffySize};
 use taffy::prelude::{
     AlignItems, AvailableSpace, Dimension, Display, FlexDirection, JustifyContent,
     LengthPercentage, LengthPercentageAuto, NodeId as TaffyId, Style as TaffyStyle, TaffyTree,
 };
+use taffy::style::GridPlacement;
+use taffy::style_helpers::line;
 use taffy::tree::{Layout, LayoutInput, LayoutOutput};
 
 use crate::geometry::{Rect, Size};
@@ -37,7 +39,7 @@ pub fn compute(root: &UiNode, viewport: Size, measurer: &dyn Measure) -> LayoutR
     taffy.disable_rounding();
 
     let mut taffy_ids = HashMap::new();
-    let taffy_root = build_taffy(&mut taffy, root, &mut taffy_ids, false, false);
+    let taffy_root = build_taffy(&mut taffy, root, &mut taffy_ids, Parent::Flex);
 
     let nodes = tree::index(root);
     let by_taffy: HashMap<TaffyId, NodeId> = taffy_ids
@@ -100,26 +102,55 @@ fn build_taffy(
     taffy: &mut TaffyTree,
     node: &UiNode,
     ids: &mut HashMap<NodeId, TaffyId>,
-    scroll_child: bool,
-    pager_child: bool,
+    parent: Parent,
 ) -> TaffyId {
-    let is_scroll = matches!(node.kind, NodeKind::Scroll(_));
-    let is_pager = matches!(node.kind, NodeKind::Pager(_));
+    let inside = match node.kind {
+        NodeKind::Scroll(_) => Parent::Scroll,
+        NodeKind::Pager(_) => Parent::Pager,
+        NodeKind::Stack => Parent::Stack,
+        _ => Parent::Flex,
+    };
     let children: Vec<TaffyId> = node
         .children
         .iter()
-        .map(|child| build_taffy(taffy, child, ids, is_scroll, is_pager))
+        .map(|child| build_taffy(taffy, child, ids, inside))
         .collect();
 
     let taffy_id = taffy
-        .new_with_children(taffy_style(node, scroll_child, pager_child), &children)
+        .new_with_children(taffy_style(node, parent), &children)
         .expect("taffy node");
 
     ids.insert(node.id, taffy_id);
     taffy_id
 }
 
-fn taffy_style(node: &UiNode, scroll_child: bool, pager_child: bool) -> TaffyStyle {
+/// The kind of container a node is laid out in, which decides a few of the
+/// node's own style values.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Parent {
+    /// A row, a column or anything else that lays its children out in a line.
+    Flex,
+    Scroll,
+    Pager,
+    /// Every child takes the stack's one cell.
+    Stack,
+}
+
+fn taffy_style(node: &UiNode, parent: Parent) -> TaffyStyle {
+    let scroll_child = parent == Parent::Scroll;
+    let pager_child = parent == Parent::Pager;
+    // A stack is a grid of one cell that all its children are placed in.
+    // The cell is as large as the largest child, or as the stack when the
+    // stack has a size of its own.
+    let is_stack = matches!(node.kind, NodeKind::Stack);
+    let cell = if parent == Parent::Stack {
+        Line {
+            start: line(1),
+            end: GridPlacement::Auto,
+        }
+    } else {
+        Line::default()
+    };
     let direction = match &node.kind {
         NodeKind::Row => FlexDirection::Row,
         NodeKind::Pager(_) => FlexDirection::Row,
@@ -148,7 +179,19 @@ fn taffy_style(node: &UiNode, scroll_child: bool, pager_child: bool) -> TaffySty
     };
 
     TaffyStyle {
-        display: Display::Flex,
+        display: if is_stack {
+            Display::Grid
+        } else {
+            Display::Flex
+        },
+        grid_row: cell.clone(),
+        grid_column: cell,
+        // In a stack `align_items` places the children on both axes.
+        justify_items: if is_stack {
+            align_items(node.style.align_items)
+        } else {
+            AlignItems::NORMAL
+        },
         flex_direction: direction,
         size: if pager_child {
             // Every pager page fills the pager viewport; the row overflows
@@ -201,7 +244,12 @@ fn taffy_style(node: &UiNode, scroll_child: bool, pager_child: bool) -> TaffySty
             1.0
         },
         align_items: align_items(node.style.align_items),
-        justify_content: justify_content(node.style.justify_content),
+        // A stack's one cell always spans the stack.
+        justify_content: if is_stack {
+            JustifyContent::STRETCH
+        } else {
+            justify_content(node.style.justify_content)
+        },
         overflow,
         ..TaffyStyle::default()
     }
@@ -298,6 +346,7 @@ fn content_size(
         | NodeKind::Column
         | NodeKind::Row
         | NodeKind::Spacer
+        | NodeKind::Stack
         | NodeKind::Container(_)
         | NodeKind::Scroll(_)
         | NodeKind::Pager(_)
@@ -362,6 +411,7 @@ mod tests {
     use crate::geometry::Constraints;
     use crate::measure::ApproximateMeasure;
     use crate::tree::ROOT_ID;
+    use crate::ui::Stack;
     use crate::ui::{
         Button, Checkbox, Column, DatePicker, DatePickerMode, DateValue, EdgeInsets, Element,
         Image, ImageSource, Pager, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView,
@@ -820,6 +870,53 @@ mod tests {
                 _ => None,
             }
         }
+    }
+
+    #[test]
+    fn a_stack_puts_its_children_on_top_of_each_other() {
+        // Sized by its largest child; every child fills it.
+        let element: Element = Column::new()
+            .align_items(Align::Start)
+            .child(
+                Stack::new()
+                    .child(Spacer::new().width(200).height(100))
+                    .child(Text::new("Caption"))
+                    .child(Column::new().child(Spacer::new()).child(Text::new("Low"))),
+            )
+            .child(Text::new("After"))
+            .into();
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(600.0, 600.0), &ApproximateMeasure).frames;
+        let stack = &tree.children[0].children[0];
+        let whole = Rect::new(0.0, 0.0, 200.0, 100.0);
+        assert_eq!(frames[&stack.id], whole);
+        for child in &stack.children {
+            assert_eq!(frames[&child.id], whole);
+        }
+        // A column in the stack arranges its own content: the spacer pushes
+        // the text to the bottom edge.
+        let low = frames[&stack.children[2].children[1].id];
+        assert_eq!(low.y + low.height, 100.0);
+        // What follows the stack is below it, not below the sum of its
+        // children.
+        assert_eq!(frames[&tree.children[0].children[1].id].y, 100.0);
+
+        // With an alignment the children keep their own size and are placed
+        // on both axes.
+        let element: Element = Stack::new()
+            .width(200)
+            .height(100)
+            .align_items(Align::Center)
+            .child(Spacer::new().width(40).height(20))
+            .into();
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(600.0, 600.0), &ApproximateMeasure).frames;
+        let stack = &tree.children[0];
+        assert_eq!(frames[&stack.id], Rect::new(0.0, 0.0, 200.0, 100.0));
+        assert_eq!(
+            frames[&stack.children[0].id],
+            Rect::new(80.0, 40.0, 40.0, 20.0)
+        );
     }
 
     #[test]

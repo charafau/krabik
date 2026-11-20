@@ -8,7 +8,14 @@ edition = "2024"
 
 [dependencies]
 krabik-ui-dsl-macros = { path = "macros" }
-taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
+taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "content_size"] }
+
+# SVG images are rendered in Rust, the same on both platforms. Off by default:
+# an app that shows none does not carry the renderer.
+resvg = { version = "0.50", default-features = false, optional = true }
+
+[features]
+svg = ["dep:resvg"]
 
 # Only the Android renderer talks to a JVM.
 [target.'cfg(target_os = "android")'.dependencies]

@@ -32,6 +32,8 @@ pub enum NodeKind {
     Row,
     /// Flexible empty space.
     Spacer,
+    /// A container whose children lie on top of each other.
+    Stack,
     /// A box around its content. It always has a native view, which is
     /// what receives the tap.
     Container(ContainerProps),
@@ -469,6 +471,7 @@ fn build_node_in(element: &RawElement, id: NodeId, cx: &mut BuildContext) -> UiN
         ElementKind::Column => NodeKind::Column,
         ElementKind::Row => NodeKind::Row,
         ElementKind::Spacer => NodeKind::Spacer,
+        ElementKind::Stack => NodeKind::Stack,
         ElementKind::Container(props) => NodeKind::Container(props.clone()),
         ElementKind::Pager(props) => NodeKind::Pager(PagerProps {
             pages: element.children.len(),

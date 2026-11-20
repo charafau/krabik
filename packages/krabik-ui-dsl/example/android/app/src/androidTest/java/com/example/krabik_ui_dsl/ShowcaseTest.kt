@@ -1,6 +1,7 @@
 package com.example.krabik_ui_dsl
 
 import dev.krabik.ui.*
+import dev.krabik.ui.testing.findFirst
 import dev.krabik.ui.testing.findRustRoot
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -660,6 +661,67 @@ class ShowcaseTest {
             onView(withText("Message 2")).perform(pullDown)
             awaitText("List refreshes: 1")
             onView(withText("Message 6")).check(matches(isDisplayed()))
+        }
+    }
+
+    /**
+     * An SVG asset is drawn by Rust at the size of its view, and a stack
+     * puts its children on top of each other.
+     */
+    @Test
+    fun aStackLayersItsChildrenOverVectorArt() {
+        fun image(scenario: ActivityScenario<MainActivity>, label: String): android.widget.ImageView {
+            var found: android.widget.ImageView? = null
+            scenario.onActivity { activity ->
+                found = findRustRoot(activity.window.decorView)
+                    ?.findFirst<android.widget.ImageView> { it.contentDescription == label }
+            }
+            return found ?: throw AssertionError("no image labelled $label")
+        }
+        /** Waits for the background rendering and returns it. */
+        fun rendering(view: android.widget.ImageView): android.graphics.Bitmap {
+            repeat(50) {
+                (view.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap?.let { return it }
+                Thread.sleep(100)
+            }
+            throw AssertionError("the SVG was not rendered")
+        }
+
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            openPage("Stack")
+            onView(withText("Caption over the art")).check(matches(isDisplayed()))
+            onView(withText("Centered")).check(matches(isDisplayed()))
+
+            val backdrop = image(scenario, "Sunrise backdrop")
+            val bitmap = rendering(backdrop)
+            // Drawn for the view, pixel for pixel, not scaled from a fixed size.
+            assertTrue(bitmap.width == backdrop.width && bitmap.height == backdrop.height)
+            // The top of the drawing is its dark blue sky.
+            val sky = bitmap.getPixel(bitmap.width / 2, 4)
+            assertTrue("the sky is blue", Color.blue(sky) > Color.red(sky))
+
+            // The caption is inside the image's frame: it lies on top of it.
+            var inside = false
+            scenario.onActivity { activity ->
+                val caption = findRustRoot(activity.window.decorView)!!
+                    .findFirst<android.widget.TextView> { it.text.toString() == "Caption over the art" }!!
+                val art = IntArray(2).also(backdrop::getLocationOnScreen)
+                val text = IntArray(2).also(caption::getLocationOnScreen)
+                inside = text[0] >= art[0] && text[1] >= art[1] &&
+                    text[1] + caption.height <= art[1] + backdrop.height
+            }
+            assertTrue("the caption lies over the image", inside)
+            tapBack()
+
+            // On the Image page the view takes the drawing's 16:9 shape.
+            openPage("Image")
+            swipeTo("An SVG asset, drawn in Rust at the size it is shown. The sun's glow is an SVG blur filter.")
+            val sunrise = image(scenario, "Vector sunrise")
+            rendering(sunrise)
+            assertTrue(
+                "320x180 keeps its aspect ratio",
+                kotlin.math.abs(sunrise.width * 9 - sunrise.height * 16) <= 16,
+            )
         }
     }
 

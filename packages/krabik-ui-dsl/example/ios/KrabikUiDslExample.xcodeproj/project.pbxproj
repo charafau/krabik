@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1F30E11CE4A9D036A74881E4 /* KrabikUiDslExampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCB437AC072D4AC6273F32AC /* KrabikUiDslExampleApp.swift */; };
+		26A4C1D95C69D5CCE1AFF58D /* sunrise.svg in Resources */ = {isa = PBXBuildFile; fileRef = 89BE31C1066D76849A653327 /* sunrise.svg */; };
 		2F8F679F00C0AB4304D8EE92 /* ShowcaseUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB41693963248DB8717533B7 /* ShowcaseUITests.swift */; };
 		443A5071DD9091565671F87F /* krabik.webp in Resources */ = {isa = PBXBuildFile; fileRef = 230A28D8837E7D4C4CAA5B09 /* krabik.webp */; };
 		4DA089D7C3A69A4B7A02A6DE /* KrabikHostController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43B1CE5B765D850DC80771C /* KrabikHostController.swift */; };
@@ -32,6 +33,7 @@
 		3A4BD54426A0A2E0C23D26D7 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		5ACEE167865A40442AC18772 /* Bridging.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Bridging.h; sourceTree = "<group>"; };
 		77BDAF0F3BFD87C766B8242D /* KrabikUiDslExampleUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = KrabikUiDslExampleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		89BE31C1066D76849A653327 /* sunrise.svg */ = {isa = PBXFileReference; path = sunrise.svg; sourceTree = "<group>"; };
 		977D0395AA01774D1B660F5A /* KrabikIOS.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = KrabikIOS.h; sourceTree = "<group>"; };
 		A9627ED92064B8FBCCFDA4C3 /* KrabikUiDslExample.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KrabikUiDslExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AB41693963248DB8717533B7 /* ShowcaseUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShowcaseUITests.swift; sourceTree = "<group>"; };
@@ -40,7 +42,7 @@
 		F36B8BF2DAD5BBF7E5A37E0A /* ChecklistUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChecklistUITests.swift; sourceTree = "<group>"; };
 		F43B1CE5B765D850DC80771C /* KrabikHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikHostController.swift; sourceTree = "<group>"; };
 		F7B3313EC88FE48C53F06030 /* RustRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustRootView.swift; sourceTree = "<group>"; };
-		"TEMP_6115C856-2C90-4E2B-B02F-13C09C7D4242" /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
+		"TEMP_DEAB9D50-536E-4CBB-A1BE-08AB1A607E25" /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -48,6 +50,7 @@
 			isa = PBXGroup;
 			children = (
 				230A28D8837E7D4C4CAA5B09 /* krabik.webp */,
+				89BE31C1066D76849A653327 /* sunrise.svg */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -119,10 +122,10 @@
 			path = ../..;
 			sourceTree = "<group>";
 		};
-		"TEMP_7A144EBD-AE43-4650-8DA9-3E9B4019EB7B" /* ios */ = {
+		"TEMP_ED07AE3E-9AAF-4406-8504-F0553960E8E5" /* ios */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_6115C856-2C90-4E2B-B02F-13C09C7D4242" /* Signing.xcconfig */,
+				"TEMP_DEAB9D50-536E-4CBB-A1BE-08AB1A607E25" /* Signing.xcconfig */,
 			);
 			path = ios;
 			sourceTree = "<group>";
@@ -174,7 +177,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1430;
+				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					02CEA64670569127D1D97C3B = {
 						ProvisioningStyle = Automatic;
@@ -211,6 +214,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				443A5071DD9091565671F87F /* krabik.webp in Resources */,
+				26A4C1D95C69D5CCE1AFF58D /* sunrise.svg in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -321,7 +325,7 @@
 		};
 		E8B8C590BFEE60488A68D21E /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_6115C856-2C90-4E2B-B02F-13C09C7D4242" /* Signing.xcconfig */;
+			baseConfigurationReference = "TEMP_DEAB9D50-536E-4CBB-A1BE-08AB1A607E25" /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -406,7 +410,7 @@
 		};
 		F1493BC7579C62791628E535 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_6115C856-2C90-4E2B-B02F-13C09C7D4242" /* Signing.xcconfig */;
+			baseConfigurationReference = "TEMP_DEAB9D50-536E-4CBB-A1BE-08AB1A607E25" /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;

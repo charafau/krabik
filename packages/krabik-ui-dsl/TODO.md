@@ -608,6 +608,10 @@ The list in [MISSING.md](MISSING.md), closed one at a time.
   `.refreshing(bool)`: `SwipeRefreshLayout` on Android, `UIRefreshControl` on iOS. On iOS a
   spinner the application starts itself, without a pull, stays above the top edge until the user
   scrolls there.
+- **Stack.** `Stack` puts its children on top of each other, sized to the largest; it is a
+  one-cell grid in Taffy.
+- **SVG assets.** An `.svg` asset is drawn by `resvg` in Rust at the size of its view, behind the
+  cargo feature `svg`. Filters work; text and remote SVGs do not.
 
 ---
 
@@ -704,6 +708,13 @@ platform does less than the other.
   as the user set it.
 - **A timer is not exact.** `Subscription::every` sleeps for the interval between ticks and a
   tick waits for the UI thread; compute elapsed time from a stored start instead of counting.
+
+- **A view added to a stack later lies on top.** Native views are added in the order they are
+  created, so a child of a `Stack` that appears after its siblings (an `if` around the backdrop,
+  for example) covers them until the stack is rebuilt. Give such a stack a `key` that changes
+  with the condition.
+- **An SVG is drawn on the main thread on iOS**, when its view gets a size. Android draws it on
+  a background thread. A very complex drawing can delay a frame.
 
 ### One platform does less
 

@@ -9,7 +9,8 @@ edition = "2024"
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-krabik-ui-dsl = { path = "../../rust" }
+# `svg` adds the renderer for `.svg` assets, which the Image and Stack pages show.
+krabik-ui-dsl = { path = "../../rust", features = ["svg"] }
 jni = "0.22"
 
 # This crate is a standalone project, mirroring the `rust/` directory that `krabik create`

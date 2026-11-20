@@ -24,6 +24,20 @@ pub(crate) struct ImageLoader {
     /// The URL each image node is currently expected to display. A download
     /// only updates views whose entry still matches its URL.
     pub(crate) expected: HashMap<NodeId, String>,
+    /// The image nodes that show an SVG asset.
+    #[cfg(feature = "svg")]
+    pub(crate) svgs: HashMap<NodeId, SvgImage>,
+}
+
+/// An SVG asset an image view shows. Rust draws it at the size of the view,
+/// so it stays sharp at any size, and again when that size changes.
+#[cfg(feature = "svg")]
+pub(crate) struct SvgImage {
+    path: String,
+    fill: bool,
+    data: Vec<u8>,
+    /// The size, in pixels, of the rendering the view shows.
+    rendered: (u32, u32),
 }
 
 impl IosState {
@@ -39,6 +53,13 @@ impl IosState {
         match &props.source {
             ImageSource::Asset(path) => {
                 self.images.expected.remove(&id);
+                #[cfg(feature = "svg")]
+                if crate::svg::is_svg(path) {
+                    self.load_svg(id, view, path, props.scale == ImageScale::Fill);
+                    return;
+                }
+                #[cfg(feature = "svg")]
+                self.images.svgs.remove(&id);
                 view.setImage(load_asset(path).as_deref());
             }
             ImageSource::Url(url) => self.load_remote_image(id, view, url),
@@ -62,13 +83,80 @@ impl IosState {
     }
 }
 
-pub(crate) fn load_asset(path: &str) -> Option<Retained<UIImage>> {
+#[cfg(feature = "svg")]
+impl IosState {
+    /// Shows an SVG asset. It is drawn now if the view already has a size,
+    /// and by [`IosState::fit_svg`] whenever a layout gives it one.
+    fn load_svg(&mut self, id: NodeId, view: &UIImageView, path: &str, fill: bool) {
+        let same = self
+            .images
+            .svgs
+            .get(&id)
+            .is_some_and(|svg| svg.path == path && svg.fill == fill);
+        if !same {
+            view.setImage(None);
+            let Some(data) = asset_bytes(path) else {
+                self.images.svgs.remove(&id);
+                return;
+            };
+            self.images.svgs.insert(
+                id,
+                SvgImage {
+                    path: path.to_owned(),
+                    fill,
+                    data,
+                    rendered: (0, 0),
+                },
+            );
+        }
+        let size = view.bounds().size;
+        self.fit_svg(id, view, size.width, size.height);
+    }
+
+    /// Draws the SVG of image node `id` for a view of `width` by `height`
+    /// points, unless that is what the view shows already.
+    pub(crate) fn fit_svg(&mut self, id: NodeId, view: &UIImageView, width: f64, height: f64) {
+        let Some(svg) = self.images.svgs.get_mut(&id) else {
+            return;
+        };
+        let scale = view.contentScaleFactor().max(1.0);
+        let pixels = (
+            (width * scale).round().max(0.0) as u32,
+            (height * scale).round().max(0.0) as u32,
+        );
+        if pixels == svg.rendered || pixels.0 == 0 || pixels.1 == 0 {
+            return;
+        }
+        svg.rendered = pixels;
+        let image = crate::svg::render_png(&svg.data, pixels.0, pixels.1, svg.fill)
+            .and_then(|png| UIImage::imageWithData_scale(&NSData::with_bytes(&png), scale));
+        view.setImage(image.as_deref());
+    }
+
+    /// Forgets the SVG of a node whose view is gone.
+    pub(crate) fn forget_svg(&mut self, id: NodeId) {
+        self.images.svgs.remove(&id);
+    }
+}
+
+/// The path of a bundled asset, which is a file at the root of the bundle.
+fn asset_path(path: &str) -> Option<Retained<NSString>> {
     let (stem, extension) = match path.rsplit_once('.') {
         Some((stem, extension)) => (stem, Some(NSString::from_str(extension))),
         None => (path, None),
     };
     let stem = NSString::from_str(stem);
-    let path = NSBundle::mainBundle().pathForResource_ofType(Some(&stem), extension.as_deref())?;
+    NSBundle::mainBundle().pathForResource_ofType(Some(&stem), extension.as_deref())
+}
+
+/// The bytes of a bundled asset.
+#[cfg(feature = "svg")]
+pub(crate) fn asset_bytes(path: &str) -> Option<Vec<u8>> {
+    std::fs::read(asset_path(path)?.to_string()).ok()
+}
+
+pub(crate) fn load_asset(path: &str) -> Option<Retained<UIImage>> {
+    let path = asset_path(path)?;
     UIImage::imageWithContentsOfFile(&path)
 }
 

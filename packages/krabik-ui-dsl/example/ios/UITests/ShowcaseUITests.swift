@@ -451,6 +451,32 @@ final class ShowcaseUITests: XCTestCase {
         start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
 
+    /// An SVG asset is drawn by Rust, and a stack puts its children on top
+    /// of each other.
+    func testAStackLayersItsChildrenOverVectorArt() throws {
+        XCUIDevice.shared.appearance = .light
+        open("Stack")
+        let backdrop = app.images["Sunrise backdrop"]
+        let caption = app.staticTexts["Caption over the art"]
+        XCTAssertTrue(backdrop.waitForExistence(timeout: 10))
+        XCTAssertTrue(caption.exists)
+        XCTAssertTrue(app.staticTexts["Centered"].exists)
+
+        // The caption is inside the image's frame: it lies on top of it.
+        XCTAssertTrue(backdrop.frame.contains(caption.frame), "the caption lies over the image")
+        // An image view with nothing in it would show the light page behind.
+        XCTAssertLessThan(brightness(of: backdrop.screenshot()), 0.6, "the sunrise was drawn")
+        capture("stack-over-svg")
+        backToCatalog()
+
+        // On the Image page the view takes the drawing's 16:9 shape.
+        open("Image")
+        let sunrise = app.images["Vector sunrise"]
+        XCTAssertTrue(sunrise.waitForExistence(timeout: 10))
+        XCTAssertEqual(sunrise.frame.width / sunrise.frame.height, 16.0 / 9.0, accuracy: 0.05)
+        backToCatalog()
+    }
+
     func testAContainerReactsToTaps() throws {
         open("Container")
         XCTAssertTrue(app.staticTexts["Nothing tapped yet."].waitForExistence(timeout: 5))

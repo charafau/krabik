@@ -35,8 +35,8 @@ jobs:
       # the UI DSL library is a standalone project, outside the workspace
       - run: cargo fmt --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --all --check
       # `--workspace` includes the macro crate next to the library
-      - run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --workspace --all-targets -- -D warnings
-      - run: cargo test --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --workspace
+      - run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --workspace --all-features
       # each DSL app (the dev harness and the examples) is its own project
       - run: cargo fmt --manifest-path packages/krabik-ui-dsl/harness/rust/Cargo.toml --check
       - run: cargo clippy --manifest-path packages/krabik-ui-dsl/harness/rust/Cargo.toml --all-targets -- -D warnings

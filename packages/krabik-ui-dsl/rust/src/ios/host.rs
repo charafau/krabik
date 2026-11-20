@@ -348,6 +348,8 @@ impl IosState {
             }
             Op::Remove { id, exit } => {
                 self.images.expected.remove(&id);
+                #[cfg(feature = "svg")]
+                self.forget_svg(id);
                 if let Some(handle) = views.remove(&id) {
                     if let Some(link) = &handle.frame_link {
                         link.invalidate();
@@ -403,7 +405,17 @@ impl IosState {
                 frame,
                 content_size,
                 animation,
-            } => IosState::apply_layout(views, id, frame, content_size, animation, mtm),
+            } => {
+                IosState::apply_layout(views, id, frame, content_size, animation, mtm);
+                // An SVG is drawn for the size its view was just given.
+                #[cfg(feature = "svg")]
+                if let Some(handle) = views.get(&id)
+                    && let Content::Image(view) = &handle.content
+                {
+                    let view = view.clone();
+                    self.fit_svg(id, &view, f64::from(frame.width), f64::from(frame.height));
+                }
+            }
             Op::ScrollTo { id, offset } => {
                 if let Some(handle) = views.get(&id)
                     && let Content::Scroll { scroll, .. } = &handle.content
@@ -428,7 +440,7 @@ impl IosState {
             NodeKind::Container(_) => container::create(node, &site),
             NodeKind::Scroll(props) => scroll::create(props, node, &site),
             NodeKind::Recycler(props) => create_recycler(props, node, &site),
-            NodeKind::Column | NodeKind::Row => {
+            NodeKind::Column | NodeKind::Row | NodeKind::Stack => {
                 let view = UIView::new(mtm);
                 let host = UIView::new(mtm);
                 view.addSubview(&host);

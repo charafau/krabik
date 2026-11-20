@@ -11,6 +11,8 @@ use krabik_ui_dsl::ui::{
     Slider, Spacer, Switch, TabBar, Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
 };
 
+use krabik_ui_dsl::ui::Stack;
+
 use crate::{Msg, RefreshTarget, ShowcaseApp};
 
 pub(crate) const COLOR_TEXT: Color = Color::adaptive(0xFF20_2125, 0xFFE8_EAED);
@@ -65,6 +67,7 @@ pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
         "text" => "text",
         "button" => "button",
         "container" => "container",
+        "stack" => "stack",
         "text-field" => "text-field",
         "switch" => "switch",
         "checkbox" => "checkbox",
@@ -110,6 +113,7 @@ pub(crate) fn title(key: &str) -> &'static str {
         "text" => "Text",
         "button" => "Button",
         "container" => "Container",
+        "stack" => "Stack",
         "text-field" => "Text field",
         "switch" => "Switch",
         "checkbox" => "Checkbox",
@@ -155,6 +159,7 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element<Msg>> {
         "text" => text_page(),
         "button" => button_page(app),
         "container" => container_page(app),
+        "stack" => stack_page(),
         "text-field" => text_field_page(app),
         "switch" => switch_page(app),
         "checkbox" => checkbox_page(app),
@@ -211,6 +216,7 @@ pub(crate) fn home() -> Element<Msg> {
                 ("Text", "page:text"),
                 ("Button", "page:button"),
                 ("Container", "page:container"),
+                ("Stack", "page:stack"),
                 ("Text field", "page:text-field"),
                 ("Layouts", "page:layouts"),
             ],
@@ -424,6 +430,52 @@ fn container_page(app: &ShowcaseApp) -> Element<Msg> {
                 .corner_radius(12)
                 .width_percent(1.0)
                 .child(caption("A plain container ignores taps.")),
+        ],
+    )
+}
+
+fn stack_page() -> Element<Msg> {
+    const WHITE: Color = Color::fixed(0xFFFF_FFFF);
+    page(
+        "Stack",
+        "Children lie on top of each other, the first at the back.",
+        body![
+            // Every child fills the stack: an image, and over it a column
+            // that pushes its caption to the bottom.
+            Stack::new()
+                .width_percent(1.0)
+                .height(180)
+                .corner_radius(16)
+                .child(
+                    Image::new(ImageSource::asset("sunrise.svg"))
+                        .scale(ImageScale::Fill)
+                        .accessibility_label("Sunrise backdrop"),
+                )
+                .child(
+                    Column::new().padding(14).child(Spacer::new()).child(
+                        Text::new("Caption over the art")
+                            .size(18)
+                            .bold()
+                            .color(WHITE)
+                    ),
+                ),
+            caption("An SVG fills the stack; the caption is the stack's second child."),
+            // With an alignment the children keep their own size.
+            Stack::new()
+                .width_percent(1.0)
+                .height(120)
+                .background(COLOR_SURFACE)
+                .corner_radius(16)
+                .align_items(Align::Center)
+                .child(
+                    Spacer::new()
+                        .width(96)
+                        .height(96)
+                        .background(COLOR_ACCENT)
+                        .corner_radius(48),
+                )
+                .child(Text::new("Centered").size(16).bold().color(WHITE)),
+            caption("align_items(Center) places both children in the middle."),
         ],
     )
 }
@@ -1236,6 +1288,13 @@ fn image_page() -> Element<Msg> {
                 .corner_radius(12)
                 .accessibility_label("Intrinsic asset icon"),
             caption("Bundled asset sized from its intrinsic aspect ratio."),
+            Image::new(ImageSource::asset("sunrise.svg"))
+                .width(240)
+                .corner_radius(12)
+                .accessibility_label("Vector sunrise"),
+            caption(
+                "An SVG asset, drawn in Rust at the size it is shown. The sun's glow is an SVG blur filter."
+            ),
             Image::new(ImageSource::url("https://picsum.photos/600/300"))
                 .width_percent(1.0)
                 .aspect_ratio(2.0)

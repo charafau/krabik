@@ -74,6 +74,52 @@ impl<M> From<Row<M>> for Element<M> {
     }
 }
 
+/// A container whose children lie on top of each other, the first at the
+/// back.
+///
+/// The stack is as large as its largest child, unless it is given a size.
+/// Every child fills it by default; `.align_items(Align::Center)` (or
+/// `Start`, `End`) keeps the children at their own size and places them
+/// there on both axes. To put one child in a corner, let it fill the stack
+/// and arrange its content with rows, columns and spacers:
+///
+/// ```ignore
+/// Stack::new()
+///     .child(Image::new(ImageSource::asset("cover.webp")))
+///     .child(
+///         Column::new()
+///             .padding(12)
+///             .child(Spacer::new())
+///             .child(Text::new("Caption").color(Color::fixed(0xFFFF_FFFF))),
+///     )
+/// ```
+pub struct Stack<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
+
+impl<M> Stack<M> {
+    /// Creates an empty stack.
+    pub fn new() -> Self {
+        Self(RawElement::container(ElementKind::Stack), PhantomData)
+    }
+
+    /// Adds a child on top of the ones added before.
+    pub fn child(mut self, child: impl Into<Element<M>>) -> Self {
+        self.0.children.push(child.into().into_raw());
+        self
+    }
+}
+
+impl<M> Default for Stack<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<M> From<Stack<M>> for Element<M> {
+    fn from(component: Stack<M>) -> Self {
+        Element::from_raw(component.0)
+    }
+}
+
 /// Empty space that grows to fill the available room.
 pub struct Spacer<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
 
@@ -164,6 +210,7 @@ impl<M> From<Container<M>> for Element<M> {
 }
 
 style_builder!(Container);
+style_builder!(Stack);
 style_builder!(Column);
 style_builder!(Row);
 style_builder!(Spacer);

@@ -64,6 +64,8 @@ mod host;
 mod measure;
 mod rows;
 mod style;
+#[cfg(feature = "svg")]
+mod svg;
 mod widgets;
 
 pub(crate) const TEXT_VIEW_CLASS: &JNIStr = jni_str!("android/widget/TextView");

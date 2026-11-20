@@ -344,7 +344,7 @@ impl AndroidState {
             }
             // Decorated layout containers become real containers so they can
             // draw behind their children and clip them to rounded corners.
-            NodeKind::Column | NodeKind::Row => {
+            NodeKind::Column | NodeKind::Row | NodeKind::Stack => {
                 let ids = jni_handles(env)?;
                 site.stock(env, &ids.frame_layout, &ids.frame_layout_ctor)?
             }

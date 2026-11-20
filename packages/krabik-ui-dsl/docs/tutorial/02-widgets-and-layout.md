@@ -183,6 +183,29 @@ other control. A container usually has one child; more than one are laid out as 
 Without `on_tap` it is only a box, and `.enabled(false)` stops the taps. On Android the box shows
 the theme's press ripple; iOS shows no highlight.
 
+### Stack: children on top of each other
+
+Rows and columns never overlap their children. `Stack` does: every child takes the same area, the
+first at the back.
+
+```rust,ignore
+Stack::new()
+    .height(180)
+    .corner_radius(16)
+    .child(Image::new(ImageSource::asset("sunrise.svg")).scale(ImageScale::Fill))
+    .child(
+        Column::new()
+            .padding(14)
+            .child(Spacer::new())
+            .child(Text::new("Caption over the art").color(WHITE)),
+    )
+```
+
+A stack is as large as its largest child unless it has a size of its own. Each child fills it, so
+a column in a stack can push its content to an edge with a `Spacer`, as above. With
+`.align_items(Align::Center)` (or `Start`, `End`) the children keep their own size and are placed
+there on both axes. Like a row or a column, a stack has no native view unless it paints something.
+
 ## Scrolling
 
 A `ScrollView` is a container whose content may be larger than itself. `ScrollView::new()` scrolls
@@ -318,6 +341,11 @@ A few notes that save a trip to the source:
   compositions of the widgets above, in `tab_bar.rs` and `pager.rs`.
 - `Image` needs an explicit size or a stretching parent; its constructor's doc comment says
   intrinsic sizing is not available for remote images yet.
+- An asset whose name ends in `.svg` is drawn by Rust (the `resvg` crate) at the size it is shown,
+  the same on both platforms, so it stays sharp at any size. SVG filters work, including
+  `feGaussianBlur`; text in an SVG does not, and remote SVGs are not supported. The renderer is
+  behind a cargo feature so apps without SVGs do not carry it:
+  `krabik-ui-dsl = { path = "...", features = ["svg"] }` in the app's `Cargo.toml`.
 - Only the widgets in the table report events. A `Row`, a `Column` or a `Text` has no tap handler
   (`Actions::of` in `rust/src/host/events.rs` lists the cases exhaustively). To make a row of a
   list or a card tappable, wrap it in a `Container` with `on_tap`.

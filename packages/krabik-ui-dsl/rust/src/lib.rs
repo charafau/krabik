@@ -39,6 +39,9 @@ mod animation;
 // compiled everywhere so its tests run on the host.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod frame_batch;
+#[cfg(feature = "svg")]
+#[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+mod svg;
 
 pub use app::{App, Component, Environment, set_app_factory};
 pub use krabik_ui_dsl_macros::view;

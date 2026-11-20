@@ -104,7 +104,11 @@ impl Actions {
             NodeKind::Container(props) => actions.click = props.on_tap.clone(),
             NodeKind::Scroll(props) => actions.refresh = props.refresh.on_refresh.clone(),
             NodeKind::Recycler(props) => actions.refresh = props.refresh.on_refresh.clone(),
-            NodeKind::Root | NodeKind::Column | NodeKind::Row | NodeKind::Spacer => {}
+            NodeKind::Root
+            | NodeKind::Column
+            | NodeKind::Row
+            | NodeKind::Spacer
+            | NodeKind::Stack => {}
         }
         (actions != Self::default()).then_some(actions)
     }

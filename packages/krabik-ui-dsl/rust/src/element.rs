@@ -16,6 +16,8 @@ pub(crate) enum ElementKind {
     Column,
     Row,
     Spacer,
+    /// Children on top of each other.
+    Stack,
     /// A box around its content that can be tapped.
     Container(ContainerProps),
     Pager(PagerProps),
@@ -38,6 +40,7 @@ impl ElementKind {
             Self::Row => 2,
             Self::Spacer => 3,
             Self::Container(_) => 21,
+            Self::Stack => 24,
             Self::Pager(_) => 20,
             Self::Widget(widget) => widget.tag(),
             Self::Scroll(props) => match props.axis {
@@ -173,7 +176,7 @@ impl RawElement {
             ElementKind::Container(props) => props.on_tap.map(wrap),
             ElementKind::Scroll(props) => props.refresh.on_refresh.map(wrap),
             ElementKind::List(props) => props.map_messages(wrap),
-            ElementKind::Column | ElementKind::Row | ElementKind::Spacer => {}
+            ElementKind::Column | ElementKind::Row | ElementKind::Spacer | ElementKind::Stack => {}
         }
         for child in &mut self.children {
             child.map_messages(wrap);
@@ -415,6 +418,7 @@ impl RawElement {
             ElementKind::Column
             | ElementKind::Row
             | ElementKind::Spacer
+            | ElementKind::Stack
             | ElementKind::Container(_)
             | ElementKind::Pager(_)
             | ElementKind::Scroll(_)

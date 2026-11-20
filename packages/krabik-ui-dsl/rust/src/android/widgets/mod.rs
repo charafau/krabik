@@ -62,7 +62,9 @@ pub(crate) fn configure_view(
     density: f32,
 ) -> JniResult<()> {
     match kind {
-        NodeKind::Root | NodeKind::Column | NodeKind::Row | NodeKind::Spacer => Ok(()),
+        NodeKind::Root | NodeKind::Column | NodeKind::Row | NodeKind::Spacer | NodeKind::Stack => {
+            Ok(())
+        }
         NodeKind::Scroll(props) => set_refreshing(env, view, &props.refresh),
         NodeKind::Widget(Widget::Text(_)) | NodeKind::Widget(Widget::Button(_)) => {
             update_text(env, view, kind)

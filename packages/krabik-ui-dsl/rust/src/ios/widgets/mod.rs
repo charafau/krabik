@@ -144,7 +144,7 @@ pub(crate) fn update_content(
             }
         }
         // Containers have no properties of their own.
-        NodeKind::Root | NodeKind::Column | NodeKind::Row | NodeKind::Spacer => {}
+        NodeKind::Root | NodeKind::Column | NodeKind::Row | NodeKind::Spacer | NodeKind::Stack => {}
     }
 }
 
