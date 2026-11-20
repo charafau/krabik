@@ -16,6 +16,8 @@ resvg = { version = "0.50", default-features = false, optional = true }
 
 [features]
 svg = ["dep:resvg"]
+# Development only: lets a running app take new application code; see `src/hot.rs`.
+hot-reload = []
 
 # Only the Android renderer talks to a JVM.
 [target.'cfg(target_os = "android")'.dependencies]

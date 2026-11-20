@@ -17,6 +17,8 @@ pub mod app;
 pub mod command;
 pub(crate) mod element;
 pub mod engine;
+#[cfg(feature = "hot-reload")]
+pub mod hot;
 // Only the platform renderers drive a session; it stays compiled everywhere
 // so its tests run on the host.
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]

@@ -1,0 +1,21 @@
+# A tiny application built as a dynamic library, in three versions, for the
+# hot reload test in `src/host/session.rs`. It is not part of any workspace.
+[package]
+name = "hot-app"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+krabik-ui-dsl = { path = "../../..", features = ["hot-reload"] }
+
+[features]
+# Other code: another label, and `Add` adds ten.
+v2 = []
+# Another state layout, which a running version one must refuse.
+v3 = []
+
+[workspace]

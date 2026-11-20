@@ -190,6 +190,12 @@ pub trait App: Component + Send + 'static {
 /// An [`App`] with its message type erased, as the runtime holds it.
 pub(crate) trait AnyApp: Send {
     fn init(&mut self) -> Jobs;
+    /// What a library must match to take this application over.
+    #[cfg(feature = "hot-reload")]
+    fn fingerprint(&self) -> crate::hot::Fingerprint;
+    /// Gives the application value up as the raw pointer of its box.
+    #[cfg(feature = "hot-reload")]
+    fn into_raw(self: Box<Self>) -> *mut ();
     fn environment_changed(&self, environment: &Environment) -> Option<Message>;
     fn view(&self) -> RawElement;
     fn update(&mut self, message: Message) -> Jobs;
@@ -208,6 +214,16 @@ pub(crate) trait AnyApp: Send {
 impl<A: App> AnyApp for A {
     fn init(&mut self) -> Jobs {
         App::init(self).into_jobs()
+    }
+
+    #[cfg(feature = "hot-reload")]
+    fn fingerprint(&self) -> crate::hot::Fingerprint {
+        crate::hot::Fingerprint::of::<A>()
+    }
+
+    #[cfg(feature = "hot-reload")]
+    fn into_raw(self: Box<Self>) -> *mut () {
+        Box::into_raw(self).cast()
     }
 
     fn view(&self) -> RawElement {

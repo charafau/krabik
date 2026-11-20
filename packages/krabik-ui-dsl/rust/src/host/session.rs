@@ -152,6 +152,41 @@ impl<P: Platform> Session<P> {
         self.sync_subscriptions();
     }
 
+    /// Continues with the application code of the library at `path`; see
+    /// [`crate::hot`]. The state is kept. A library that cannot take the
+    /// application over is reported and changes nothing.
+    #[cfg(feature = "hot-reload")]
+    pub(crate) fn hot_swap(&mut self, cx: &mut P::Cx<'_>, path: &str) -> Result<(), P::Error> {
+        let library = match crate::hot::Library::open(path) {
+            Ok(library) => library,
+            Err(reason) => {
+                crate::log::error(&format!("hot reload: {reason}"));
+                return Ok(());
+            }
+        };
+        // The application is moved out and back in without anything that
+        // can unwind in between.
+        // SAFETY: `self.app` is read once and written once; `adopt` returns
+        // an application on both paths.
+        unsafe {
+            let app = std::ptr::read(&self.app);
+            let (app, refused) = match library.adopt(app) {
+                Ok(app) => (app, None),
+                Err((app, reason)) => (app, Some(reason)),
+            };
+            std::ptr::write(&mut self.app, app);
+            if let Some(reason) = refused {
+                crate::log::error(&format!("hot reload: {reason}"));
+                return Ok(());
+            }
+        }
+        // Timers hold closures of the old code; the render starts the ones
+        // the new code asks for.
+        self.timers = Timers::default();
+        crate::log::error(&format!("hot reload: now running {path}"));
+        self.render_all(cx)
+    }
+
     /// Applies one message and starts the work it asks for.
     fn apply(&mut self, message: Message) {
         let jobs = self.app.update(message);
@@ -1991,6 +2026,108 @@ mod tests {
         session.set_locale("pl-PL");
         session.render_all(&mut ()).unwrap();
         assert!(app.state().environments.is_empty());
+    }
+
+    /// Builds the fixture application in `tests/fixtures/hot-app` with the
+    /// given features and returns the library, copied to a name of its own:
+    /// loading the same path twice gives the same library.
+    #[cfg(feature = "hot-reload")]
+    fn fixture_library(features: &str) -> String {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let target = root.join("target/hot-fixture");
+        let built = std::process::Command::new(env!("CARGO"))
+            .arg("build")
+            .arg("--manifest-path")
+            .arg(root.join("tests/fixtures/hot-app/Cargo.toml"))
+            .arg("--target-dir")
+            .arg(&target)
+            .args(["--features", features])
+            // The test's own flags are not the fixture's.
+            .env_remove("RUSTFLAGS")
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .status()
+            .expect("cargo runs");
+        assert!(built.success(), "the fixture builds");
+        let extension = if cfg!(target_os = "macos") {
+            "dylib"
+        } else {
+            "so"
+        };
+        let copy = target.join(format!(
+            "hot_app_{}.{extension}",
+            features.replace(',', "_")
+        ));
+        std::fs::copy(target.join(format!("debug/libhot_app.{extension}")), &copy)
+            .expect("the library is copied");
+        copy.to_str().expect("a utf-8 path").to_owned()
+    }
+
+    /// What the fixture shows, and the message of its button.
+    #[cfg(feature = "hot-reload")]
+    fn fixture_screen(session: &Session<Fake>) -> (String, Message) {
+        use crate::element::ElementKind;
+        use crate::widgets::Widget;
+        let view = session.app.view();
+        let ElementKind::Widget(Widget::Text(text)) = &view.children[0].kind else {
+            panic!("the first child is a text");
+        };
+        let ElementKind::Widget(Widget::Button(button)) = &view.children[1].kind else {
+            panic!("the second child is a button");
+        };
+        (
+            text.content.clone(),
+            button.on_click.message(()).expect("a handler"),
+        )
+    }
+
+    /// One test, because the versions are built one after the other into
+    /// the same target directory.
+    #[cfg(feature = "hot-reload")]
+    #[test]
+    fn new_application_code_takes_over_the_running_state() {
+        use crate::hot::Library;
+
+        let first = fixture_library("");
+        let second = fixture_library("v2");
+        let other_layout = fixture_library("v3");
+
+        // The application starts as version one, which lives in a library
+        // with its own copy of the framework, as an app on a device does.
+        let app = Library::open(&first)
+            .expect("version one loads")
+            .create(c"fixture_new");
+        let mut session = Session::<Fake>::with_executor(
+            Running::new(app),
+            FakeHost::new(HostKind::Main),
+            Arc::new(Inline::default()),
+        );
+        session.render_all(&mut ()).unwrap();
+        let (text, add) = fixture_screen(&session);
+        assert_eq!(text, "Count: 0");
+        session.update(&mut (), add).unwrap();
+        assert_eq!(fixture_screen(&session).0, "Count: 1");
+        let renders = session.hosts[&MAIN_HOST].renders;
+
+        // Version two takes the same value over: the count is kept, the
+        // label is the new code's, and the screen is rendered again.
+        session.hot_swap(&mut (), &second).unwrap();
+        let (text, add) = fixture_screen(&session);
+        assert_eq!(text, "Total: 1");
+        assert_eq!(session.hosts[&MAIN_HOST].renders, renders + 1);
+        // `update` is new code too.
+        session.update(&mut (), add).unwrap();
+        assert_eq!(fixture_screen(&session).0, "Total: 11");
+
+        // A library whose state has another layout is refused, and the
+        // application carries on as it was.
+        let renders = session.hosts[&MAIN_HOST].renders;
+        session.hot_swap(&mut (), &other_layout).unwrap();
+        assert_eq!(fixture_screen(&session).0, "Total: 11");
+        assert_eq!(session.hosts[&MAIN_HOST].renders, renders);
+
+        // So is a file that is not such a library.
+        session.hot_swap(&mut (), "/nonexistent/libapp.so").unwrap();
+        assert_eq!(fixture_screen(&session).0, "Total: 11");
     }
 
     #[test]
