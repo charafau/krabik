@@ -168,7 +168,7 @@ by the platform.
 | Animation | controllers, tickers, implicit widgets | `Animated`, Reanimated | implicit only: `.animate(ms)`, enter/exit |
 | Theme | `Theme.of(context)` | your choice | `Color::adaptive(light, dark)`; no theme object |
 | Accessibility | semantics tree | accessibility props on native views | native views' own, plus `accessibility_label` |
-| Hot reload | yes | Fast Refresh | no; full native rebuild |
+| Hot reload | yes | Fast Refresh | no; full native rebuild ([proposal](../design/hot-reload.md)) |
 | Tests without a device | widget tests, goldens | Jest, component tests | Rust tests on ops with a fake platform; no goldens |
 | What ships | AOT snapshot + Flutter engine | JS bytecode + Hermes + native code | one native library with your app and the framework |
 

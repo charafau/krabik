@@ -1,8 +1,8 @@
 # Missing or deferred framework capabilities
 
-This rewrite intentionally uses the current Krabik APIs without modifying
-`krabik-ui-dsl`. The following gaps are handled with documented compromises
-and are candidates for a later framework pass.
+An application rewrite listed the gaps it had to work around. Most are closed
+now (startup work, tappable boxes, language and appearance, pull to refresh,
+SVG assets; see section 9 of [TODO.md](TODO.md)). What is left:
 
 ## Custom illustration pipeline
 
@@ -21,4 +21,7 @@ and are candidates for a later framework pass.
 ## Hot reload
 
 - Flutter and react native support hot reload, krabik doesn't.
-- Dioxus, framework in rust does support it. Check how it works.
+- Dioxus, framework in rust does support it. How it works, what it would take
+  here and what to build first are written up in
+  [docs/design/hot-reload.md](docs/design/hot-reload.md). Nothing is built yet,
+  and the write-up is from reading, not from a device run.

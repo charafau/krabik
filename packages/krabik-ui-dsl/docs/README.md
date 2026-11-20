@@ -23,7 +23,7 @@ If you are new to the codebase and want the whole picture:
 1. [Tutorial 1: Your first app](tutorial/01-your-first-app.md), to see what an app looks like.
 2. [The big picture](internals/01-the-big-picture.md), one page on how a description becomes
    native views and how an event comes back.
-3. [Why it is built this way](design/decisions.md), eleven decisions with their reasons.
+3. [Why it is built this way](design/decisions.md), twelve decisions with their reasons.
 4. [One tap, end to end](internals/10-one-tap-end-to-end.md) and
    [One tap on each platform](platforms/08-one-tap-on-each-platform.md), which follow a single
    tap through every function.
@@ -54,6 +54,8 @@ Kotlin and Swift shells, the Gradle and Xcode builds, CI, and the procedural mac
 
 - [Why it is built this way](design/decisions.md): each decision, the problem it answers, the
   alternatives, and what it costs.
+- [Hot reload](design/hot-reload.md): how Dioxus patches running Rust code, what it would take
+  here, and a cheaper alternative. A proposal; nothing is built yet.
 - [What was done, in order](design/history.md): the work commit by commit, from the first
   native-UI bug fixes through the restructure to the scaffold, with how each step was checked.
 

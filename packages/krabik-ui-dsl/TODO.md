@@ -616,6 +616,10 @@ The list in [MISSING.md](MISSING.md), closed one at a time.
   cannot draw the same thing ([decision 12](docs/design/decisions.md)). Illustration blur is an
   SVG filter.
 
+- **Hot reload: researched, not built.** [docs/design/hot-reload.md](docs/design/hot-reload.md)
+  describes Dioxus's `subsecond`, the open questions for a library loaded by a native app, and a
+  cheaper restart-and-restore path to build first. No device spike was run.
+
 ---
 
 ## Remaining ❌
