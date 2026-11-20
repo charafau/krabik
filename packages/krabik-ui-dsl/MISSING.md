@@ -17,12 +17,6 @@ and are candidates for a later framework pass.
   but the effective appearance continues to follow the device because Krabik's
   host does not expose a colour-scheme override. The Appearance screen says so.
 
-## Runtime locale changes
-
-- Missing: a locale subscription or framework localization API.
-- Current handling: English/Polish strings live in Rust and the initial
-  language is supplied by the native host; changes apply after a cold start.
-
 ## Custom illustration pipeline
 
 - Missing: SVG rendering and effects such as blur.

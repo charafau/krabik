@@ -60,7 +60,8 @@ final class KrabikHostController: UIViewController {
             Unmanaged.passUnretained(mainHost).toOpaque(),
             Double(view.bounds.width),
             Double(view.bounds.height),
-            traitCollection.userInterfaceStyle == .dark
+            traitCollection.userInterfaceStyle == .dark,
+            Self.languageTag()
         )
         mainHost.bindMain(session: session)
         mainHost.frame = view.bounds
@@ -112,6 +113,20 @@ final class KrabikHostController: UIViewController {
             self, selector: #selector(becameInactive),
             name: UIApplication.didEnterBackgroundNotification, object: nil
         )
+        // An application that keeps its strings in Rust follows the language.
+        center.addObserver(
+            self, selector: #selector(localeChanged),
+            name: NSLocale.currentLocaleDidChangeNotification, object: nil
+        )
+    }
+
+    /// The user's first language, as a BCP 47 tag such as "pl-PL".
+    private static func languageTag() -> String {
+        Locale.preferredLanguages.first ?? Locale.current.identifier
+    }
+
+    @objc private func localeChanged() {
+        if session != 0 { krabik_ios_set_locale(session, Self.languageTag()) }
     }
 
     @objc private func becameActive() {

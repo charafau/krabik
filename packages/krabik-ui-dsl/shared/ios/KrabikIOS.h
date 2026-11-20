@@ -14,8 +14,13 @@ extern "C" {
 #endif
 
 /// Creates the Rust renderer state for a root view. `dark` says whether the
-/// device shows its dark appearance. Returns 0 on failure.
-uint64_t krabik_ios_create(void *root, double width, double height, bool dark);
+/// device shows its dark appearance; `locale` is the user's language as a
+/// BCP 47 tag, or NULL. Returns 0 on failure.
+uint64_t krabik_ios_create(void *root, double width, double height, bool dark,
+                           const char *locale);
+
+/// Reports that the user's language changed while the app runs.
+void krabik_ios_set_locale(uint64_t handle, const char *locale);
 
 /// Reports a switch between the light and the dark appearance.
 void krabik_ios_set_color_scheme(uint64_t handle, bool dark);

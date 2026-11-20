@@ -597,6 +597,9 @@ The list in [MISSING.md](MISSING.md), closed one at a time.
 - **Tappable boxes.** `Container` is a box around its content that always has a native view;
   `.on_tap(msg)` makes the whole of it react, while a control inside keeps its own taps. Android
   shows the theme's press ripple. iOS shows no press highlight yet.
+- **Language and appearance.** `App::environment_changed` tells the application the device's
+  language (a BCP 47 tag) and whether the screen is light or dark, before the first render and
+  when either changes, so strings kept in Rust can follow the language without a restart.
 
 ---
 
@@ -725,8 +728,6 @@ platform does less than the other.
 
 ## Nice-to-haves
 
-- Let a view read the current appearance (light or dark), for cases adaptive colours do not
-  cover, such as choosing a different image.
 - A drawer menu button on Android and iOS only appears on a root screen; a pushed screen keeps
   its back button and opens the drawer by a swipe (Android) or from the app's own button.
 - Creating a widget's native view is still one exhaustive `match` per platform, in

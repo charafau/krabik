@@ -225,7 +225,8 @@ as ordinary global functions:
 
 ```c
 // shared/ios/KrabikIOS.h
-uint64_t krabik_ios_create(void *root, double width, double height, bool dark);
+uint64_t krabik_ios_create(void *root, double width, double height, bool dark,
+                           const char *locale);
 void krabik_ios_render(uint64_t handle, uint64_t host, double width, double height);
 ```
 
@@ -338,7 +339,7 @@ says how the entry point takes the state map: `lock` blocks, `try` gives up when
 
 | Kotlin `external fun` | Lock | What it does |
 | --- | --- | --- |
-| `nativeCreate(context, density, night, retainedApp)` | lock | Loads the JNI handles, creates the session and its main host, returns the handle. |
+| `nativeCreate(context, density, night, locale, retainedApp)` | lock | Loads the JNI handles, creates the session and its main host, returns the handle. |
 | `nativeRender(handle, host, w, h)` | lock | Sets the host's viewport and renders every host. |
 | `nativeContentHeight(handle, host)` | lock | Height in pixels of what the host rendered last, for the sheet. |
 | `nativeAttachHost(handle, host)` | lock | Adopts a screen or sheet view the controller created, then renders. |
@@ -389,7 +390,8 @@ All are declared in `shared/ios/KrabikIOS.h` and defined in `rust/src/ios/entry.
 
 | C function | What it does |
 | --- | --- |
-| `krabik_ios_create(root, width, height, dark)` | Creates the session and its main host, renders once, returns the handle. |
+| `krabik_ios_create(root, width, height, dark, locale)` | Creates the session and its main host, renders once, returns the handle. |
+| `krabik_ios_set_locale(handle, locale)` | The user's language changed while the app runs; tell the application and re-render. |
 | `krabik_ios_set_color_scheme(handle, dark)` | The device switched appearance; re-render with the other colours. |
 | `krabik_ios_render(handle, host, width, height)` | Sets the host's viewport and renders every host. |
 | `krabik_ios_attach_host(handle, host, root)` | Adopts a screen or sheet view, then renders. |

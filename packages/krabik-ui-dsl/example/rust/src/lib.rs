@@ -14,12 +14,12 @@ use std::time::Duration;
 
 use jni::EnvUnowned;
 use jni::objects::JObject;
-use krabik_ui_dsl::app::{App, Component, set_app_factory};
+use krabik_ui_dsl::app::{App, Component, Environment, set_app_factory};
 use krabik_ui_dsl::command::{Command, Subscription};
 use krabik_ui_dsl::navigation::{Navigation, Route, ScreenTransition};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::scaffold::{AppBar, Scaffold};
-use krabik_ui_dsl::ui::{DatePickerValue, DateValue, Element, Icon, TimeValue};
+use krabik_ui_dsl::ui::{ColorScheme, DatePickerValue, DateValue, Element, Icon, TimeValue};
 
 /// How long the Async page's pretend request takes.
 const LOAD_TIME: Duration = Duration::from_millis(2500);
@@ -61,6 +61,8 @@ pub enum Msg {
     SubmitName,
     Tap,
     ResetTaps,
+    /// The device's language or appearance, at startup and when it changes.
+    Environment(Environment),
     /// A container on the Container page was tapped.
     ContainerTap(&'static str),
     /// The button inside the tappable card.
@@ -121,6 +123,10 @@ pub struct ShowcaseApp {
     container_last: Option<&'static str>,
     container_taps: usize,
     container_muted: bool,
+    /// What the device last reported; shown on the Environment page.
+    language: String,
+    locale: String,
+    color_scheme: ColorScheme,
     notifications: bool,
     wifi: bool,
     bluetooth: bool,
@@ -181,6 +187,9 @@ impl ShowcaseApp {
             container_last: None,
             container_taps: 0,
             container_muted: false,
+            language: String::new(),
+            locale: String::new(),
+            color_scheme: ColorScheme::Light,
             notifications: false,
             wifi: true,
             bluetooth: false,
@@ -313,6 +322,11 @@ impl Component for ShowcaseApp {
                 self.container_taps += 1;
             }
             Msg::ContainerMute => self.container_muted = !self.container_muted,
+            Msg::Environment(environment) => {
+                self.language = environment.language();
+                self.locale = environment.locale;
+                self.color_scheme = environment.color_scheme;
+            }
             Msg::Progress(value) => self.progress = value,
             Msg::RecycledTap => self.recycled_taps += 1,
             Msg::RecycledShuffle => self.recycled_alt = !self.recycled_alt,
@@ -380,6 +394,10 @@ impl Component for ShowcaseApp {
 }
 
 impl App for ShowcaseApp {
+    fn environment_changed(&self, environment: &Environment) -> Option<Msg> {
+        Some(Msg::Environment(environment.clone()))
+    }
+
     /// The clock ticks only while it is switched on. The runtime starts and
     /// stops the timer by comparing this list after every message, and
     /// pauses it while the app is in the background.

@@ -47,6 +47,32 @@ use crate::message::Message;
 use crate::navigation::{Navigation, Route};
 use crate::presentation::{BottomSheet, Dialog};
 use crate::scaffold::{Chrome, Scaffold};
+use crate::style::ColorScheme;
+
+/// What the device tells the application about itself: the user's language
+/// and whether the screen is light or dark.
+///
+/// The application hears about it through [`App::environment_changed`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Environment {
+    /// The user's preferred language as a BCP 47 tag, such as `en-US` or
+    /// `pl-PL`. Empty when the platform did not report one.
+    pub locale: String,
+    /// The appearance colours are resolved for.
+    pub color_scheme: ColorScheme,
+}
+
+impl Environment {
+    /// The language part of [`Environment::locale`], in lower case: `pl`
+    /// for `pl-PL`.
+    pub fn language(&self) -> String {
+        self.locale
+            .split(['-', '_'])
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+    }
+}
 
 /// A piece of UI with its own state and messages.
 pub trait Component {
@@ -105,6 +131,22 @@ pub trait App: Component + Send + 'static {
         None
     }
 
+    /// The message to send because the device's language or appearance is
+    /// `environment`, or `None` when the application does not follow them.
+    ///
+    /// Called before the first render and again whenever a value changes
+    /// while the application runs, so an application that keeps its strings
+    /// in Rust can switch language without a restart:
+    ///
+    /// ```ignore
+    /// fn environment_changed(&self, environment: &Environment) -> Option<Msg> {
+    ///     Some(Msg::Language(environment.language()))
+    /// }
+    /// ```
+    fn environment_changed(&self, _environment: &Environment) -> Option<Self::Msg> {
+        None
+    }
+
     /// What should keep sending messages in the current state, such as a
     /// clock. Compared by key after every message; see [`Subscription`].
     fn subscriptions(&self) -> Vec<Subscription<Self::Msg>> {
@@ -137,6 +179,7 @@ pub trait App: Component + Send + 'static {
 /// An [`App`] with its message type erased, as the runtime holds it.
 pub(crate) trait AnyApp: Send {
     fn init(&mut self) -> Jobs;
+    fn environment_changed(&self, environment: &Environment) -> Option<Message>;
     fn view(&self) -> RawElement;
     fn update(&mut self, message: Message) -> Jobs;
     fn subscriptions(&self) -> Vec<Subscription<()>>;
@@ -165,6 +208,10 @@ impl<A: App> AnyApp for A {
             Ok(message) => Component::update(self, *message).into_jobs(),
             Err(_) => Jobs::none(),
         }
+    }
+
+    fn environment_changed(&self, environment: &Environment) -> Option<Message> {
+        App::environment_changed(self, environment).map(|message| Box::new(message) as Message)
     }
 
     fn subscriptions(&self) -> Vec<Subscription<()>> {
@@ -250,6 +297,9 @@ pub(crate) struct Running {
     /// The work [`App::init`] asked for, until the first session starts it.
     /// Empty for an application that already had a session.
     pub(crate) init: Jobs,
+    /// The environment the application was last told about, so a session
+    /// that continues with it only reports what changed in between.
+    pub(crate) told: Option<Environment>,
 }
 
 impl Running {
@@ -260,6 +310,7 @@ impl Running {
             app,
             mailbox: Arc::new(Mailbox::default()),
             init,
+            told: None,
         }
     }
 }

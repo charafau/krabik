@@ -381,6 +381,27 @@ final class ShowcaseUITests: XCTestCase {
         backToCatalog()
     }
 
+    /// The device's language and appearance reach the application.
+    func testTheApplicationHearsAboutTheEnvironment() throws {
+        XCUIDevice.shared.appearance = .light
+        defer { XCUIDevice.shared.appearance = .light }
+
+        open("Environment")
+        let language = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH 'Language: '")
+        ).firstMatch
+        XCTAssertTrue(language.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(language.label.count, "Language: ".count, "a language was reported")
+        XCTAssertTrue(app.staticTexts["Appearance: light"].exists)
+
+        // The simulator takes a few seconds to switch.
+        XCUIDevice.shared.appearance = .dark
+        XCTAssertTrue(app.staticTexts["Appearance: dark"].waitForExistence(timeout: 20))
+        capture("environment-dark")
+
+        backToCatalog()
+    }
+
     func testAContainerReactsToTaps() throws {
         open("Container")
         XCTAssertTrue(app.staticTexts["Nothing tapped yet."].waitForExistence(timeout: 5))

@@ -147,7 +147,8 @@ override func viewDidLoad() {
         Unmanaged.passUnretained(mainHost).toOpaque(),
         Double(view.bounds.width),
         Double(view.bounds.height),
-        traitCollection.userInterfaceStyle == .dark
+        traitCollection.userInterfaceStyle == .dark,
+        Self.languageTag()
     )
     mainHost.bindMain(session: session)
 

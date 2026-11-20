@@ -65,6 +65,7 @@ pub extern "system" fn native_create<'caller>(
     context: JObject<'caller>,
     density: jfloat,
     night: jboolean,
+    locale: JString<'caller>,
     retained_app: jlong,
 ) -> jlong {
     run(&mut unenv, "nativeCreate", |env| {
@@ -86,6 +87,9 @@ pub extern "system" fn native_create<'caller>(
         } else {
             ColorScheme::Light
         });
+        // A change of language recreates the activity, so the locale an
+        // activity is created with is the one it keeps.
+        core.set_locale(&locale.try_to_string(env)?);
         let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
         // Background work finishes on its own thread. It asks the main
         // thread, through Kotlin's main-looper handler, to come and collect

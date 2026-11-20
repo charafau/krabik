@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use crate::app::{AnyApp, Running};
+use crate::app::{AnyApp, Environment, Running};
 use crate::command::{self, Executor, Jobs, Mailbox, Threads};
 use crate::engine::tree::{self, NodeId};
 use crate::message::Message;
@@ -50,8 +50,11 @@ pub(crate) struct Session<P: Platform> {
     back_enabled: bool,
     /// Whether the controller has been given a navigation stack yet.
     navigation_synced: bool,
-    /// The appearance every host resolves its colours for.
-    scheme: ColorScheme,
+    /// The device's language, and the appearance every host resolves its
+    /// colours for.
+    environment: Environment,
+    /// The environment the application was last told about.
+    told: Option<Environment>,
     /// The height the sheet's content had when the controller last heard
     /// of it; `None` while no sheet host has rendered.
     sheet_height: Option<f32>,
@@ -94,7 +97,8 @@ impl<P: Platform> Session<P> {
             dialog: None,
             back_enabled: false,
             navigation_synced: false,
-            scheme: ColorScheme::Light,
+            environment: Environment::default(),
+            told: running.told,
             native_pop: false,
             sheet_height: None,
         }
@@ -104,7 +108,9 @@ impl<P: Platform> Session<P> {
     /// can continue with its state.
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     pub(crate) fn into_app(self) -> Running {
-        let Self { app, mailbox, .. } = self;
+        let Self {
+            app, mailbox, told, ..
+        } = self;
         Running {
             app,
             // Dropping the rest of the session stops its timers and its
@@ -112,6 +118,7 @@ impl<P: Platform> Session<P> {
             mailbox: mailbox.0.clone(),
             // The application has started; `init` is not run again.
             init: Jobs::none(),
+            told,
         }
     }
 
@@ -192,7 +199,27 @@ impl<P: Platform> Session<P> {
     /// Records whether the device shows its light or dark appearance. The
     /// next render repaints whatever depends on it.
     pub(crate) fn set_color_scheme(&mut self, scheme: ColorScheme) {
-        self.scheme = scheme;
+        self.environment.color_scheme = scheme;
+    }
+
+    /// Records the user's language as a BCP 47 tag. The next render tells
+    /// the application.
+    pub(crate) fn set_locale(&mut self, locale: &str) {
+        if self.environment.locale != locale {
+            self.environment.locale = locale.to_owned();
+        }
+    }
+
+    /// Tells the application about the environment when it differs from
+    /// what it heard last: before the first render, and after a change.
+    fn announce_environment(&mut self) {
+        if self.told.as_ref() == Some(&self.environment) {
+            return;
+        }
+        self.told = Some(self.environment.clone());
+        if let Some(message) = self.app.environment_changed(&self.environment) {
+            self.apply(message);
+        }
     }
 
     /// Registers the native controller. Until then only the main host renders.
@@ -245,6 +272,7 @@ impl<P: Platform> Session<P> {
 
     /// Rebuilds every host from the application and mirrors the native chrome.
     pub(crate) fn render_all(&mut self, cx: &mut P::Cx<'_>) -> Result<(), P::Error> {
+        self.announce_environment();
         let has_navigation = self.app.navigation().is_some();
         for host in self.hosts.values_mut() {
             let element = match host.kind() {
@@ -258,7 +286,8 @@ impl<P: Platform> Session<P> {
                 HostKind::Sheet => self.app.sheet().map(|sheet| sheet.into_content()),
             };
             if let Some(element) = element {
-                host.runtime_mut().set_color_scheme(self.scheme);
+                host.runtime_mut()
+                    .set_color_scheme(self.environment.color_scheme);
                 host.render(cx, &element)?;
             }
         }
@@ -932,6 +961,10 @@ mod tests {
         snackbar_id: u64,
         /// Starts the work of `Msg::Load` when the application starts.
         load_at_start: bool,
+        /// Asks to hear about the device's language and appearance.
+        follows_environment: bool,
+        /// Every environment the application was told about, in order.
+        environments: Vec<(String, ColorScheme)>,
     }
 
     /// An application whose state the test can also change from outside,
@@ -966,6 +999,7 @@ mod tests {
         /// Starts background work that reports `Loaded`.
         Load,
         Loaded(usize),
+        Environment(String, ColorScheme),
     }
 
     impl Component for TestApp {
@@ -1012,6 +1046,7 @@ mod tests {
                         state.tab = Some(index);
                     }
                 }
+                Msg::Environment(language, scheme) => state.environments.push((language, scheme)),
             }
             Command::none()
         }
@@ -1024,6 +1059,12 @@ mod tests {
             } else {
                 Command::none()
             }
+        }
+
+        fn environment_changed(&self, environment: &Environment) -> Option<Msg> {
+            self.state()
+                .follows_environment
+                .then(|| Msg::Environment(environment.language(), environment.color_scheme))
         }
 
         fn navigation(&self) -> Option<Navigation<Msg>> {
@@ -1836,6 +1877,62 @@ mod tests {
         next.drain(&mut ()).unwrap();
         assert_eq!(*woken.lock().unwrap(), 0);
         assert_eq!(app.state().clicks, 100);
+    }
+
+    #[test]
+    fn the_application_hears_about_the_environment_when_it_changes() {
+        let (mut session, app, _log) = session(State {
+            stack: vec!["home"],
+            follows_environment: true,
+            ..State::default()
+        });
+        let told = |app: &TestApp| app.state().environments.clone();
+        let (pl, en) = ("pl".to_string(), "en".to_string());
+
+        // Before the first render, with what the platform reported so far.
+        session.set_locale("pl-PL");
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(told(&app), [(pl.clone(), ColorScheme::Light)]);
+
+        // A render that changes nothing says nothing.
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(told(&app).len(), 1);
+
+        session.set_color_scheme(ColorScheme::Dark);
+        session.render_all(&mut ()).unwrap();
+        assert_eq!(told(&app)[1..], [(pl.clone(), ColorScheme::Dark)]);
+
+        // The activity is recreated with the same environment: the
+        // application already knows.
+        let recreate = |session: Session<Fake>, locale: &str| {
+            let mut next = Session::<Fake>::with_executor(
+                session.into_app(),
+                FakeHost::new(HostKind::Main),
+                Arc::new(Inline::default()),
+            );
+            next.set_controller(FakeController(Log::default()));
+            next.set_color_scheme(ColorScheme::Dark);
+            next.set_locale(locale);
+            next.render_all(&mut ()).unwrap();
+            next
+        };
+        let session = recreate(session, "pl-PL");
+        assert_eq!(told(&app).len(), 2);
+
+        // The user changed the device language, which recreates it too.
+        recreate(session, "en-GB");
+        assert_eq!(told(&app)[2..], [(en, ColorScheme::Dark)]);
+    }
+
+    #[test]
+    fn an_application_that_does_not_follow_the_environment_is_left_alone() {
+        let (mut session, app, _log) = session(State {
+            stack: vec!["home"],
+            ..State::default()
+        });
+        session.set_locale("pl-PL");
+        session.render_all(&mut ()).unwrap();
+        assert!(app.state().environments.is_empty());
     }
 
     #[test]

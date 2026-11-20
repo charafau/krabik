@@ -348,6 +348,33 @@ The two custom iOS views from chapter 6 are not painted by Rust, so they handle 
 themselves with UIKit dynamic colours. `KrabikSnackbarView` in `shared/ios/KrabikChrome.swift`
 inverts: a dark bar in light mode, a light bar in dark mode.
 
+## Following the device yourself
+
+Adaptive colours cover most of dark mode without the app knowing which appearance is showing.
+For the rest (a different image, a chart drawn with other colours) and for the user's language,
+the app can ask to be told. `App::environment_changed` is called before the first render and
+whenever a value changes, and returns the message to send:
+
+```rust,ignore
+impl App for Notes {
+    fn environment_changed(&self, environment: &Environment) -> Option<Msg> {
+        Some(Msg::Environment(environment.clone()))
+    }
+}
+
+// in update:
+Msg::Environment(environment) => {
+    self.dark = environment.color_scheme == ColorScheme::Dark;
+    self.strings = Strings::for_language(&environment.language());   // "pl" for "pl-PL"
+}
+```
+
+`Environment::locale` is the user's first language as a BCP 47 tag (`pl-PL`), and `language()`
+is its first part. An app that keeps its strings in Rust switches language this way while it
+runs. On Android a change of language or appearance recreates the activity; the app is kept and
+is told what changed. On iOS the host observes the locale notification and the trait change.
+A recreation that changes neither, such as a rotation, says nothing.
+
 ## Trying it
 
 On an Android emulator the night mode can be switched from a shell; this is the command the

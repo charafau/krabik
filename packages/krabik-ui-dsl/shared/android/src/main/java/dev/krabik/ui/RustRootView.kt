@@ -41,7 +41,9 @@ class RustRootView(
     private var handle: Long = if (ownsSession) {
         val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
             Configuration.UI_MODE_NIGHT_YES
-        nativeCreate(context, resources.displayMetrics.density, night, retainedApp).also {
+        // The user's first language, as a BCP 47 tag such as "pl-PL".
+        val locale = resources.configuration.locales[0].toLanguageTag()
+        nativeCreate(context, resources.displayMetrics.density, night, locale, retainedApp).also {
             // Zero means Rust could not set itself up, almost always because
             // a class or method it looks up by name is missing. Failing here
             // beats an empty screen with no explanation.
@@ -558,6 +560,7 @@ class RustRootView(
         context: Context,
         density: Float,
         night: Boolean,
+        locale: String,
         retainedApp: Long,
     ): Long
 

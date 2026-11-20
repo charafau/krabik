@@ -5,10 +5,10 @@ use krabik_ui_dsl::navigation::{BottomNavItem, BottomNavigation};
 use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::scaffold::{Drawer, DrawerItem, Fab, Scaffold, Snackbar};
 use krabik_ui_dsl::ui::{
-    Align, AnimationCurve, Button, Checkbox, Color, Column, Container, DatePicker, DatePickerMode,
-    DateValue, EdgeInsets, Element, Gradient, Icon, Image, ImageScale, ImageSource, Justify, List,
-    Pager, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider, Spacer, Switch,
-    TabBar, Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
+    Align, AnimationCurve, Button, Checkbox, Color, ColorScheme, Column, Container, DatePicker,
+    DatePickerMode, DateValue, EdgeInsets, Element, Gradient, Icon, Image, ImageScale, ImageSource,
+    Justify, List, Pager, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView, Slider,
+    Spacer, Switch, TabBar, Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
 };
 
 use crate::{Msg, ShowcaseApp};
@@ -96,6 +96,7 @@ pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
         "recycled-list" => "recycled-list",
         "layouts" => "layouts",
         "styling" => "styling",
+        "environment" => "environment",
         "checklist" => "checklist",
         _ => return None,
     })
@@ -139,6 +140,7 @@ pub(crate) fn title(key: &str) -> &'static str {
         "recycled-list" => "Recycled list",
         "layouts" => "Layouts",
         "styling" => "Styling",
+        "environment" => "Environment",
         "checklist" => "Checklist",
         _ => "Krabik UI DSL",
     }
@@ -182,6 +184,7 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element<Msg>> {
         "recycled-list" => recycled_list_page(app),
         "layouts" => layouts_page(),
         "styling" => styling_page(),
+        "environment" => environment_page(app),
         "checklist" => app.checklist.view().map(Msg::Checklist),
         _ => return None,
     })
@@ -262,6 +265,7 @@ pub(crate) fn home() -> Element<Msg> {
             "Extras",
             &[
                 ("Styling", "page:styling"),
+                ("Environment", "page:environment"),
                 ("Checklist", "page:checklist"),
                 ("Dialog", "dialog:open"),
                 ("Bottom sheet", "page:bottom-sheet"),
@@ -1415,6 +1419,37 @@ fn layouts_page() -> Element<Msg> {
                 .child(chip("A", COLOR_BLUE))
                 .child(chip("B", COLOR_AMBER))
                 .child(chip("C", COLOR_PURPLE)),
+        ],
+    )
+}
+
+fn environment_page(app: &ShowcaseApp) -> Element<Msg> {
+    let appearance = match app.color_scheme {
+        ColorScheme::Light => "light",
+        ColorScheme::Dark => "dark",
+    };
+    page(
+        "Environment",
+        "The device tells the app its language and appearance, at startup and when they change.",
+        body![
+            Text::new(format!("Language: {}", app.language))
+                .size(18)
+                .color(COLOR_TEXT),
+            Text::new(format!("Locale: {}", app.locale))
+                .size(16)
+                .color(COLOR_MUTED),
+            Text::new(format!("Appearance: {appearance}"))
+                .size(18)
+                .color(COLOR_TEXT),
+            // Strings live in Rust, so the app picks them by language.
+            Text::new(match app.language.as_str() {
+                "pl" => "Dzień dobry",
+                "ja" => "こんにちは",
+                _ => "Good morning",
+            })
+            .size(24)
+            .bold()
+            .color(COLOR_ACCENT),
         ],
     )
 }

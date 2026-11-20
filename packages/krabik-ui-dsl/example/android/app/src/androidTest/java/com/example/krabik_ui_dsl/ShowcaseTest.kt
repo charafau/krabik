@@ -542,6 +542,34 @@ class ShowcaseTest {
         }
     }
 
+    /** The device's language and appearance reach the application. */
+    @Test
+    fun theApplicationHearsAboutTheEnvironment() {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        fun night(mode: String) {
+            automation.executeShellCommand("cmd uimode night $mode").close()
+            Thread.sleep(2500)
+        }
+        val language = java.util.Locale.getDefault().language
+
+        night("no")
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                openPage("Environment")
+                onView(withText("Language: $language")).check(matches(isDisplayed()))
+                onView(withText("Appearance: light")).check(matches(isDisplayed()))
+
+                // The switch recreates the activity; the application it
+                // kept is told what changed.
+                night("yes")
+                onView(withText("Appearance: dark")).check(matches(isDisplayed()))
+                onView(withText("Language: $language")).check(matches(isDisplayed()))
+            }
+        } finally {
+            night("no")
+        }
+    }
+
     @Test
     fun aContainerReactsToTaps() {
         ActivityScenario.launch(MainActivity::class.java).use {

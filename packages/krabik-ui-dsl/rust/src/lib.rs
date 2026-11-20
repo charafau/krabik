@@ -40,7 +40,7 @@ mod animation;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod frame_batch;
 
-pub use app::{App, Component, set_app_factory};
+pub use app::{App, Component, Environment, set_app_factory};
 pub use krabik_ui_dsl_macros::view;
 // The engine modules keep their short public paths, e.g. `krabik_ui_dsl::runtime`.
 pub use engine::{geometry, layout, measure, render, runtime, tree};

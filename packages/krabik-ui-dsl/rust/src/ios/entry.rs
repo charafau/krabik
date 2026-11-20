@@ -12,7 +12,7 @@ use objc2::rc::Retained;
 use objc2::runtime::NSObject;
 use objc2_ui_kit::UIView;
 use std::collections::HashMap;
-use std::ffi::c_void;
+use std::ffi::{CStr, c_char, c_void};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -27,13 +27,15 @@ pub(crate) fn states() -> &'static Mutex<HashMap<u64, IosSession>> {
 ///
 /// # Safety
 ///
-/// `root` must be a live `UIView` and the call must happen on the main thread.
+/// `root` must be a live `UIView`, `locale` must be null or a C string, and
+/// the call must happen on the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn krabik_ios_create(
     root: *mut c_void,
     width: f64,
     height: f64,
     dark: bool,
+    locale: *const c_char,
 ) -> u64 {
     let Some(mtm) = MainThreadMarker::new() else {
         return 0;
@@ -48,6 +50,8 @@ pub unsafe extern "C" fn krabik_ios_create(
     main.viewport = Size::new(width.max(0.0) as f32, height.max(0.0) as f32);
     let mut session = IosSession::new(crate::app::create_app(), main);
     session.set_color_scheme(scheme(dark));
+    // SAFETY: the caller passes null or a C string that lives for the call.
+    session.set_locale(&unsafe { language_tag(locale) });
     // Background work finishes on its own thread; the result is collected
     // on the main queue.
     session.set_waker(std::sync::Arc::new(move || schedule(move || drain(handle))));
@@ -55,6 +59,43 @@ pub unsafe extern "C" fn krabik_ios_create(
     guard("create", || infallible(session.render_all(&mut cx)));
     states().lock().expect("ios states").insert(handle, session);
     handle
+}
+
+/// Reads a BCP 47 tag handed over as a C string; null reads as no tag.
+///
+/// # Safety
+///
+/// `locale` must be null or point to a C string that lives for the call.
+unsafe fn language_tag(locale: *const c_char) -> String {
+    if locale.is_null() {
+        return String::new();
+    }
+    // SAFETY: not null, and a C string by the caller's guarantee.
+    unsafe { CStr::from_ptr(locale) }
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Tells the session that the user's language changed while the app runs,
+/// and renders what the application makes of it.
+///
+/// # Safety
+///
+/// `locale` must be null or a C string, and the call must happen on the main
+/// thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_set_locale(handle: u64, locale: *const c_char) {
+    let Some(mut mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    // SAFETY: the caller passes null or a C string that lives for the call.
+    let locale = unsafe { language_tag(locale) };
+    guard("locale", || {
+        with_session(handle, |session| {
+            session.set_locale(&locale);
+            infallible(session.render_all(&mut mtm));
+        });
+    });
 }
 
 fn scheme(dark: bool) -> ColorScheme {

@@ -90,6 +90,7 @@ run(&mut unenv, "nativeCreate", |env| {
         .unwrap_or_else(crate::app::create_app);
     let mut core = Session::new(app, main);
     core.set_color_scheme(if night { ColorScheme::Dark } else { ColorScheme::Light });
+    core.set_locale(&locale.try_to_string(env)?);
     // ... insert into the map under a fresh handle, return the handle
 })
 ```
@@ -101,7 +102,8 @@ Four things happen, in an order that matters:
 3. The app is either taken from the retained-app map or created from the registered factory.
    `create_app` panics with a clear message if no app was registered; `run` turns that panic into
    a Java `RuntimeException`.
-4. The colour scheme is set from the `night` flag before the first render.
+4. The colour scheme and the user's language are set from the `night` flag and the `locale`
+   string before the first render, which is when the application hears about them.
 
 Note that `nativeCreate` does **not** render. The root view has no size yet. The first render
 happens when Android measures the view and Kotlin calls `nativeRender`.
