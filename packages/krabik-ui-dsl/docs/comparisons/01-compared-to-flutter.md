@@ -753,7 +753,7 @@ pre-build script (`shared/build-rust-ios.sh`). There is no CLI that wraps both. 
 
 | Flutter | Here |
 |---|---|
-| Hot reload, hot restart | none; every change is a native rebuild and reinstall |
+| Hot reload, hot restart | hot reload of `view` and `update` code on the emulator and the simulator ([how](../design/hot-reload.md)); anything else is a native rebuild and reinstall |
 | DevTools: widget inspector, performance overlay | none; the platform's own tools (Layout Inspector, Xcode view debugger) show the real native views |
 | `debugPrint`, `flutter logs` | `adb logcat -s krabik`; the Xcode console |
 | Widget tests (`pumpWidget`, `find`, `tap`) | Rust tests that build a session with a fake platform, send events and assert on the operations and messages |
@@ -781,7 +781,8 @@ engine never touches a view, only ids, so the whole pipeline in
 
 **Give up**
 
-- Hot reload. This is the largest day-to-day difference.
+- Hot reload as complete as Flutter's. Here it covers `view` and `update` code on the emulator
+  and the simulator; a change to the shape of the state, or a device, means a reinstall.
 - Pixel-identical UI across platforms, custom painting, shaders, free-form transforms and clips.
 - Explicit animations, `Hero`, gesture recognisers.
 - Local widget state, `InheritedWidget`, `GlobalKey`, lifecycle callbacks.

@@ -54,8 +54,8 @@ Kotlin and Swift shells, the Gradle and Xcode builds, CI, and the procedural mac
 
 - [Why it is built this way](design/decisions.md): each decision, the problem it answers, the
   alternatives, and what it costs.
-- [Hot reload](design/hot-reload.md): how Dioxus patches running Rust code, what it would take
-  here, and a cheaper alternative. A proposal; nothing is built yet.
+- [Hot reload](design/hot-reload.md): new application code in a running app during development.
+  How to use it, how it works, what was measured, and its limits.
 - [What was done, in order](design/history.md): the work commit by commit, from the first
   native-UI bug fixes through the restructure to the scaffold, with how each step was checked.
 

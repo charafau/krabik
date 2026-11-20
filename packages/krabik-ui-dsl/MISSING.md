@@ -20,8 +20,9 @@ SVG assets; see section 9 of [TODO.md](TODO.md)). What is left:
 
 ## Hot reload
 
-- Flutter and react native support hot reload, krabik doesn't.
-- Dioxus, framework in rust does support it. How it works, what it would take
-  here and what to build first are written up in
-  [docs/design/hot-reload.md](docs/design/hot-reload.md). Nothing is built yet,
-  and the write-up is from reading, not from a device run.
+- Available now for development, on the Android emulator and the iOS
+  simulator: `shared/hot-reload.sh` puts changed `view` and `update` code into
+  the running app and keeps its state (about 3 s on Android, about 1 s on
+  iOS). See [docs/design/hot-reload.md](docs/design/hot-reload.md).
+- Still missing: devices, and changes to the layout of the app's state or
+  message type, which need a restart.

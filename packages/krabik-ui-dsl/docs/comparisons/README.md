@@ -168,14 +168,14 @@ by the platform.
 | Animation | controllers, tickers, implicit widgets | `Animated`, Reanimated | implicit only: `.animate(ms)`, enter/exit |
 | Theme | `Theme.of(context)` | your choice | `Color::adaptive(light, dark)`; no theme object |
 | Accessibility | semantics tree | accessibility props on native views | native views' own, plus `accessibility_label` |
-| Hot reload | yes | Fast Refresh | no; full native rebuild ([proposal](../design/hot-reload.md)) |
+| Hot reload | yes | Fast Refresh | on emulator and simulator, for `view` and `update` code ([how](../design/hot-reload.md)) |
 | Tests without a device | widget tests, goldens | Jest, component tests | Rust tests on ops with a fake platform; no goldens |
 | What ships | AOT snapshot + Flutter engine | JS bytecode + Hermes + native code | one native library with your app and the framework |
 
 ## What this part does not do
 
 It does not rank the three frameworks. Flutter and React Native are mature, with tooling,
-ecosystems and features this framework does not have: hot reload, explicit animations, a semantics
+ecosystems and features this framework does not have: explicit animations, a semantics
 tree, golden tests, thousands of packages. Each chapter ends with a plain list of what you gain
 and what you give up.
 

@@ -308,7 +308,7 @@ Only the implicit kind exists.
 | React Native | Here |
 |---|---|
 | Metro bundles JavaScript; the native app loads the bundle | cargo compiles the app and the framework into one native library; Gradle and Xcode invoke cargo |
-| Fast Refresh | none; rebuild and reinstall |
+| Fast Refresh | hot reload of `view` and `update` code on the emulator and the simulator ([how](../design/hot-reload.md)) |
 | Over-the-air JavaScript updates | not possible; everything is compiled native code |
 | Flipper / React DevTools | the platform's view inspectors show the real views; logs under the `krabik` tag |
 | Jest, React Native Testing Library | Rust tests against a fake platform that assert on operations and messages |
@@ -333,7 +333,7 @@ More: [Building and CI](../platforms/06-building-and-ci.md),
 
 **Give up**
 
-- Fast Refresh and over-the-air updates.
+- Fast Refresh on devices and for every kind of change, and over-the-air updates.
 - Local component state, hooks, context.
 - Concurrent rendering, priorities, and a JS thread that leaves the UI thread free.
 - Explicit and gesture-driven animation.

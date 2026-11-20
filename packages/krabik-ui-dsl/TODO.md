@@ -616,9 +616,11 @@ The list in [MISSING.md](MISSING.md), closed one at a time.
   cannot draw the same thing ([decision 12](docs/design/decisions.md)). Illustration blur is an
   SVG filter.
 
-- **Hot reload: researched, not built.** [docs/design/hot-reload.md](docs/design/hot-reload.md)
-  describes Dioxus's `subsecond`, the open questions for a library loaded by a native app, and a
-  cheaper restart-and-restore path to build first. No device spike was run.
+- **Hot reload.** Behind the cargo feature `hot-reload`: a rebuilt app library adopts the
+  running application value and the session continues with its code. `shared/hot-reload.sh`
+  builds and delivers it. Tried on the Android emulator (about 3 s) and the iOS simulator
+  (about 1 s) with `example-todo-minimal`; limits and open items are in
+  [docs/design/hot-reload.md](docs/design/hot-reload.md).
 
 ---
 

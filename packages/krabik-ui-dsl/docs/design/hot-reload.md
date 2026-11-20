@@ -1,131 +1,161 @@
-# Hot reload: what Dioxus does and what it would take here
+# Hot reload
 
-Flutter and React Native apply a code change to a running app in about a second and keep its
-state. Here every change is a native rebuild and a reinstall. This document looks at how Dioxus
-does it for Rust, maps that onto this framework, and recommends what to build.
+Flutter and React Native put a code change into a running app in about a second and keep its
+state. This framework can now do the same during development, on the Android emulator and the
+iOS simulator, for changes to an application's `view` and `update` code.
 
-**Status: a proposal from reading, not from running.** The Dioxus facts below come from the
-`subsecond` 0.7.10 documentation and source comments, read on 2026-11-21. Nothing was tried on a
-device or a simulator: the `dx` tool is not installed on the machine this was written on, and it
-expects to build and package the app itself (see "What stands in the way"). Statements that need
-an experiment are marked **to verify**.
+This document says how to use it, how it works, what was measured, where it stops, and why it
+does not use Dioxus's `subsecond`.
 
-## Two different things are called hot reload
+## Using it
 
-1. **Reloading a description.** React Native's Fast Refresh and Dioxus's RSX hot reload send a
-   new description of the UI to the running app, which interprets it. No machine code changes.
-   It needs an interpreter for the description, and it only covers what the description language
-   can express.
-2. **Patching compiled code.** The changed functions are recompiled, loaded into the running
-   process, and calls are redirected to them. Flutter does this in its VM. Dioxus 0.7 does it for
-   native Rust with a crate called `subsecond`.
+1. Enable the feature in the app's `rust/Cargo.toml`:
 
-A screen here is a Rust function that builds an `Element`, written with builders or with the
-`view!` macro, which expands to the same builders (`rust/macros/src/view.rs`). There is no
-description to interpret, so only the second kind applies.
+   ```toml
+   krabik-ui-dsl = { path = "...", features = ["hot-reload"] }
+   ```
 
-## How `subsecond` works
+2. Opt in once in the app's crate, with the type that implements `App`:
 
-- **Calls go through a jump table.** The app wraps a call in `subsecond::call(|| ...)`. After a
-  patch, the call lands in the newest version of the function. The documentation says it "works
-  by detouring function calls through a jump table" and "does not modify your process memory".
-- **A patch is a new dynamic library.** The changed crate is recompiled and linked into a small
-  library whose undefined symbols resolve to the running program. `subsecond::apply_patch` loads
-  it and updates the jump table. On Android the library is loaded from memory rather than from a
-  file, "to circumvent permissions issues".
-- **A stale frame unwinds to the nearest `call`.** Code that was already running when the patch
-  arrived panics with a `HotFnPanic`, which the next `call` up the stack catches and retries.
-- **The tool does the building.** "A third-party tool that implements the Subsecond compiler and
-  protocol is required"; that tool is the Dioxus CLI, run as `dx serve --hotpatch`. Its linker
-  wrapper is "not available as a standalone tool".
-- **Patches arrive over a websocket.** `dioxus_devtools::connect_subsecond()` is documented as
-  "intended to be used by non-dioxus projects that want to use hotpatching". The Dioxus guide
-  says Bevy and Iced already use it.
-- **It is a debug feature.** It is only enabled when `debug_assertions` are on.
+   ```rust,ignore
+   krabik_ui_dsl::hot_reload!(Notes);
+   ```
 
-### What it cannot do
+3. Build, install and start the app as usual, then run the script and edit the Rust sources:
 
-| Limit | Consequence here |
-|---|---|
-| Only the "tip" crate is patched: "the crate in which your main.rs is located". Changes in other crates are ignored. | The app crate is the tip, which is right: edits to the framework would still need a rebuild. An app split into several crates reloads only one. |
-| "Does not support hot-reloading of structs." A changed layout with old state crashes. | Adding a field to the app's state or a variant to `Msg` needs a restart. Editing `view` and `update` bodies does not. |
-| Changes to static initializers are not seen; thread-locals in the tip crate reset. | Little effect: an app here keeps its state in the `App` value. |
-| iOS devices are "currently not supported due to code-signing requirements". | Simulator only on iOS. |
+   ```sh
+   shared/hot-reload.sh example-todo-minimal android   # or: ios
+   ```
 
-## How it maps onto this framework
+`example-todo-minimal` is set up this way. The script needs `ANDROID_HOME` for Android and a
+booted simulator with the app installed for iOS.
 
-The shape fits well, because the application already is three functions the runtime calls:
+## How it works
 
-- `Session` calls the app through the `AnyApp` trait in a handful of places: `view`, `update`,
-  `screen`, `scaffold`, `navigation`, `dialog`, `sheet`, `subscriptions`
-  (`rust/src/host/session.rs`). Wrapping those calls in `subsecond::call` behind a cargo feature
-  is a small, contained change.
-- State survives by construction. The `App` value is not rebuilt by a patch; only the code that
-  reads it changes. This is the same reason an Android activity recreation keeps the app today.
-- `Session::render_all` already rebuilds every host from the application. A patch handler needs
-  to call it on the UI thread. There is no entry point for that from outside an event today:
-  `drain` returns early when the mailbox is empty. One new entry point per platform, or a
-  "rendered again" marker posted through the mailbox and its waker, would do it.
-- The patch listener is a background thread, started once per process when the feature is on.
+An application is a library, and the runtime reaches it through one trait object
+(`Session.app: Box<dyn AnyApp>`). That is all the mechanism needs:
 
-## What stands in the way
+```text
+  save a file
+      |
+  shared/hot-reload.sh   cargo build of the app's crate (the framework is a cached dependency)
+      |                  copy the library into a directory inside the app's storage, new name
+      v
+  watcher thread         sees the file, wakes every session (the mailbox's waker)
+      |
+  Session::drain         on the UI thread: Session::hot_swap(path)
+      |
+  hot::Library::open     dlopen; look up the two functions hot_reload! exports
+  Library::adopt         compare fingerprints; hand the application value over
+      |
+  render_all             the same state, drawn by the new code
+```
 
-These are the open questions, in the order I would test them.
+- **Adoption.** `hot_reload!(App)` exports `krabik_hot_fingerprint` and `krabik_hot_adopt` from
+  the app's library. `adopt` takes the pointer of the running application value, treats it as
+  its own `App` type, and returns a trait object whose methods are the new code. Nothing is
+  copied or rebuilt, which is why the state survives.
+- **The fingerprint** is the size and alignment of the application type and hashes of its name
+  and its message type's name. A library whose fingerprint differs is refused, the reason goes
+  to the log, and the app carries on with the code it has.
+- **The old library stays loaded.** Handlers and commands made by old code may still run. Each
+  reload leaks one library, which is fine for a development session.
+- **The new library has its own copy of the framework.** It is used only to build descriptions
+  and handlers. Its session maps and platform entry points are never called; the running
+  session stays in the library the app started with.
+- **Delivery.** A process may only load code from its own storage. The watcher polls
+  `code_cache/krabik-hot` on Android and `tmp/krabik-hot` in the app's container on iOS. The
+  script writes under another name and renames, so a library is never seen half written. No
+  socket and no permission is involved.
 
-1. **The app is not an executable. To verify.** `subsecond` uses the `main` symbol "as a
-   sentinel for the current executable" to work out where the program was loaded, and "requires
-   coordination from the CLI to export it". Here the app and the framework are one `cdylib`
-   loaded with `System.loadLibrary` on Android, and a static library linked into a Swift
-   executable on iOS (`docs/platforms/06-building-and-ci.md`). On Android the process's `main`
-   belongs to the Android runtime, not to our library. Whether the address arithmetic holds for a
-   library loaded by a host process is not documented.
-2. **`dx` wants to own the build. To verify.** `dx serve` builds, packages and installs an app
-   from its own project layout. Here Gradle and Xcode drive Cargo (`shared/android/rust.gradle.kts`,
-   `shared/build-rust-ios.sh`). Either `dx` can be pointed at an existing native project, or the
-   patch build has to be reproduced: compile the app crate with the same flags, link the patch
-   against the running library's symbols, produce the jump table. The second is the real cost of
-   this project, and it follows a format that is still marked experimental.
-3. **Reaching the device.** The websocket has to connect from the device to the development
-   machine: `adb reverse` for an emulator or a phone, nothing extra for the iOS simulator. How
-   the address is configured for `connect_subsecond` is not stated in its documentation.
-4. **"The tip crate" for a `cdylib`.** The documentation defines it by `main.rs`. Our app crates
-   have a `lib.rs`.
-5. **Versions.** crates.io shows `subsecond` and `dioxus-cli` at `0.8.0-alpha.3` next to the
-   0.7.10 documentation, so the interface is moving.
+The code is `rust/src/hot.rs`, `Session::hot_swap` and the two lines in `Session::drain` and
+`Session::set_waker` (`rust/src/host/session.rs`), all behind the cargo feature `hot-reload`.
+The watcher only starts in a debug build.
 
-## A cheaper alternative: restart quickly, keep the state
+## What was tried, and what it showed
 
-Most of the day-to-day cost is not the restart, it is getting back to the screen being worked on.
-That can be had without patching code:
+Run on 2026-11-21 with `example-todo-minimal`.
 
-- `krabik-cli` already has a `watch` command that rebuilds, reinstalls and relaunches on a change
-  to the Rust sources. It only knows UniFFI projects today, not this package's layout.
-- The app would opt into restoring its state: an optional `App::save` / `App::restore` pair
-  (bytes out, bytes in), written by the session when the process is asked to stop for a reload
-  and read by `set_app_factory`'s instance on the next start. Navigation is application state
-  here, so the stack comes back with it.
+| Check | Android emulator (Galaxy S24 AVD, API 37, arm64) | iOS simulator (iPhone 17) |
+|---|---|---|
+| Change a label and a button title in `view`, with a todo added and one ticked | New text shown, todos kept, same process id | New text shown, added todo kept |
+| Use the app after the reload | Ticking a todo updates the count through the new code | Ticking a todo updates the count through the new code |
+| Change `update` (prefix new todos) | New todos get the prefix | not tried |
+| Add a field to the state struct | Refused, with the two fingerprints in logcat; app keeps running | not tried on the simulator |
+| Panic in reloaded code | The process aborts (SIGABRT); the panic message is not in logcat | not tried |
+| Save to new code on screen | about 3 s (three runs: 3.8, 3.0, 3.0) | about 1.2 s (0.6 s build, 0.6 s until seen) |
 
-It handles every kind of change, including new struct fields (the app decides what to do with
-old bytes), needs no third-party tool, and also gives Android process-death restoration, which is
-missing today. It is slower: a debug build, an install and a launch, where a patch takes a
-second or two.
+Where the Android time goes: about 2.7 s is the incremental build, nearly all of it linking an
+88 MB debug library; delivering and loading takes about 0.2 s. The simulator's library is
+10 MB and links in 0.6 s. The first build for a target is a full build (27 s for the simulator).
 
-## Recommendation
+The same path is covered without a device by a Rust test,
+`new_application_code_takes_over_the_running_state` in `rust/src/host/session.rs`. It builds
+the fixture app in `rust/tests/fixtures/hot-app` three times and swaps the versions in a session
+with the fake platform: state kept, `view` and `update` replaced, another layout refused, a
+missing file refused. It runs with `cargo test --features hot-reload`.
 
-1. **Build the restart path first.** Teach `krabik-cli watch` this package's project layout and
-   add opt-in state save and restore. It is useful on both platforms and on devices, and nothing
-   in it depends on an experimental format.
-2. **Run a two-day spike on `subsecond` before committing to it.** Answer open questions 1 and 2
-   on the Android emulator with `example-todo-minimal`: wrap the `AnyApp` calls, start the
-   listener, change a string in `view`, and see whether the patch applies and the count survives.
-   If the `main` sentinel or the build ownership cannot be worked around, stop there.
-3. **If the spike works**, ship it as a development-only cargo feature of the framework, document
-   the limits from the table above, and keep the restart path for the changes a patch cannot
-   apply.
+## Limits
+
+- **Emulator and simulator only.** An iOS device does not load unsigned code. An Android device
+  was not tried; the emulator logs an SELinux audit line for executing a library from the app's
+  data directory, which stricter builds may deny.
+- **The state type and the message type must keep their layout.** Add a field or a variant and
+  the library is refused: restart the app. The check is by size, alignment and name, so a change
+  that keeps all three, such as swapping two fields of the same type, is not caught and will
+  misbehave.
+- **The framework must not change.** The running session is old framework code, and it trusts
+  that the new library's copy lays out `Element`, handlers and messages the same way. That holds
+  when both are built from the same sources by the same compiler. After editing the framework,
+  reinstall.
+- **A panic in reloaded code aborts the process** without a message in logcat. It crosses from
+  one copy of the Rust runtime into another, which cannot be unwound.
+- **A new instance of the app is old code.** `set_app_factory` belongs to the library the app
+  started with. An activity that is recreated keeps its reloaded application; a second scene on
+  iOS, or an activity started fresh in the same process, starts from the old factory and then
+  takes the newest library when it is woken.
+- **Statics in the app's crate start again** in each library. State that should survive belongs
+  in the `App` value.
+- **The script reports "reloaded" when the library was delivered.** A refusal is only in the
+  app's log (`adb logcat -s krabik`).
+
+## Why not Dioxus's `subsecond`
+
+Dioxus 0.7 patches running Rust with a crate called `subsecond`. It redirects calls through a
+jump table to functions in a small patch library, and unwinds stale frames to the nearest
+`subsecond::call`. Its documentation (version 0.7.10, read on 2026-11-21) says two things that
+decided against it here:
+
+- "A third-party tool that implements the Subsecond compiler and protocol is required", and the
+  linker wrapper that builds the patches is "not available as a standalone tool": in practice
+  the Dioxus CLI, `dx`, which also wants to build and package the app itself. Here Gradle and
+  Xcode drive Cargo.
+- It locates the program through the `main` symbol of "the current executable" and patches "the
+  crate in which your main.rs is located". An app here is a library loaded by a Java or Swift
+  process and has neither.
+
+`subsecond` is the finer tool: it patches single functions, so it avoids relinking the whole
+library, and it copes with frames that are on the stack when the patch arrives. This framework
+does not need that. Its application is entered from the top for every message and every render,
+so replacing the whole application object between two of those is enough, and that takes
+nothing but `cargo build` and `dlopen`.
+
+Both stop at the same wall: neither can change the layout of live state.
+
+## What is left
+
+- Make the Android link faster. Most of the three seconds is linking debug information; a
+  development profile with `debug = "line-tables-only"` or split debug info should bring it
+  close to the simulator's time. Not tried.
+- Move the script into `krabik-cli`, which already has a file watcher
+  (`packages/krabik-cli/src/watch.rs`) but only knows UniFFI projects.
+- Report a refusal back to the script.
+- A restart that restores state, for the changes a reload cannot apply: an opt-in
+  `save`/`restore` pair on `App`, which would also give Android process-death restoration.
+- Run the layout and panic checks on the iOS simulator, and try an Android device.
 
 ## Sources
 
-- `subsecond` crate documentation, version 0.7.10: <https://docs.rs/subsecond/latest/subsecond/>
+- `subsecond` crate documentation: <https://docs.rs/subsecond/latest/subsecond/>
 - `subsecond` source and README: <https://github.com/DioxusLabs/dioxus/tree/main/packages/subsecond>
 - Dioxus 0.7 hot-reload guide: <https://dioxuslabs.com/learn/0.7/essentials/ui/hotreload>
-- `dioxus_devtools::connect_subsecond`: <https://docs.rs/dioxus-devtools/latest/dioxus_devtools/fn.connect_subsecond.html>
