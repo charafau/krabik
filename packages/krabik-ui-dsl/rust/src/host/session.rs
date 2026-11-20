@@ -50,6 +50,9 @@ pub(crate) struct Session<P: Platform> {
     back_enabled: bool,
     /// The appearance the controller was last asked for.
     appearance: Appearance,
+    /// The number of the library this session last took its code from.
+    #[cfg(feature = "hot-reload")]
+    hot_library: u64,
     /// Whether the controller has been given a navigation stack yet.
     navigation_synced: bool,
     /// The device's language, and the appearance every host resolves its
@@ -99,6 +102,8 @@ impl<P: Platform> Session<P> {
             dialog: None,
             back_enabled: false,
             appearance: Appearance::System,
+            #[cfg(feature = "hot-reload")]
+            hot_library: 0,
             navigation_synced: false,
             environment: Environment::default(),
             told: running.told,
@@ -129,12 +134,20 @@ impl<P: Platform> Session<P> {
     /// `wake` must arrange a call to [`Session::drain`] there. Messages that
     /// arrived while no session was connected ask for it at once.
     pub(crate) fn set_waker(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
+        // A new library is announced the same way a finished command is.
+        #[cfg(feature = "hot-reload")]
+        crate::hot::watch(wake.clone());
         self.mailbox.0.set_waker(Some(wake));
     }
 
     /// Applies every message background work has delivered, then renders
     /// once.
     pub(crate) fn drain(&mut self, cx: &mut P::Cx<'_>) -> Result<(), P::Error> {
+        #[cfg(feature = "hot-reload")]
+        if let Some((number, path)) = crate::hot::pending(self.hot_library) {
+            self.hot_library = number;
+            self.hot_swap(cx, &path)?;
+        }
         let parcels = self.mailbox.0.take();
         if parcels.is_empty() {
             return Ok(());

@@ -21,8 +21,17 @@
 //! handlers and commands made by old code may still run.
 //!
 //! An application opts in with [`hot_reload!`](crate::hot_reload).
+//!
+//! # How a new library reaches the app
+//!
+//! On a device or a simulator a thread watches one directory inside the
+//! app's own storage, which is the only place a process may load code
+//! from. A development script builds the library and drops it there under
+//! a new name; `shared/hot-reload.sh` is that script. The watcher wakes the
+//! sessions, and each loads the newest library on its UI thread.
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::sync::{Arc, Mutex};
 
 use crate::app::{AnyApp, App};
 
@@ -212,4 +221,92 @@ unsafe extern "C" {
     fn dlopen(path: *const c_char, flags: c_int) -> *mut c_void;
     fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
     fn dlerror() -> *const c_char;
+}
+
+/// The newest library dropped into the watched directory, and its number.
+static PENDING: Mutex<(u64, String)> = Mutex::new((0, String::new()));
+
+/// How to reach the UI thread of every session that asked.
+static WAKERS: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>> = Mutex::new(Vec::new());
+
+/// The library a session that last loaded number `after` should load now.
+pub(crate) fn pending(after: u64) -> Option<(u64, String)> {
+    let pending = PENDING.lock().expect("pending library");
+    (pending.0 > after).then(|| pending.clone())
+}
+
+/// Registers a session: `wake` must lead to its `drain` on the UI thread.
+/// The first call starts the watcher.
+pub(crate) fn watch(wake: Arc<dyn Fn() + Send + Sync>) {
+    let mut wakers = WAKERS.lock().expect("wakers");
+    let first = wakers.is_empty();
+    wakers.push(wake.clone());
+    drop(wakers);
+    // A session that starts after a library arrived, such as the one of a
+    // recreated activity, takes it right away.
+    if pending(0).is_some() {
+        wake();
+    }
+    // Only where an app runs, and only in a development build.
+    if first && cfg!(debug_assertions) && cfg!(any(target_os = "android", target_os = "ios")) {
+        let started = std::thread::Builder::new()
+            .name("krabik-hot-reload".into())
+            .spawn(watch_directory);
+        if started.is_err() {
+            crate::log::error("hot reload: could not start the watcher");
+        }
+    }
+}
+
+/// The directory new libraries are dropped into: `krabik-hot` in the
+/// application's code cache on Android, and in its temporary directory on
+/// iOS, where the simulator lets the Mac write.
+fn directory() -> Option<std::path::PathBuf> {
+    if cfg!(target_os = "android") {
+        // The process is named after the application's package.
+        let command = std::fs::read("/proc/self/cmdline").ok()?;
+        let package = command.split(|byte| *byte == 0).next()?;
+        let package = std::str::from_utf8(package).ok()?;
+        let package = package.split(':').next()?;
+        Some(format!("/data/data/{package}/code_cache/krabik-hot").into())
+    } else {
+        Some(std::env::temp_dir().join("krabik-hot"))
+    }
+}
+
+/// Polls the directory. A file counts once its name ends in `.so` or
+/// `.dylib`; the script writes under another name and renames, so a
+/// library is never seen half written.
+fn watch_directory() {
+    let Some(directory) = directory() else {
+        crate::log::error("hot reload: no directory to watch");
+        return;
+    };
+    let _ = std::fs::create_dir_all(&directory);
+    crate::log::error(&format!("hot reload: watching {}", directory.display()));
+    let mut seen = std::collections::HashSet::new();
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        let mut new: Vec<String> = entries
+            .flatten()
+            .filter_map(|entry| entry.path().to_str().map(str::to_owned))
+            .filter(|path| path.ends_with(".so") || path.ends_with(".dylib"))
+            .filter(|path| seen.insert(path.clone()))
+            .collect();
+        // Names carry a timestamp; the last one is the newest.
+        new.sort();
+        let Some(newest) = new.pop() else {
+            continue;
+        };
+        {
+            let mut pending = PENDING.lock().expect("pending library");
+            *pending = (pending.0 + 1, newest);
+        }
+        for wake in WAKERS.lock().expect("wakers").iter() {
+            wake();
+        }
+    }
 }

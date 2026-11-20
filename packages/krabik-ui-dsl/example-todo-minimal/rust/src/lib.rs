@@ -225,6 +225,9 @@ impl Component for MinimalTodoApp {
     }
 }
 
+// Lets a rebuilt library take over the running app during development.
+krabik_ui_dsl::hot_reload!(MinimalTodoApp);
+
 impl App for MinimalTodoApp {
     /// One screen with a native app bar. Without a navigation stack the
     /// chrome is described here and the body is the component's view.
