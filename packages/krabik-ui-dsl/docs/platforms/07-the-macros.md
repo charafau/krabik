@@ -235,7 +235,7 @@ crate::element::style_builder!(Slider);
 
 // 5. What the `Widget` enum forwards to.
 impl crate::widgets::WidgetProps for SliderProps {
-    fn map_messages(&mut self, wrap: &crate::message::Wrap) {
+    fn map_messages(&mut self, wrap: &crate::message::MessageMap) {
         let _ = wrap;
         self.on_change.map(wrap);
     }

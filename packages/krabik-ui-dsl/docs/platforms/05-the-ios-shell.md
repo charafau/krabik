@@ -391,6 +391,9 @@ override func traitCollectionDidChange(_ previous: UITraitCollection?) {
     if previous?.userInterfaceStyle != traitCollection.userInterfaceStyle, session != 0 {
         krabik_ios_set_color_scheme(session, traitCollection.userInterfaceStyle == .dark)
     }
+    if previous?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+        applyTextScale()
+    }
 }
 ```
 
@@ -398,6 +401,11 @@ The system chrome (navigation bar, tab bar, alert, sheet background) uses dynami
 and re-themes itself. The colours Rust paints are fixed values the engine resolved, so Rust must
 be told. It re-renders, and the diff updates only the nodes whose colours differ. Nothing is
 recreated. Compare Android, where the activity is recreated and the app retained.
+
+The second check is for the text size the user chose in Settings. `applyTextScale` turns it into
+a factor with `UIFontMetrics` and calls `krabik_ios_set_text_scale`, once after the session is
+created and again on every change; Rust scales the size of every text by it
+([the iOS renderer](04-the-ios-renderer.md#the-users-text-size)).
 
 ## `KrabikChrome.swift`: snackbar and drawer
 
@@ -449,7 +457,9 @@ belongs to back.
 
 ## What an app adds
 
-An app's `ios/Sources/` folder holds two files.
+An app's `ios/Sources/` folder holds two files. `krabik create <name> --with-dsl` writes both
+for a new app; its `Bridging.h` includes `KrabikIOS.h` by the absolute path of the krabik
+checkout, because such an app does not live inside this package.
 
 ```c
 // example/ios/Sources/Bridging.h

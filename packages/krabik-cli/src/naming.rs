@@ -175,6 +175,23 @@ impl ProjectName {
         self.java_package(package_prefix).replace('.', "/")
     }
 
+    /// The prefix of the JNI symbols of the package, e.g.
+    /// `Java_com_example_my_1app`.
+    ///
+    /// JNI separates the parts of a package with `_`, so an underscore that
+    /// is part of a name is written `_1`.
+    pub fn jni_symbol_prefix(&self, package_prefix: &str) -> String {
+        let mut symbol = String::from("Java_");
+        for c in self.java_package(package_prefix).chars() {
+            match c {
+                '.' => symbol.push('_'),
+                '_' => symbol.push_str("_1"),
+                other => symbol.push(other),
+            }
+        }
+        symbol
+    }
+
     /// The iOS bundle identifier, e.g. `com.example.my-app`.
     pub fn bundle_id(&self, package_prefix: &str) -> String {
         format!("{package_prefix}.{}", self.dir_name.replace('_', "-"))
@@ -307,6 +324,22 @@ mod tests {
         let name = ProjectName::parse("demo").unwrap();
         assert_eq!(name.java_package("io.acme"), "io.acme.demo");
         assert_eq!(name.java_package_path("io.acme"), "io/acme/demo");
+    }
+
+    #[test]
+    fn test_jni_symbol_prefix() {
+        let name = ProjectName::parse("demo").unwrap();
+        assert_eq!(
+            name.jni_symbol_prefix("com.example"),
+            "Java_com_example_demo"
+        );
+
+        // an underscore inside a name is escaped
+        let name = ProjectName::parse("my-app").unwrap();
+        assert_eq!(
+            name.jni_symbol_prefix("io.my_org"),
+            "Java_io_my_1org_my_1app"
+        );
     }
 
     #[test]

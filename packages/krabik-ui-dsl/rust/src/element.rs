@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use crate::message::{Message, Wrap};
+use crate::message::{Message, MessageMap};
 
 /// The component-specific part of an [`RawElement`].
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +42,9 @@ impl ElementKind {
             Self::Container(_) => 21,
             Self::Stack => 24,
             Self::Pager(_) => 20,
+            // A text that can be selected is set up differently from the
+            // start, so changing that builds the view again.
+            Self::Widget(Widget::Text(props)) if props.selectable => 26,
             Self::Widget(widget) => widget.tag(),
             Self::Scroll(props) => match props.axis {
                 Axis::Vertical if props.refresh.is_enabled() => 22,
@@ -87,7 +90,7 @@ impl<M> Element<M> {
         M: 'static,
     {
         let mut raw = self.raw;
-        let wrap: Wrap = Arc::new(move |message: Message| -> Message {
+        let wrap: MessageMap = Arc::new(move |message: Message| -> Message {
             match message.downcast::<M>() {
                 Ok(message) => Box::new(wrap(*message)),
                 // Not produced by this subtree; pass it through untouched.
@@ -169,11 +172,11 @@ impl RawElement {
     }
 
     /// Re-wraps every message this subtree can produce; see [`Element::map`].
-    pub(crate) fn map_messages(&mut self, wrap: &Wrap) {
+    pub(crate) fn map_messages(&mut self, wrap: &MessageMap) {
         match &mut self.kind {
             ElementKind::Widget(widget) => widget.map_messages(wrap),
             ElementKind::Pager(props) => props.on_select.map(wrap),
-            ElementKind::Container(props) => props.on_tap.map(wrap),
+            ElementKind::Container(props) => props.map_messages(wrap),
             ElementKind::Scroll(props) => props.refresh.on_refresh.map(wrap),
             ElementKind::List(props) => props.map_messages(wrap),
             ElementKind::Column | ElementKind::Row | ElementKind::Spacer | ElementKind::Stack => {}
@@ -182,6 +185,19 @@ impl RawElement {
             child.map_messages(wrap);
         }
     }
+}
+
+/// Puts a builder's own style and key on the element it assembled from other
+/// widgets.
+///
+/// Such a builder keeps a shell element only for the shared style methods to
+/// write to. The style the assembled root needs is therefore set on the
+/// shell when the builder is created, where the application can replace it.
+pub(crate) fn finish<M>(shell: RawElement, built: impl Into<Element<M>>) -> Element<M> {
+    let mut raw = built.into().into_raw();
+    raw.style = shell.style;
+    raw.key = shell.key;
+    Element::from_raw(raw)
 }
 
 /// Adds the shared style builder methods to a component.
@@ -241,6 +257,38 @@ macro_rules! style_builder {
             /// Sets the height as a fraction of the parent's height.
             pub fn height_percent(mut self, value: impl $crate::style::IntoPoints) -> Self {
                 self.0.style.height = $crate::style::Length::Percent(value.into_points());
+                self
+            }
+
+            /// Sets the smallest width the node may have.
+            pub fn min_width(mut self, value: impl $crate::style::IntoPoints) -> Self {
+                self.0.style.min_width = Some(value.into_points());
+                self
+            }
+
+            /// Sets the largest width the node may have.
+            pub fn max_width(mut self, value: impl $crate::style::IntoPoints) -> Self {
+                self.0.style.max_width = Some(value.into_points());
+                self
+            }
+
+            /// Sets the smallest height the node may have.
+            pub fn min_height(mut self, value: impl $crate::style::IntoPoints) -> Self {
+                self.0.style.min_height = Some(value.into_points());
+                self
+            }
+
+            /// Sets the largest height the node may have.
+            pub fn max_height(mut self, value: impl $crate::style::IntoPoints) -> Self {
+                self.0.style.max_height = Some(value.into_points());
+                self
+            }
+
+            /// Holds the node at fixed distances from the edges of the
+            /// [`Stack`]($crate::ui::Stack) it is a child of, on top of the
+            /// stack's other children and without taking part in its size.
+            pub fn positioned(mut self, inset: $crate::style::Inset) -> Self {
+                self.0.style.inset = Some(inset);
                 self
             }
 
@@ -373,6 +421,18 @@ macro_rules! style_builder {
                 self
             }
 
+            /// Explains the node in a small label that appears while it is
+            /// pressed and held: the platform's tooltip on Android, a label
+            /// above the node on iOS.
+            ///
+            /// It is for controls whose meaning is not written on them, an
+            /// icon button above all. The node should not also react to a
+            /// long press of its own.
+            pub fn tooltip(mut self, text: impl Into<String>) -> Self {
+                self.0.style.tooltip = Some(text.into());
+                self
+            }
+
             /// Identifies the node among its siblings across rebuilds.
             ///
             /// Keys must be unique among siblings and stable across rebuilds.
@@ -405,6 +465,12 @@ macro_rules! text_builder {
             /// Renders the text in bold.
             pub fn bold(mut self) -> Self {
                 self.0.set_text_weight($crate::style::FontWeight::Bold);
+                self
+            }
+
+            /// Sets the font weight.
+            pub fn weight(mut self, weight: $crate::style::FontWeight) -> Self {
+                self.0.set_text_weight(weight);
                 self
             }
         }

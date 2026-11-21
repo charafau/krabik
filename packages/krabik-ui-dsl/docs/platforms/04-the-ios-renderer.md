@@ -95,7 +95,14 @@ There is no retained-app mechanism. Nothing on iOS destroys the session while th
 
 ### Small helpers
 
-- `system_font(size, weight)` returns the system font, regular or bold.
+- `fonts.rs` has the fonts. `font(size, weight, italic)` returns the system font in one of nine
+  weights (`UIFont.systemFont(ofSize:weight:)`), with the italic trait when asked. The trait
+  alone would give the regular italic, so semi-bold and heavier ask for the bold trait too.
+  `system_font(size, weight)` is the upright one, for the controls. `font_of(font, …)` is what
+  text and buttons call: for `Font::Asset` it finds the file in the bundle, asks Core Text for
+  the faces in it (`CTFontManagerCreateFontDescriptorsFromURL`, declared by hand, since it is
+  the one Core Text function used) and makes a `UIFont` from the first descriptor. The
+  descriptor is kept per path; nothing is registered with the system.
 - `color(c)` converts a resolved engine `Color` (`0xAARRGGBB`) into a `UIColor`; `cg_color` gives
   the `CGColor` that layers want. The colours are fixed values, not dynamic system colours: the
   engine has already picked the light or the dark value. That is why Swift has to tell Rust about
@@ -548,11 +555,28 @@ corner radius and elevation does not clip, because clipping would cut off its ow
 (except a radio group and a tab bar, whose items must stay reachable individually), and sets
 interaction and `UIControl.enabled`.
 
+## The user's text size
+
+A `UILabel` with a font of 16 points stays at 16 points whatever text size the user chose in
+Settings; UIKit only scales fonts made from a text style. Android's text views do scale, because
+their size is given in `sp`. To make the platforms agree, the Swift host computes the factor
+(`UIFontMetrics.default.scaledValue(for: 100) / 100`) when it starts and whenever
+`preferredContentSizeCategory` changes, and reports it with `krabik_ios_set_text_scale`. The
+session hands it to every runtime, and `tree::scale_text` multiplies each text size, line height,
+letter spacing and span size in the tree by it, right after the colours are resolved
+(`rust/src/engine/runtime.rs`). Nothing in this renderer knows about it: the sizes it receives
+are already scaled, the measurer measures them, and a new factor arrives as ordinary updates of
+the nodes that show text. On Android the factor stays one.
+
 ## `measure.rs`
 
 `IosMeasure` implements the engine's `Measure` trait. Text is measured with one off-screen
-`UILabel` and `sizeThatFits`, with results cached by content, size, weight, width, line limit and
-ellipsis. The switch size is the `intrinsicContentSize` of a `UISwitch`, cached. An image's size
+`UILabel` and `sizeThatFits`, with results cached by the available width and
+`TextProps::measure_key()`. The label is filled by `set_label_text` in `widgets/text.rs`, the
+same function that fills a rendered label: a plain string with a font, or, when the text has a
+decoration, letter spacing, a line height or spans, an attributed string (kern, underline and
+strikethrough styles, a paragraph style with the line height, and per run a font, a colour and
+its decorations). The switch size is the `intrinsicContentSize` of a `UISwitch`, cached. An image's size
 is that of the loaded asset.
 
 It carries `unsafe impl Send` and `Sync` for the same reason as the session: the trait object

@@ -32,9 +32,10 @@ If you are new to the codebase and want the whole picture:
 
 ## Part 1: Tutorial
 
-Builds one small Notes app from an empty folder: a counter, widgets and layout, lists,
+Builds one small Notes app, starting from `krabik create notes --with-dsl`: a counter, widgets and layout, lists,
 components, navigation and the scaffold, dialogs and sheets, colours and dark mode, the `view!`
-macro, testing, running on both platforms, and background work and timers. Every chapter ends with the complete code so far.
+macro, testing, running on both platforms with `krabik run` and hot reload with `krabik watch`,
+and background work and timers. Every chapter ends with the complete code so far.
 [Start here](tutorial/README.md).
 
 ## Part 2a: How the engine works
@@ -64,7 +65,9 @@ Kotlin and Swift shells, the Gradle and Xcode builds, CI, and the procedural mac
 Checklists for changing the framework: [add a widget](recipes/add-a-widget.md),
 [add a piece of native chrome](recipes/add-a-chrome-slot.md),
 [write tests at each level](recipes/write-tests.md) and
-[find out why something renders wrongly](recipes/debug-a-render.md).
+[find out why something renders wrongly](recipes/debug-a-render.md). One recipe is for
+applications: [embed a native view of your own](recipes/embed-a-native-view.md), such as a map
+or a video player.
 
 ## Part 5: Comparisons
 

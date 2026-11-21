@@ -7,15 +7,19 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		18C7F3DE0016F15317AB675D /* KrabikRangeSlider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 529639A114BEB5FD42760F67 /* KrabikRangeSlider.swift */; };
 		1F30E11CE4A9D036A74881E4 /* KrabikUiDslExampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCB437AC072D4AC6273F32AC /* KrabikUiDslExampleApp.swift */; };
 		26A4C1D95C69D5CCE1AFF58D /* sunrise.svg in Resources */ = {isa = PBXBuildFile; fileRef = 89BE31C1066D76849A653327 /* sunrise.svg */; };
 		2F8F679F00C0AB4304D8EE92 /* ShowcaseUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB41693963248DB8717533B7 /* ShowcaseUITests.swift */; };
+		3DA629B5361CC5936768DB88 /* KrabikNativeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A333B580FC628AE451E5832C /* KrabikNativeViews.swift */; };
+		41E6FBE0ABFF2DD8D4AA78AB /* NativeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95C2964EE940113C4CA6B1B6 /* NativeViews.swift */; };
 		443A5071DD9091565671F87F /* krabik.webp in Resources */ = {isa = PBXBuildFile; fileRef = 230A28D8837E7D4C4CAA5B09 /* krabik.webp */; };
 		4DA089D7C3A69A4B7A02A6DE /* KrabikHostController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43B1CE5B765D850DC80771C /* KrabikHostController.swift */; };
 		63F51A445E8B7CCA989D4000 /* ChecklistUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F36B8BF2DAD5BBF7E5A37E0A /* ChecklistUITests.swift */; };
 		9315C5307CBD8AB72ED35078 /* RustRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7B3313EC88FE48C53F06030 /* RustRootView.swift */; };
 		B5435D99E2BE4A0C656AFD74 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A4BD54426A0A2E0C23D26D7 /* ContentView.swift */; };
 		EAE6B4B8882FD590C49B8582 /* KrabikChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B04B022A3FAFEBFC0F5F68 /* KrabikChrome.swift */; };
+		F5BF14CEE25A97617688773F /* Pacifico-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AFA889ED16CA8AA794C2E7C4 /* Pacifico-Regular.ttf */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -31,18 +35,22 @@
 /* Begin PBXFileReference section */
 		230A28D8837E7D4C4CAA5B09 /* krabik.webp */ = {isa = PBXFileReference; path = krabik.webp; sourceTree = "<group>"; };
 		3A4BD54426A0A2E0C23D26D7 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		529639A114BEB5FD42760F67 /* KrabikRangeSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikRangeSlider.swift; sourceTree = "<group>"; };
 		5ACEE167865A40442AC18772 /* Bridging.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Bridging.h; sourceTree = "<group>"; };
 		77BDAF0F3BFD87C766B8242D /* KrabikUiDslExampleUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = KrabikUiDslExampleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		89BE31C1066D76849A653327 /* sunrise.svg */ = {isa = PBXFileReference; path = sunrise.svg; sourceTree = "<group>"; };
+		95C2964EE940113C4CA6B1B6 /* NativeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeViews.swift; sourceTree = "<group>"; };
 		977D0395AA01774D1B660F5A /* KrabikIOS.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = KrabikIOS.h; sourceTree = "<group>"; };
+		A333B580FC628AE451E5832C /* KrabikNativeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikNativeViews.swift; sourceTree = "<group>"; };
 		A9627ED92064B8FBCCFDA4C3 /* KrabikUiDslExample.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KrabikUiDslExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AB41693963248DB8717533B7 /* ShowcaseUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShowcaseUITests.swift; sourceTree = "<group>"; };
+		AFA889ED16CA8AA794C2E7C4 /* Pacifico-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Pacifico-Regular.ttf"; sourceTree = "<group>"; };
 		DCB437AC072D4AC6273F32AC /* KrabikUiDslExampleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikUiDslExampleApp.swift; sourceTree = "<group>"; };
 		E7B04B022A3FAFEBFC0F5F68 /* KrabikChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikChrome.swift; sourceTree = "<group>"; };
 		F36B8BF2DAD5BBF7E5A37E0A /* ChecklistUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChecklistUITests.swift; sourceTree = "<group>"; };
 		F43B1CE5B765D850DC80771C /* KrabikHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KrabikHostController.swift; sourceTree = "<group>"; };
 		F7B3313EC88FE48C53F06030 /* RustRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustRootView.swift; sourceTree = "<group>"; };
-		"TEMP_DEAB9D50-536E-4CBB-A1BE-08AB1A607E25" /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
+		"TEMP_A759370A-FCD5-47E5-B2DA-35A2DBBD16C9" /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -50,6 +58,7 @@
 			isa = PBXGroup;
 			children = (
 				230A28D8837E7D4C4CAA5B09 /* krabik.webp */,
+				AFA889ED16CA8AA794C2E7C4 /* Pacifico-Regular.ttf */,
 				89BE31C1066D76849A653327 /* sunrise.svg */,
 			);
 			path = Resources;
@@ -60,6 +69,7 @@
 			children = (
 				5ACEE167865A40442AC18772 /* Bridging.h */,
 				DCB437AC072D4AC6273F32AC /* KrabikUiDslExampleApp.swift */,
+				95C2964EE940113C4CA6B1B6 /* NativeViews.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -99,6 +109,8 @@
 				E7B04B022A3FAFEBFC0F5F68 /* KrabikChrome.swift */,
 				F43B1CE5B765D850DC80771C /* KrabikHostController.swift */,
 				977D0395AA01774D1B660F5A /* KrabikIOS.h */,
+				A333B580FC628AE451E5832C /* KrabikNativeViews.swift */,
+				529639A114BEB5FD42760F67 /* KrabikRangeSlider.swift */,
 				F7B3313EC88FE48C53F06030 /* RustRootView.swift */,
 			);
 			path = ios;
@@ -122,10 +134,10 @@
 			path = ../..;
 			sourceTree = "<group>";
 		};
-		"TEMP_ED07AE3E-9AAF-4406-8504-F0553960E8E5" /* ios */ = {
+		"TEMP_0C3DFE9E-F4F4-4B2C-8D9C-588FD6F7357D" /* ios */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_DEAB9D50-536E-4CBB-A1BE-08AB1A607E25" /* Signing.xcconfig */,
+				"TEMP_A759370A-FCD5-47E5-B2DA-35A2DBBD16C9" /* Signing.xcconfig */,
 			);
 			path = ios;
 			sourceTree = "<group>";
@@ -213,6 +225,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F5BF14CEE25A97617688773F /* Pacifico-Regular.ttf in Resources */,
 				443A5071DD9091565671F87F /* krabik.webp in Resources */,
 				26A4C1D95C69D5CCE1AFF58D /* sunrise.svg in Resources */,
 			);
@@ -259,7 +272,10 @@
 				B5435D99E2BE4A0C656AFD74 /* ContentView.swift in Sources */,
 				EAE6B4B8882FD590C49B8582 /* KrabikChrome.swift in Sources */,
 				4DA089D7C3A69A4B7A02A6DE /* KrabikHostController.swift in Sources */,
+				3DA629B5361CC5936768DB88 /* KrabikNativeViews.swift in Sources */,
+				18C7F3DE0016F15317AB675D /* KrabikRangeSlider.swift in Sources */,
 				1F30E11CE4A9D036A74881E4 /* KrabikUiDslExampleApp.swift in Sources */,
+				41E6FBE0ABFF2DD8D4AA78AB /* NativeViews.swift in Sources */,
 				9315C5307CBD8AB72ED35078 /* RustRootView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -325,7 +341,7 @@
 		};
 		E8B8C590BFEE60488A68D21E /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_DEAB9D50-536E-4CBB-A1BE-08AB1A607E25" /* Signing.xcconfig */;
+			baseConfigurationReference = "TEMP_A759370A-FCD5-47E5-B2DA-35A2DBBD16C9" /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -410,7 +426,7 @@
 		};
 		F1493BC7579C62791628E535 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_DEAB9D50-536E-4CBB-A1BE-08AB1A607E25" /* Signing.xcconfig */;
+			baseConfigurationReference = "TEMP_A759370A-FCD5-47E5-B2DA-35A2DBBD16C9" /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;

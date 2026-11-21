@@ -6,7 +6,7 @@ use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
 use crate::style::Color;
-use crate::style::FontWeight;
+use crate::style::{Font, FontWeight};
 use crate::widgets::IntrinsicSize;
 use crate::widgets::TextProps;
 
@@ -28,6 +28,9 @@ pub struct ButtonProps {
     /// Font weight.
     #[widget(default = FontWeight::Normal)]
     pub weight: FontWeight,
+    /// The font of the label; the system's unless a file is named.
+    #[widget(set)]
+    pub font: Font,
 }
 
 /// The horizontal padding a button adds around its label.
@@ -46,6 +49,7 @@ impl IntrinsicSize for ButtonProps {
             size: self.size,
             color: self.color,
             weight: self.weight,
+            font: self.font.clone(),
             ..TextProps::new("")
         };
         let text = label.intrinsic_size(inner_width, measurer);
@@ -53,5 +57,30 @@ impl IntrinsicSize for ButtonProps {
             text.width + BUTTON_PADDING_X * 2.0,
             text.height.max(BUTTON_MIN_HEIGHT) + BUTTON_PADDING_Y * 2.0,
         )
+    }
+}
+
+impl<M> Button<M> {
+    /// Creates a button that stands out: white text on the accent color,
+    /// with rounded ends. For the one main action of a screen.
+    ///
+    /// It is a [`Button::new`] with a look, so every style method still
+    /// applies and replaces what it sets.
+    pub fn filled(label: impl Into<String>) -> Self {
+        Self::new(label)
+            .color(Color::fixed(0xFFFF_FFFF))
+            .weight(FontWeight::Medium)
+            .background(Color::ACCENT)
+            .corner_radius(22)
+    }
+
+    /// Creates a button with an outline: accent text in a rounded border.
+    /// For an action next to a filled one.
+    pub fn outlined(label: impl Into<String>) -> Self {
+        Self::new(label)
+            .color(Color::ACCENT)
+            .weight(FontWeight::Medium)
+            .border(1, Color::OUTLINE)
+            .corner_radius(22)
     }
 }

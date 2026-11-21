@@ -125,6 +125,25 @@ pub unsafe extern "C" fn krabik_ios_set_color_scheme(handle: u64, dark: bool) {
     });
 }
 
+/// Reports the factor the user's text size setting asks for (one for the
+/// default size) and draws every text again in the new size.
+///
+/// # Safety
+///
+/// The call must happen on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn krabik_ios_set_text_scale(handle: u64, scale: f64) {
+    let Some(mut mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    guard("text scale", || {
+        with_session(handle, |session| {
+            session.set_text_scale(scale as f32);
+            infallible(session.render_all(&mut mtm));
+        });
+    });
+}
+
 /// Rebuilds the tree for the new viewport and applies the resulting operations.
 ///
 /// # Safety

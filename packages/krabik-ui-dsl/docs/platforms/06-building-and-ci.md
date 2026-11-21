@@ -20,6 +20,15 @@ example/
   ios/       an Xcode project (generated from project.yml)
 ```
 
+An app made with `krabik create <name> --with-dsl` has the same three directories, anywhere on
+disk. It differs in three ways: every path to the framework (`rust/`, `shared/android`,
+`shared/ios`, `shared/build-rust-ios.sh`) is the absolute path of the krabik checkout instead of
+`../..`; it has its own `rust-toolchain.toml`; and its Xcode project is not committed. Everything
+in this chapter applies to it otherwise, because `krabik run` only starts the builds described
+here: `./gradlew app:installDebug -PkrabikAbis=<the device's ABI>` on Android, and
+`xcodegen generate` followed by `xcodebuild` on iOS. `krabik release` does not support such a
+project yet; a release build is made with Gradle or Xcode as described below.
+
 The app crate declares two library types:
 
 ```toml
@@ -70,7 +79,8 @@ targets = [
 ]
 ```
 
-When `cargo` runs anywhere under the package directory, rustup reads this file, uses the stable
+When `cargo` runs anywhere under the package directory (or, for an app made with
+`krabik create`, under the app's directory, which has such a file of its own), rustup reads this file, uses the stable
 channel, and installs the listed targets if they are missing. A *target* is a
 CPU-and-operating-system combination the compiler can produce code for:
 
@@ -318,8 +328,10 @@ own classes that only Rust refers to need the app's own rules.
 
 An `.xcodeproj` is a large generated file that is unpleasant to edit or review. Each app
 describes its project in a short `project.yml`, and the tool XcodeGen generates the Xcode project
-from it (`xcodegen generate` in the app's `ios/` directory). The generated project is committed,
-so building does not require XcodeGen; only changing the project structure does.
+from it (`xcodegen generate` in the app's `ios/` directory). For the apps in this package the
+generated project is committed, so building does not require XcodeGen; only changing the project
+structure does. An app made with `krabik create` ignores the generated project in git instead,
+and `krabik run --platform ios` regenerates it before every build.
 
 ```yaml
 # example/ios/project.yml (trimmed)
@@ -488,8 +500,8 @@ workspace it handles each standalone project by manifest path:
 # .github/workflows/ci.yml
 - run: cargo fmt --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --all --check
 # `--workspace` includes the macro crate next to the library
-- run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --workspace --all-targets -- -D warnings
-- run: cargo test --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --workspace
+- run: cargo clippy --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+- run: cargo test --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --workspace --all-features
 ```
 
 followed by `fmt`, `clippy` and `test` for the harness and each of the three example crates.

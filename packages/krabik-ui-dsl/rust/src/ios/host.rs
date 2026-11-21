@@ -29,8 +29,8 @@ use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
 use objc2_quartz_core::{CADisplayLink, CAGradientLayer};
 use objc2_ui_kit::{
     UIActivityIndicatorView, UIButton, UICollectionView, UIDatePicker, UIImageView, UILabel,
-    UIProgressView, UIScrollView, UISegmentedControl, UISlider, UIStackView, UISwitch,
-    UITapGestureRecognizer, UITextField, UIView, UIViewAnimatingPosition,
+    UILongPressGestureRecognizer, UIProgressView, UIScrollView, UISegmentedControl, UISlider,
+    UIStackView, UISwitch, UITapGestureRecognizer, UITextField, UIView, UIViewAnimatingPosition,
 };
 use std::collections::HashMap;
 
@@ -63,6 +63,10 @@ pub(crate) enum Content {
         selected: usize,
     },
     Slider(Retained<UISlider>),
+    /// The host of a view the application's own code makes.
+    NativeView(Retained<UIView>),
+    /// A `KrabikRangeSlider`, a Swift class of the shared host sources.
+    RangeSlider(Retained<objc2_ui_kit::UIControl>),
     Progress(Retained<UIProgressView>),
     Spinner(Retained<UIActivityIndicatorView>),
     Image(Retained<UIImageView>),
@@ -71,8 +75,14 @@ pub(crate) enum Content {
         host: Retained<UIView>,
         /// Enabled while the container has a tap handler.
         tap: Retained<UITapGestureRecognizer>,
-        /// The recognizer does not retain its target, so the handle does.
-        _target: Retained<TapTarget>,
+        /// Enabled while the container has a long-press handler.
+        long_press: Retained<UILongPressGestureRecognizer>,
+        /// The clear button that opens the container's menu on a tap.
+        menu_button: Option<Retained<UIButton>>,
+        /// The interaction that opens the container's menu on a long press.
+        context_menu: Option<Retained<objc2_ui_kit::UIContextMenuInteraction>>,
+        /// The recognizers do not retain their target, so the handle does.
+        target: Retained<TapTarget>,
     },
     Scroll {
         scroll: Retained<UIScrollView>,
@@ -128,6 +138,8 @@ pub(crate) struct ViewHandle {
     pub(crate) padding: EdgeInsets,
     /// The display link driving a frame animation, when one is running.
     pub(crate) frame_link: Option<Retained<CADisplayLink>>,
+    /// The long press that shows the node's tooltip, when it has one.
+    pub(crate) tooltip: Option<crate::ios::tooltip::Tooltip>,
 }
 
 impl ViewHandle {
@@ -142,6 +154,7 @@ impl ViewHandle {
             frame: None,
             padding: node.style.padding,
             frame_link: None,
+            tooltip: None,
         }
     }
 
@@ -300,6 +313,12 @@ impl IosState {
                         &mut handle.corner_radius,
                     );
                     apply_accessibility(&handle.view, &node, mtm);
+                    crate::ios::tooltip::apply(
+                        &handle.view,
+                        &mut handle.tooltip,
+                        node.style.tooltip.as_deref(),
+                        mtm,
+                    );
                     if let (Some(animation), Some(snapshot)) = (animation, snapshot) {
                         animate_style_change(
                             &handle.view,
@@ -464,6 +483,12 @@ impl IosState {
             &mut handle.corner_radius,
         );
         apply_accessibility(&handle.view, node, mtm);
+        crate::ios::tooltip::apply(
+            &handle.view,
+            &mut handle.tooltip,
+            node.style.tooltip.as_deref(),
+            mtm,
+        );
         handle
     }
 

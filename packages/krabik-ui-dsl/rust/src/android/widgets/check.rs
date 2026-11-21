@@ -4,7 +4,7 @@ use crate::android::handles::{Method, VOID, class, get as jni_handles, method, w
 use crate::android::widgets::text::apply_typeface;
 use crate::android::widgets::{Ctor, Site};
 use crate::android::{CHECKBOX_CLASS, COMPLEX_UNIT_SP, RADIO_CLASS};
-use crate::ui::{CheckProps, FontWeight};
+use crate::ui::CheckProps;
 use jni::errors::Result as JniResult;
 use jni::objects::{JClass, JObject};
 use jni::refs::Global;
@@ -36,7 +36,7 @@ pub(crate) fn update_check(
     let ellipsis = ids.truncate_at_end.get(env, &ids.truncate_at)?;
     ids.set_ellipsize
         .call_void(env, view, &[JValue::Object(ellipsis.l()?.as_ref())])?;
-    apply_typeface(env, view, matches!(props.weight, FontWeight::Bold))?;
+    apply_typeface(env, view, props.weight)?;
 
     let setter = if radio {
         ids.check.radio_set_checked

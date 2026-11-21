@@ -30,7 +30,7 @@ class RustRootView(
     sessionHandle: Long = 0L,
     host: Long = 0L,
     retainedApp: Long = 0L,
-) : ViewGroup(context), View.OnClickListener {
+) : ViewGroup(context), View.OnClickListener, View.OnLongClickListener {
 
     private val ownsSession = sessionHandle == 0L
     private val hostId: Long = host
@@ -65,6 +65,8 @@ class RustRootView(
     private val pendingExits = LongSparseArray<View>()
 
     init {
+        // See `KrabikViews.letChildrenOverflow`.
+        clipChildren = false
         if (!ownsSession) {
             nativeAttachHost(handle, hostId)
         }
@@ -136,7 +138,16 @@ class RustRootView(
 
     override fun onClick(view: View) {
         val nodeId = view.tag as? Long ?: return
+        // A container with a menu opens it and reports the picked line.
+        if (KrabikMenus.show(view, this, longPress = false)) return
         nativeOnClick(handle, hostId, nodeId)
+    }
+
+    override fun onLongClick(view: View): Boolean {
+        val nodeId = view.tag as? Long ?: return false
+        if (KrabikMenus.show(view, this, longPress = true)) return true
+        nativeOnLongClick(handle, hostId, nodeId)
+        return true
     }
 
     /**
@@ -427,6 +438,20 @@ class RustRootView(
         }
     }
 
+    /** Forwards a string from a view of the application's own back to Rust. */
+    fun onNativeEvent(nodeId: Long, value: String) {
+        if (handle != 0L) {
+            nativeOnNativeEvent(handle, hostId, nodeId, value)
+        }
+    }
+
+    /** Forwards the two places of a range slider, each from 0 to 1, back to Rust. */
+    fun onRangeChanged(nodeId: Long, low: Float, high: Float) {
+        if (handle != 0L) {
+            nativeOnRangeChanged(handle, hostId, nodeId, low, high)
+        }
+    }
+
     /** Forwards the selected index of a native radio group back to Rust. */
     fun onRadioGroupSelected(nodeId: Long, index: Int) {
         if (handle != 0L) {
@@ -505,6 +530,20 @@ class RustRootView(
             0
         }
 
+    /** Forwards the position of a row that was swiped away back to Rust. */
+    fun onRowDismissed(nodeId: Long, position: Int) {
+        if (handle != 0L) {
+            nativeOnRowDismissed(handle, hostId, nodeId, position)
+        }
+    }
+
+    /** Forwards where a row was dragged from and to back to Rust. */
+    fun onRowMoved(nodeId: Long, from: Int, to: Int) {
+        if (handle != 0L) {
+            nativeOnRowMoved(handle, hostId, nodeId, from, to)
+        }
+    }
+
     /** Tells Rust that [holderId] no longer shows a row. */
     fun unbindRow(nodeId: Long, holderId: Long) {
         if (handle != 0L) {
@@ -577,6 +616,11 @@ class RustRootView(
     private external fun nativeContentHeight(handle: Long, host: Long): Int
 
     private external fun nativeOnClick(handle: Long, host: Long, nodeId: Long)
+    private external fun nativeOnLongClick(handle: Long, host: Long, nodeId: Long)
+    private external fun nativeOnRowDismissed(handle: Long, host: Long, nodeId: Long, position: Int)
+    private external fun nativeOnRowMoved(handle: Long, host: Long, nodeId: Long, from: Int, to: Int)
+    private external fun nativeOnNativeEvent(handle: Long, host: Long, nodeId: Long, value: String)
+    private external fun nativeOnRangeChanged(handle: Long, host: Long, nodeId: Long, low: Float, high: Float)
 
     private external fun nativeOnTextChanged(handle: Long, host: Long, nodeId: Long, text: String)
 

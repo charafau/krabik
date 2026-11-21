@@ -272,6 +272,7 @@ class KrabikHostController(
         hidden: Boolean,
         actionLabels: Array<String>,
         actionIcons: Array<String>,
+        menuMask: Long,
     ) {
         toolbar.title = title
         toolbar.subtitle = subtitle.ifEmpty { null }
@@ -280,6 +281,12 @@ class KrabikHostController(
         toolbar.menu.clear()
         for (index in actionLabels.indices) {
             val item = toolbar.menu.add(0, ACTION_ID_BASE + index, index, actionLabels[index])
+            // A line of the "more" menu: the toolbar shows its three dots
+            // while it has any, and reports a pick like any other action.
+            if (index < 64 && menuMask and (1L shl index) != 0L) {
+                item.setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+                continue
+            }
             item.setShowAsAction(
                 MenuItem.SHOW_AS_ACTION_ALWAYS or MenuItem.SHOW_AS_ACTION_WITH_TEXT,
             )

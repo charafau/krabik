@@ -52,7 +52,23 @@ final class KrabikHostController: UIViewController {
         if previous?.userInterfaceStyle != traitCollection.userInterfaceStyle, session != 0 {
             krabik_ios_set_color_scheme(session, traitCollection.userInterfaceStyle == .dark)
         }
+        if previous?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+            applyTextScale()
+        }
     }
+
+    /// Rust sets fonts by point size, which do not follow the text size the
+    /// user chose in Settings. Rust is told the factor and scales its texts.
+    private func applyTextScale() {
+        guard session != 0 else { return }
+        let scale = UIFontMetrics.default.scaledValue(for: 100, compatibleWith: traitCollection) / 100
+        guard scale != textScale else { return }
+        textScale = scale
+        krabik_ios_set_text_scale(session, Double(scale))
+    }
+
+    /// The factor Rust was told last.
+    private var textScale: CGFloat = 1
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -72,6 +88,7 @@ final class KrabikHostController: UIViewController {
             Self.languageTag()
         )
         mainHost.bindMain(session: session)
+        applyTextScale()
         mainHost.frame = view.bounds
         mainHost.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
@@ -210,7 +227,8 @@ final class KrabikHostController: UIViewController {
         backTitle: String,
         hidden: Bool,
         actionLabels: [String],
-        actionIcons: [String]
+        actionIcons: [String],
+        menuMask: UInt64
     ) {
         guard let top = navigation.viewControllers.last else { return }
 
@@ -246,8 +264,18 @@ final class KrabikHostController: UIViewController {
         }
 
         var items: [UIBarButtonItem] = []
+        // The lines of the "more" menu; a pick is reported like a tap on
+        // any other action, by its index.
+        var menuLines: [UIAction] = []
         for index in actionLabels.indices {
             let label = actionLabels[index]
+            if index < 64, menuMask & (UInt64(1) << UInt64(index)) != 0 {
+                let session = self.session
+                menuLines.append(UIAction(title: label) { _ in
+                    krabik_ios_on_toolbar_action(session, UInt64(index))
+                })
+                continue
+            }
             let iconName = actionIcons.indices.contains(index) ? actionIcons[index] : ""
             if iconName.isEmpty {
                 let item = UIBarButtonItem(
@@ -269,6 +297,15 @@ final class KrabikHostController: UIViewController {
                 button.addTarget(self, action: #selector(toolbarTapped(_:)), for: .touchUpInside)
                 items.append(UIBarButtonItem(customView: button))
             }
+        }
+        if !menuLines.isEmpty {
+            let more = UIBarButtonItem(
+                image: UIImage(systemName: "ellipsis.circle"),
+                menu: UIMenu(children: menuLines)
+            )
+            more.accessibilityLabel = "More"
+            // The first item is the one at the trailing edge.
+            items.insert(more, at: 0)
         }
         top.navigationItem.rightBarButtonItems = items
         // An app without a navigation stack shows its bar on the root.

@@ -168,7 +168,8 @@ by the platform.
 | Animation | controllers, tickers, implicit widgets | `Animated`, Reanimated | implicit only: `.animate(ms)`, enter/exit |
 | Theme | `Theme.of(context)` | your choice | `Color::adaptive(light, dark)`; no theme object |
 | Accessibility | semantics tree | accessibility props on native views | native views' own, plus `accessibility_label` |
-| Hot reload | yes | Fast Refresh | on emulator and simulator, for `view` and `update` code ([how](../design/hot-reload.md)) |
+| Create and run a project | `flutter create`, `flutter run` | the community CLI's `init`, `run-android`, `run-ios` | `krabik create --with-dsl`, `krabik run` |
+| Hot reload | yes | Fast Refresh | `krabik watch`: on emulator and simulator, for `view` and `update` code ([how](../design/hot-reload.md)) |
 | Tests without a device | widget tests, goldens | Jest, component tests | Rust tests on ops with a fake platform; no goldens |
 | What ships | AOT snapshot + Flutter engine | JS bytecode + Hermes + native code | one native library with your app and the framework |
 

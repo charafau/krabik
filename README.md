@@ -12,7 +12,8 @@ This repository is a Cargo workspace with the krabik toolchain and libraries:
 
 | Package | Description |
 | --- | --- |
-| [`packages/krabik-cli`](packages/krabik-cli/) | The `krabik` CLI: scaffold, build, run, and watch Android and iOS apps with a shared Rust core and UniFFI bindings. |
+| [`packages/krabik-cli`](packages/krabik-cli/) | The `krabik` CLI: scaffold, build, run, and watch Android and iOS apps. A project is either a shared Rust core with UniFFI bindings under a UI you write per platform, or a krabik-ui-dsl app. |
+| [`packages/krabik-ui-dsl`](packages/krabik-ui-dsl/) | A UI framework: the whole app is written in Rust and drawn with native Android and iOS widgets, with hot reload during development. |
 | [`packages/krabik-ui-android`](packages/krabik-ui-android/) | Declarative Android view bindings for Rust, created through direct JNI. |
 
 ## Quick start
@@ -26,8 +27,21 @@ cd my-app
 krabik run             # build, install and launch the app
 ```
 
+That project has a Rust core and a Kotlin and a Swift UI you write yourself. To
+write the UI in Rust as well, create a [krabik-ui-dsl](packages/krabik-ui-dsl/)
+app:
+
+```sh
+krabik create my-app --with-dsl
+cd my-app
+krabik run             # build, install and launch the app
+krabik watch           # put every change into the running app, state kept
+```
+
 See [`packages/krabik-cli/README.md`](packages/krabik-cli/README.md) for the full
-command reference and platform requirements.
+command reference and platform requirements, and the
+[krabik-ui-dsl tutorial](packages/krabik-ui-dsl/docs/tutorial/README.md) for
+writing such an app.
 
 ## Using the UI library
 
@@ -61,4 +75,11 @@ Build it with:
 
 ```sh
 cargo check --manifest-path packages/krabik-ui-android/example/rust/Cargo.toml
+```
+
+`packages/krabik-ui-dsl` is not part of the workspace either; it has its own
+workspace and toolchain file. Test it with:
+
+```sh
+cargo test --manifest-path packages/krabik-ui-dsl/rust/Cargo.toml --workspace --all-features
 ```

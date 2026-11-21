@@ -254,7 +254,8 @@ pub(crate) fn controller_set_toolbar(
             backTitle: &*back_title,
             hidden: hidden,
             actionLabels: &*labels,
-            actionIcons: &*icons
+            actionIcons: &*icons,
+            menuMask: crate::scaffold::menu_mask(actions)
         ]
     };
 }

@@ -74,14 +74,74 @@ impl<M> From<Row<M>> for Element<M> {
     }
 }
 
+/// A row that continues on a new line when its children do not fit.
+///
+/// ```ignore
+/// Wrap::new()
+///     .spacing(8)
+///     .run_spacing(8)
+///     .child(Chip::new("Rust"))
+///     .child(Chip::new("Kotlin"))
+///     .child(Chip::new("Swift"))
+/// ```
+///
+/// It needs a width to wrap at, which it has wherever a column would stretch
+/// it. Each line is as tall as its tallest child.
+pub struct Wrap<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>);
+
+impl<M> Wrap<M> {
+    /// Creates an empty wrapping row.
+    pub fn new() -> Self {
+        let mut element = RawElement::container(ElementKind::Row);
+        element.style.wrap = true;
+        // A child keeps its own height in a line that is taller.
+        element.style.align_items = crate::style::Align::Start;
+        Self(element, PhantomData)
+    }
+
+    /// Sets the space between children on a line, and between lines unless
+    /// [`run_spacing`](Self::run_spacing) says otherwise.
+    pub fn spacing(mut self, value: impl IntoPoints) -> Self {
+        self.0.style.gap = value.into_points();
+        self
+    }
+
+    /// Sets the space between lines.
+    pub fn run_spacing(mut self, value: impl IntoPoints) -> Self {
+        self.0.style.run_gap = Some(value.into_points());
+        self
+    }
+
+    /// Appends a child.
+    pub fn child(mut self, child: impl Into<Element<M>>) -> Self {
+        self.0.children.push(child.into().into_raw());
+        self
+    }
+}
+
+impl<M> Default for Wrap<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<M> From<Wrap<M>> for Element<M> {
+    fn from(component: Wrap<M>) -> Self {
+        Element::from_raw(component.0)
+    }
+}
+
 /// A container whose children lie on top of each other, the first at the
 /// back.
 ///
 /// The stack is as large as its largest child, unless it is given a size.
 /// Every child fills it by default; `.align_items(Align::Center)` (or
 /// `Start`, `End`) keeps the children at their own size and places them
-/// there on both axes. To put one child in a corner, let it fill the stack
-/// and arrange its content with rows, columns and spacers:
+/// there on both axes. A child with
+/// [`.positioned(Inset)`](Container::positioned) is held at distances from the
+/// stack's edges instead, and does not count for the stack's size. Another
+/// way to put a child in a corner is to let it fill the stack and arrange
+/// its content with rows, columns and spacers:
 ///
 /// ```ignore
 /// Stack::new()
@@ -149,6 +209,20 @@ impl<M> From<Spacer<M>> for Element<M> {
 pub struct ContainerProps {
     /// Sends its message when the container is tapped.
     pub on_tap: Handler<()>,
+    /// Sends its message when the container is pressed and held.
+    pub on_long_press: Handler<()>,
+    /// The menu the container opens, on a tap or on a long press.
+    pub menu: Option<crate::widgets::MenuProps>,
+}
+
+impl ContainerProps {
+    pub(crate) fn map_messages(&mut self, wrap: &crate::message::MessageMap) {
+        self.on_tap.map(wrap);
+        self.on_long_press.map(wrap);
+        if let Some(menu) = &mut self.menu {
+            menu.map_messages(wrap);
+        }
+    }
 }
 
 /// A box around its content that can be tapped.
@@ -195,6 +269,26 @@ impl<M> Container<M> {
         }
         self
     }
+
+    /// Sets the erased tap handler; for widgets that are built from a
+    /// container.
+    pub(crate) fn handler(mut self, on_tap: Handler<()>) -> Self {
+        if let ElementKind::Container(props) = &mut self.0.kind {
+            props.on_tap = on_tap;
+        }
+        self
+    }
+
+    /// Sends `message` when the container is pressed and held.
+    pub fn on_long_press(mut self, message: M) -> Self
+    where
+        M: Clone + Send + Sync + 'static,
+    {
+        if let ElementKind::Container(props) = &mut self.0.kind {
+            props.on_long_press = Handler::new(move |()| message.clone());
+        }
+        self
+    }
 }
 
 impl<M> Default for Container<M> {
@@ -213,4 +307,5 @@ style_builder!(Container);
 style_builder!(Stack);
 style_builder!(Column);
 style_builder!(Row);
+style_builder!(Wrap);
 style_builder!(Spacer);

@@ -378,6 +378,154 @@ final class ShowcaseUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Toolbar taps: 1"].waitForExistence(timeout: 5))
         app.buttons["Save"].tap()
         XCTAssertTrue(app.staticTexts["Toolbar taps: 2"].waitForExistence(timeout: 5))
+        // The lines of the "more" menu are behind one button on the bar.
+        app.buttons["More"].tap()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Help"].exists)
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts["Toolbar taps: 3"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Last action: Settings"].exists)
+        backToCatalog()
+    }
+
+    /// Swiping a row of a recycled list away, dragging one elsewhere, and
+    /// the header that stays at the top.
+    func testListGestures() throws {
+        func shown(_ text: String) {
+            XCTAssertTrue(app.staticTexts[text].waitForExistence(timeout: 5), "\(text) is shown")
+        }
+
+        open("List gestures")
+        shown("32 rows · Fruit 1, Fruit 2, Fruit 3")
+        let listTop = app.staticTexts["Fruit"].frame.minY
+
+        app.staticTexts["Fruit 2"].swipeLeft()
+        shown("31 rows · Fruit 1, Fruit 3, Fruit 4")
+        XCTAssertFalse(app.staticTexts["Fruit 2"].exists)
+        // The application keeps a header: the row comes back.
+        app.staticTexts["Fruit"].swipeLeft()
+        sleep(1)
+        shown("31 rows · Fruit 1, Fruit 3, Fruit 4")
+        XCTAssertTrue(app.staticTexts["Fruit"].exists)
+
+        // A long press picks a row up; it is dropped two rows further down.
+        app.staticTexts["Fruit 1"].press(forDuration: 1.0, thenDragTo: app.staticTexts["Fruit 4"])
+        shown("31 rows · Fruit 3, Fruit 4, Fruit 1")
+        XCTAssertGreaterThan(
+            app.staticTexts["Fruit 1"].frame.minY, app.staticTexts["Fruit 4"].frame.minY
+        )
+        capture("list-reordered")
+
+        // Scrolled, the section's header stays at the top of the list.
+        app.swipeUp()
+        sleep(1)
+        capture("list-sticky")
+        let pinned = ["Fruit", "Vegetables", "Grains", "Spices"].contains { name in
+            app.staticTexts.matching(identifier: name).allElementsBoundByIndex.contains {
+                abs($0.frame.minY - listTop) < 20
+            }
+        }
+        XCTAssertTrue(pinned, "a header is pinned at the top of the list")
+        backToCatalog()
+    }
+
+    /// A view the application registers, and the framework's web view.
+    func testNativeViewsAreLaidOutAndReportBack() throws {
+        func shown(_ text: String, timeout: TimeInterval = 5) {
+            XCTAssertTrue(app.staticTexts[text].waitForExistence(timeout: timeout), "\(text) is shown")
+        }
+
+        open("Native views")
+        shown("Stars: 2")
+        // Five stars from the application's Swift code, in the frame Rust gave.
+        let four = app.buttons["4 stars"]
+        XCTAssertTrue(four.exists)
+        XCTAssertEqual(app.buttons["5 stars"].frame.maxX - app.buttons["1 stars"].frame.minX, 240, accuracy: 1)
+        XCTAssertEqual(four.frame.height, 56, accuracy: 1)
+        // What the view reports reaches the application.
+        four.tap()
+        shown("Stars: 4")
+        // A new property reaches the same view.
+        tapButton("One star")
+        shown("Stars: 1")
+
+        // The web view loaded its page and said so.
+        shown("Pages loaded: 1", timeout: 15)
+        XCTAssertTrue(app.webViews.staticTexts["Hello from a web view"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.otherElements["Missing view"].exists)
+        capture("native-views")
+        backToCatalog()
+    }
+
+    /// The platform's menu on buttons and containers, and the choices built
+    /// on it.
+    func testMenusAndChoices() throws {
+        func shown(_ text: String) {
+            XCTAssertTrue(app.staticTexts[text].waitForExistence(timeout: 5), "\(text) is shown")
+        }
+        func pick(_ line: String) {
+            let item = app.buttons[line]
+            XCTAssertTrue(item.waitForExistence(timeout: 5), "the menu has \(line)")
+            item.tap()
+        }
+
+        open("Menus & choices")
+        shown("Sorted by Name")
+        app.buttons["Sort menu"].tap()
+        capture("menu-open")
+        pick("Date")
+        shown("Sorted by Date")
+
+        app.buttons["More actions"].tap()
+        pick("Delete")
+        shown("Last action: Delete")
+
+        // A long press shows a label that explains an icon.
+        app.buttons["Find notes"].press(forDuration: 1.0)
+        // The label is added to the window, where a UI test does not find
+        // it; the screenshot is the evidence. It goes away on its own.
+        capture("tooltip")
+        sleep(3)
+        shown("Last action: Delete")
+
+        // A context menu opens on a long press and leaves the tap alone.
+        let target = app.buttons["Context target"]
+        target.tap()
+        shown("Last action: Opened")
+        target.press(forDuration: 1.0)
+        capture("context-menu")
+        pick("Rename")
+        shown("Last action: Rename")
+
+        shown("Country: none")
+        app.buttons["Country dropdown"].tap()
+        pick("Japan")
+        shown("Country: Japan")
+        capture("dropdown-picked")
+
+        // A touch on the track moves the nearer thumb, to a multiple of ten.
+        let price = app.descendants(matching: .any)["Price range"]
+        XCTAssertTrue(price.exists)
+        XCTAssertEqual(price.frame.height, 48, accuracy: 0.5)
+        shown("Price: 20 to 80")
+        price.coordinate(withNormalizedOffset: CGVector(dx: 0.33, dy: 0.5)).tap()
+        shown("Price: 30 to 80")
+        price.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        shown("Price: 30 to 100")
+        capture("range-slider")
+
+        // A text that can be copied offers "Copy" when it is held.
+        app.descendants(matching: .any)["Copyable text"].press(forDuration: 1.0)
+        XCTAssertTrue(app.buttons["Copy"].waitForExistence(timeout: 5))
+        app.buttons["Copy"].tap()
+
+        let week = app.buttons["Week"]
+        XCTAssertTrue(week.exists)
+        // The three segments share the width.
+        XCTAssertEqual(week.frame.width, app.buttons["Month"].frame.width, accuracy: 0.5)
+        week.tap()
+        shown("Range: Week")
+        capture("segmented")
         backToCatalog()
     }
 
@@ -477,6 +625,49 @@ final class ShowcaseUITests: XCTestCase {
         backToCatalog()
     }
 
+    /// A text's frame is the size its style needs: a line height applies to a
+    /// single line and to every line of a paragraph.
+    func testTextStylesAreMeasuredForWhatIsDrawn() throws {
+        open("Text")
+        XCTAssertTrue(app.staticTexts["Thin 100"].waitForExistence(timeout: 10))
+        for label in ["Medium 500", "Black 900", "Italic", "Bold italic", "Underlined",
+                      "Struck through", "LETTER SPACING 2"] {
+            XCTAssertTrue(app.staticTexts[label].exists, "\(label) is shown")
+        }
+
+        let single = app.staticTexts["One line, 40 high"]
+        XCTAssertTrue(single.exists)
+        XCTAssertEqual(single.frame.height, 40, accuracy: 1)
+
+        // The plain 16 point texts show what one line needs without a line height.
+        let plain = app.staticTexts["Italic"].frame.height
+        XCTAssertLessThan(plain, 28)
+
+        let paragraph = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Line height 28:")
+        ).firstMatch
+        XCTAssertTrue(paragraph.exists)
+        let lines = (paragraph.frame.height / 28).rounded()
+        XCTAssertGreaterThanOrEqual(lines, 2, "the paragraph wraps")
+        XCTAssertEqual(paragraph.frame.height, lines * 28, accuracy: 1)
+
+        // A rich text is one label, taller than a plain line of its base
+        // size because one of its parts is larger.
+        let rich = app.staticTexts["Rich text: bold, italic, teal, underlined and large."]
+        XCTAssertTrue(rich.exists)
+        XCTAssertGreaterThan(rich.frame.height, plain)
+        XCTAssertTrue(app.staticTexts["Was 19.99 now 12.50"].exists)
+
+        // A text in a font file, and one whose file does not exist.
+        XCTAssertTrue(app.staticTexts["A font from a file"].exists)
+        XCTAssertTrue(app.staticTexts["A missing font file falls back"].exists)
+        XCTAssertEqual(app.staticTexts["A missing font file falls back"].frame.height, plain, accuracy: 1)
+
+        app.swipeUp()
+        capture("text-styles")
+        backToCatalog()
+    }
+
     func testAContainerReactsToTaps() throws {
         open("Container")
         XCTAssertTrue(app.staticTexts["Nothing tapped yet."].waitForExistence(timeout: 5))
@@ -536,6 +727,148 @@ final class ShowcaseUITests: XCTestCase {
         open("Windowed list")
         XCTAssertTrue(app.staticTexts["Windowed row 1"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Windowed row 200"].exists)
+        backToCatalog()
+    }
+
+    /// The layout additions (wrapping, positioned children, long presses,
+    /// icons) and the widgets that are assembled from containers.
+    func testLayoutAdditionsAndComposedWidgets() throws {
+        func shown(_ text: String) {
+            XCTAssertTrue(app.staticTexts[text].waitForExistence(timeout: 5), "\(text) is shown")
+        }
+        func reveal(_ element: XCUIElement) {
+            var attempts = 0
+            while !(element.exists && element.isHittable) && attempts < 8 {
+                app.swipeUp()
+                attempts += 1
+            }
+            XCTAssertTrue(element.exists, "\(element) can be reached")
+        }
+
+        open("Wrap & position")
+        // The six chips do not fit on one line, so the row wraps.
+        let rust = app.buttons["Language Rust"]
+        XCTAssertTrue(rust.waitForExistence(timeout: 10))
+        let kotlin = app.buttons["Language Kotlin"]
+        let typescript = app.buttons["Language TypeScript"]
+        XCTAssertGreaterThanOrEqual(typescript.frame.minY, rust.frame.maxY)
+        XCTAssertLessThan(typescript.frame.minX, kotlin.frame.minX)
+        XCTAssertEqual(rust.frame.height, 32, accuracy: 0.5)
+        kotlin.tap()
+        shown("Picked: Rust, Kotlin")
+        XCTAssertEqual(app.otherElements["Positioned stack"].frame.size.width, 220, accuracy: 0.5)
+        // A maximum width wraps the text early.
+        let narrow = app.otherElements["Narrow text"]
+        XCTAssertEqual(narrow.frame.width, 160, accuracy: 1)
+        XCTAssertGreaterThan(narrow.frame.height, 30)
+        capture("layout-top")
+
+        let target = app.buttons["Press target"]
+        reveal(target)
+        XCTAssertTrue(app.images["Add icon"].exists)
+        // The space is shared out around the three boxes, or evenly.
+        XCTAssertTrue(app.otherElements["Space around"].exists)
+        target.tap()
+        shown("Taps: 1 · Holds: 0")
+        target.press(forDuration: 1.0)
+        shown("Taps: 1 · Holds: 1")
+        capture("layout-bottom")
+        backToCatalog()
+
+        open("Display pieces")
+        shown("A card")
+        shown("Unread: 3")
+        // The badge shows the count, and lies partly outside its icon.
+        let icon = app.images["Unread icon"]
+        let badge = app.staticTexts["3"]
+        XCTAssertTrue(badge.exists)
+        XCTAssertGreaterThan(badge.frame.maxX, icon.frame.maxX)
+        XCTAssertLessThan(badge.frame.minY, icon.frame.minY + 4)
+        // An avatar is a circle of twice its radius.
+        tapButton("Add unread")
+        shown("Unread: 4")
+        shown("4")
+        app.staticTexts["Wi-Fi"].tap()
+        shown("Tile taps: 1")
+        // The switch inside the tile keeps its own taps.
+        app.switches["Wi-Fi switch"].tap()
+        shown("Off")
+        shown("Tile taps: 1")
+        capture("pieces-top")
+        let remove = app.buttons["Remove urgent"]
+        reveal(remove)
+        remove.tap()
+        XCTAssertTrue(app.staticTexts["urgent"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["draft"].exists)
+        let share = app.buttons["Share item"]
+        reveal(share)
+        XCTAssertGreaterThanOrEqual(share.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(share.frame.height, 44)
+        share.tap()
+        shown("Button taps: 1")
+        XCTAssertTrue(app.buttons["Filled"].exists)
+        capture("pieces-bottom")
+        backToCatalog()
+
+        open("Composed inputs")
+        let advanced = app.buttons["Advanced"]
+        XCTAssertTrue(advanced.waitForExistence(timeout: 10))
+        advanced.tap()
+        shown("Hidden until expanded")
+        capture("inputs-top")
+        advanced.tap()
+        XCTAssertTrue(app.staticTexts["Hidden until expanded"].waitForNonExistence(timeout: 5))
+        app.buttons["Increase"].tap()
+        shown("Quantity: 3")
+        app.buttons["Decrease"].tap()
+        app.buttons["Decrease"].tap()
+        shown("Quantity: 1")
+        // At the end of the range the minus is dimmed and no longer a button.
+        XCTAssertFalse(app.buttons["Decrease"].exists)
+        XCTAssertTrue(app.otherElements["Decrease"].exists)
+        XCTAssertTrue(app.buttons["Increase"].exists)
+
+        let search = app.textFields["Search notes"]
+        XCTAssertTrue(search.exists)
+        search.tap()
+        search.typeText("tea")
+        shown("Query: \"tea\" · searched: \"\"")
+        app.buttons["Clear"].tap()
+        shown("Query: \"\" · searched: \"\"")
+
+        let city = app.textFields["City"]
+        reveal(city)
+        city.tap()
+        city.typeText("to")
+        shown("Kyoto")
+        capture("inputs-suggestions")
+        app.staticTexts["Toronto"].tap()
+        shown("City: Toronto")
+        XCTAssertFalse(app.staticTexts["Kyoto"].exists)
+
+        let next = app.buttons["To payment"]
+        reveal(next)
+        next.tap()
+        shown("How do you pay?")
+        XCTAssertFalse(app.staticTexts["Where should it go?"].exists)
+        capture("inputs-stepper")
+        backToCatalog()
+
+        open("Grid")
+        shown("A list with three equally wide items on a line.")
+        let one = app.otherElements["Tile 1"]
+        XCTAssertTrue(one.waitForExistence(timeout: 5))
+        let two = app.otherElements["Tile 2"].frame
+        let three = app.otherElements["Tile 3"].frame
+        let four = app.otherElements["Tile 4"].frame
+        XCTAssertEqual(one.frame.minY, two.minY, accuracy: 0.5)
+        XCTAssertEqual(one.frame.width, two.width, accuracy: 0.5)
+        XCTAssertEqual(two.width, three.width, accuracy: 0.5)
+        XCTAssertEqual(two.minX - one.frame.maxX, 8, accuracy: 0.5)
+        XCTAssertEqual(four.minX, one.frame.minX, accuracy: 0.5)
+        XCTAssertEqual(four.minY - one.frame.maxY, 8, accuracy: 0.5)
+        app.swipeUp()
+        capture("grid")
         backToCatalog()
     }
 

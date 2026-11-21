@@ -13,6 +13,8 @@ use crate::widgets::Widget;
 pub(crate) enum NodeEvent {
     /// A button was pressed.
     Click,
+    /// A container was pressed and held.
+    LongPress,
     /// The text of an input changed.
     Text(String),
     /// An input was submitted from the keyboard.
@@ -24,27 +26,46 @@ pub(crate) enum NodeEvent {
     Toggle(bool),
     /// A slider moved to a raw, unsnapped value.
     Slider(f32),
+    /// A thumb of a range slider moved; both places along the track, each
+    /// from 0 to 1.
+    Range(f32, f32),
     /// A radio group, tab bar or pager selected an index.
     Select(usize),
     /// A picker chose a value, before clamping to the widget's range.
     Picker(DatePickerValue),
+    /// A view of the application's own sent a string.
+    Native(String),
     /// A scroll container moved to an offset in logical points.
     Scroll(f32),
     /// A scroll container or a list was pulled down to refresh.
     Refresh,
+    /// A row of a list was swiped away.
+    Dismiss(usize),
+    /// A row of a list was dragged from one index to another.
+    Move(usize, usize),
 }
 
 /// What the application wants to hear about from one widget.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Actions {
     pub click: Handler<()>,
+    pub long_press: Handler<()>,
     pub text: Handler<String>,
+    pub native: Handler<String>,
     pub submit: Handler<()>,
     pub focus: Handler<bool>,
     pub toggle: Handler<bool>,
     pub select: Handler<usize>,
+    /// The number of choices, where an index past the end must be dropped:
+    /// a menu that was open while the application replaced it.
+    pub select_count: Option<usize>,
     pub refresh: Handler<()>,
+    pub dismiss: Handler<usize>,
+    pub reorder: Handler<(usize, usize)>,
+    /// The number of rows of a list, past which an index is dropped.
+    pub row_count: usize,
     pub slider: Option<SliderAction>,
+    pub range: Option<crate::ui::RangeSliderProps>,
     pub picker: Option<PickerAction>,
 }
 
@@ -93,6 +114,10 @@ impl Actions {
                         step: props.step,
                     });
                 }
+                Widget::RangeSlider(props) => {
+                    actions.range = props.on_change.is_set().then(|| props.clone());
+                }
+                Widget::NativeView(props) => actions.native = props.on_event.clone(),
                 Widget::TextField(props) => {
                     actions.text = props.on_change.clone();
                     actions.submit = props.on_submit.clone();
@@ -101,9 +126,23 @@ impl Actions {
                 Widget::Text(_) | Widget::Progress(_) | Widget::Spinner(_) | Widget::Image(_) => {}
             },
             NodeKind::Pager(props) => actions.select = props.on_select.clone(),
-            NodeKind::Container(props) => actions.click = props.on_tap.clone(),
+            NodeKind::Container(props) => {
+                actions.click = props.on_tap.clone();
+                actions.long_press = props.on_long_press.clone();
+                if let Some(menu) = &props.menu {
+                    actions.select = menu.on_select.clone();
+                    actions.select_count = Some(menu.items.len());
+                }
+            }
             NodeKind::Scroll(props) => actions.refresh = props.refresh.on_refresh.clone(),
-            NodeKind::Recycler(props) => actions.refresh = props.refresh.on_refresh.clone(),
+            NodeKind::Recycler(props) => {
+                actions.refresh = props.refresh.on_refresh.clone();
+                actions.dismiss = props.on_dismiss.clone();
+                actions.reorder = props.on_reorder.clone();
+                if actions.dismiss.is_set() || actions.reorder.is_set() {
+                    actions.row_count = props.item_count;
+                }
+            }
             NodeKind::Root
             | NodeKind::Column
             | NodeKind::Row
@@ -117,16 +156,33 @@ impl Actions {
     pub(crate) fn message(&self, event: &NodeEvent) -> Option<Message> {
         match event {
             NodeEvent::Click => self.click.message(()),
+            NodeEvent::LongPress => self.long_press.message(()),
             NodeEvent::Text(value) => self.text.message(value.clone()),
             NodeEvent::Submit => self.submit.message(()),
+            NodeEvent::Native(value) => self.native.message(value.clone()),
             NodeEvent::Focus { focused, .. } => self.focus.message(*focused),
             NodeEvent::Toggle(checked) => self.toggle.message(*checked),
-            NodeEvent::Select(index) => self.select.message(*index),
+            NodeEvent::Select(index) => {
+                if self.select_count.is_some_and(|count| *index >= count) {
+                    return None;
+                }
+                self.select.message(*index)
+            }
             NodeEvent::Refresh => self.refresh.message(()),
+            // The list may have changed while the row was under the finger.
+            NodeEvent::Dismiss(index) if *index < self.row_count => self.dismiss.message(*index),
+            NodeEvent::Move(from, to) if *from < self.row_count && *to < self.row_count => {
+                self.reorder.message((*from, *to))
+            }
+            NodeEvent::Dismiss(_) | NodeEvent::Move(..) => None,
             NodeEvent::Slider(value) => self.slider.as_ref().and_then(|slider| {
                 let value = snap_slider_value(*value, slider.min, slider.max, slider.step);
                 slider.on_change.message(value)
             }),
+            NodeEvent::Range(low, high) => self
+                .range
+                .as_ref()
+                .and_then(|range| range.on_change.message(range.values_at(*low, *high))),
             NodeEvent::Picker(value) => self.picker.as_ref().and_then(|picker| {
                 let value = value.clamped(picker.date_range, picker.time_range);
                 picker.on_change.message(value)

@@ -516,6 +516,144 @@ class ShowcaseTest {
             onView(withText("Toolbar taps: 1")).check(matches(isDisplayed()))
             onView(withText("Save")).perform(click())
             onView(withText("Toolbar taps: 2")).check(matches(isDisplayed()))
+            // The lines of the "more" menu are behind the toolbar's three dots.
+            onView(withContentDescription("More options")).perform(click())
+            onView(withText("Settings"))
+                .inRoot(androidx.test.espresso.matcher.RootMatchers.isPlatformPopup())
+                .perform(click())
+            awaitText("Toolbar taps: 3")
+            awaitText("Last action: Settings")
+            tapBack()
+        }
+    }
+
+    /** Swiping a row of a recycled list away, and a row the application keeps. */
+    @Test
+    fun listRowsCanBeSwipedAway() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openPage("List gestures")
+            awaitText("32 rows · Fruit 1, Fruit 2, Fruit 3")
+            onView(withText("Fruit 2")).perform(swipeLeft())
+            awaitText("31 rows · Fruit 1, Fruit 3, Fruit 4")
+            awaitNoText("Fruit 2")
+            // The application keeps a header: the row comes back.
+            onView(withText("Fruit")).perform(swipeLeft())
+            Thread.sleep(800)
+            awaitText("31 rows · Fruit 1, Fruit 3, Fruit 4")
+            awaitText("Fruit")
+            onView(withText("Reset")).perform(click())
+            awaitText("32 rows · Fruit 1, Fruit 2, Fruit 3")
+            awaitText("Fruit 2")
+            tapBack()
+        }
+    }
+
+    /** A view the application registers, and the framework's web view. */
+    @Test
+    fun nativeViewsAreLaidOutAndReportBack() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            openPage("Native views")
+            awaitText("Stars: 2")
+            fun rating(): android.widget.RatingBar {
+                var found: android.widget.RatingBar? = null
+                scenario.onActivity { activity ->
+                    found = findRustRoot(activity.window.decorView)?.findFirst<android.widget.RatingBar>()
+                }
+                return found ?: throw AssertionError("no rating bar")
+            }
+            // The view shows the property it was told, at the size Rust gave it.
+            val bar = rating()
+            assertTrue(bar.rating == 2f)
+            val host = bar.parent as android.view.View
+            val density = bar.resources.displayMetrics.density
+            assertTrue(kotlin.math.abs(host.width / density - 240f) < 1f)
+            assertTrue(kotlin.math.abs(host.height / density - 56f) < 1f)
+
+            // A new property reaches the same view.
+            onView(withText("One star")).perform(click())
+            awaitText("Stars: 1")
+            assertTrue(rating() === bar && bar.rating == 1f)
+
+            // What the view reports reaches the application.
+            scenario.onActivity { bar.rating = 4f }
+            onView(org.hamcrest.Matchers.instanceOf(android.widget.RatingBar::class.java))
+                .perform(click())
+            awaitText("Stars: 3")
+
+            // The web view loaded its page and said so.
+            awaitText("Pages loaded: 1", 15000)
+            onView(withContentDescription("Missing view")).check(matches(isDisplayed()))
+            tapBack()
+        }
+    }
+
+    /** The platform's popup menu on buttons and containers, and the choices built on it. */
+    @Test
+    fun menusAndChoicesWork() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val popup = androidx.test.espresso.matcher.RootMatchers.isPlatformPopup()
+            fun pick(line: String) {
+                Thread.sleep(300)
+                onView(withText(line)).inRoot(popup).perform(click())
+            }
+
+            openPage("Menus & choices")
+            awaitText("Sorted by Name")
+            onView(withContentDescription("Sort menu")).perform(click())
+            pick("Date")
+            awaitText("Sorted by Date")
+            // The button shows what the application now says.
+            awaitText("Sort: Date")
+
+            onView(withContentDescription("More actions")).perform(click())
+            pick("Delete")
+            awaitText("Last action: Delete")
+
+            // A context menu opens on a long press and leaves the tap alone.
+            onView(withContentDescription("Context target")).perform(click())
+            awaitText("Last action: Opened")
+            onView(withContentDescription("Context target"))
+                .perform(androidx.test.espresso.action.ViewActions.longClick())
+            pick("Rename")
+            awaitText("Last action: Rename")
+
+            awaitText("Country: none")
+            onView(withContentDescription("Country dropdown")).perform(click())
+            pick("Japan")
+            awaitText("Country: Japan")
+            awaitText("Japan")
+            // The menu marks the current option.
+            onView(withContentDescription("Country dropdown")).perform(click())
+            Thread.sleep(300)
+            onView(withText("Japan")).inRoot(popup).check(matches(isDisplayed()))
+            androidx.test.espresso.Espresso.pressBack()
+
+            // A tap on the track moves the nearer thumb, to a multiple of ten.
+            swipeTo("Price: 20 to 80")
+            fun tapTrackAt(fraction: Float) = androidx.test.espresso.action.GeneralClickAction(
+                androidx.test.espresso.action.Tap.SINGLE,
+                { view ->
+                    val at = IntArray(2)
+                    view.getLocationOnScreen(at)
+                    floatArrayOf(at[0] + view.width * fraction, at[1] + view.height / 2f)
+                },
+                Press.FINGER,
+                0,
+                0,
+            )
+            onView(withContentDescription("Price range")).perform(tapTrackAt(0.33f))
+            awaitText("Price: 30 to 80")
+            onView(withContentDescription("Price range")).perform(tapTrackAt(0.97f))
+            awaitText("Price: 30 to 100")
+
+            swipeTo("Range: Day")
+            onView(withContentDescription("Copyable text"))
+                .check { view, _ -> assertTrue((view as android.widget.TextView).isTextSelectable) }
+            onView(withContentDescription("Week")).perform(click())
+            awaitText("Range: Week")
+            // Tapping the picked segment again changes nothing.
+            onView(withContentDescription("Week")).perform(click())
+            awaitText("Range: Week")
             tapBack()
         }
     }
@@ -802,5 +940,217 @@ class ShowcaseTest {
             }
         }
         awaitText("Filters")
+    }
+
+    /**
+     * Weights, italics, decorations, letter spacing and line heights reach the
+     * native text views, and a text's frame is the size its style needs.
+     */
+    @Test
+    fun textStylesAreMeasuredForWhatIsDrawn() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            openPage("Text")
+            awaitText("Thin 100")
+
+            fun text(content: String): android.widget.TextView {
+                var found: android.widget.TextView? = null
+                scenario.onActivity { activity ->
+                    found = findRustRoot(activity.window.decorView)
+                        ?.findFirst<android.widget.TextView> { it.text.toString() == content }
+                }
+                return found ?: throw AssertionError("no text \"$content\"")
+            }
+            fun dp(view: android.view.View, pixels: Int): Float =
+                pixels / view.resources.displayMetrics.density
+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                assertTrue(text("Thin 100").typeface.weight == 100)
+                assertTrue(text("Medium 500").typeface.weight == 500)
+                assertTrue(text("Black 900").typeface.weight == 900)
+            }
+            assertTrue(text("Italic").typeface.isItalic)
+            val boldItalic = text("Bold italic").typeface
+            assertTrue(boldItalic.isItalic && boldItalic.isBold)
+
+            val lines = android.graphics.Paint.UNDERLINE_TEXT_FLAG or
+                android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
+            assertTrue(
+                text("Underlined").paintFlags and lines == android.graphics.Paint.UNDERLINE_TEXT_FLAG
+            )
+            assertTrue(
+                text("Struck through").paintFlags and lines ==
+                    android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
+            )
+            // a text without a decoration has neither line
+            assertTrue(text("Italic").paintFlags and lines == 0)
+
+            assertTrue(text("LETTER SPACING 2").letterSpacing > 0f)
+            assertTrue(text("Italic").letterSpacing == 0f)
+
+            // One line is as tall as the line height asks, not as the font is.
+            val single = text("One line, 40 high")
+            assertTrue(single.layout.lineCount == 1)
+            assertTrue(
+                "one line is 40dp tall, was ${dp(single, single.height)}",
+                kotlin.math.abs(dp(single, single.height) - 40f) < 1f
+            )
+
+            // Every line of a paragraph has the line height, and the frame
+            // was measured for exactly those lines: nothing is cut off.
+            val paragraph = android.widget.TextView::class.java.cast(
+                text(
+                    "Line height 28: this paragraph wraps onto several lines, and every one " +
+                        "of them is twenty-eight points tall."
+                )
+            )!!
+            val count = paragraph.layout.lineCount
+            assertTrue("the paragraph wraps", count >= 2)
+            assertTrue(
+                "$count lines of 28dp, was ${dp(paragraph, paragraph.height)}",
+                kotlin.math.abs(dp(paragraph, paragraph.height) - 28f * count) < 1.5f
+            )
+            assertTrue(paragraph.layout.height <= paragraph.height)
+
+            // A font file replaces the system font; a missing one does not.
+            val system = text("Italic").typeface
+            assertTrue(text("A font from a file").typeface != android.graphics.Typeface.DEFAULT)
+            assertTrue(!text("A font from a file").typeface.isItalic && system.isItalic)
+            assertTrue(
+                text("A missing font file falls back").typeface == android.graphics.Typeface.DEFAULT
+            )
+
+            // A rich text is one view; its parts are spans in the string.
+            val rich = text("Rich text: bold, italic, teal, underlined and large.")
+            val spanned = rich.text as android.text.Spanned
+            fun <T> spans(word: String, kind: Class<T>): Array<T> {
+                val start = spanned.toString().indexOf(word)
+                return spanned.getSpans(start, start + word.length, kind)
+            }
+            assertTrue(spans("underlined", android.text.style.UnderlineSpan::class.java).size == 1)
+            assertTrue(spans("bold", android.text.style.UnderlineSpan::class.java).isEmpty())
+            val large = spans("large", android.text.style.AbsoluteSizeSpan::class.java).single()
+            assertTrue(kotlin.math.abs(dp(rich, large.size) - 24f) < 1f)
+            // The largest part decides how tall its line is: nothing is cut off.
+            assertTrue(rich.layout.height <= rich.height)
+            assertTrue(dp(rich, rich.height) > 24f)
+        }
+    }
+
+    /**
+     * The layout additions (wrapping, positioned children, long presses,
+     * icons) and the widgets that are assembled from containers.
+     */
+    @Test
+    fun layoutAdditionsAndComposedWidgetsWork() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            fun <T : android.view.View> find(kind: Class<T>, what: String, test: (T) -> Boolean): T {
+                var found: T? = null
+                scenario.onActivity { activity ->
+                    found = findRustRoot(activity.window.decorView)?.findFirst(kind, test)
+                }
+                return found ?: throw AssertionError("no $what")
+            }
+            fun text(content: String) = find(android.widget.TextView::class.java, "text \"$content\"") {
+                it.text.toString() == content
+            }
+            fun described(label: String) = find(android.view.View::class.java, "view \"$label\"") {
+                it.contentDescription?.toString() == label
+            }
+            fun onScreen(view: android.view.View): android.graphics.Rect {
+                val at = IntArray(2)
+                view.getLocationOnScreen(at)
+                return android.graphics.Rect(at[0], at[1], at[0] + view.width, at[1] + view.height)
+            }
+            fun dp(view: android.view.View, pixels: Int): Float =
+                pixels / view.resources.displayMetrics.density
+
+            openPage("Wrap & position")
+            // The six chips do not fit on one line, so the row wraps.
+            val first = onScreen(text("Rust"))
+            val wrapped = onScreen(text("TypeScript"))
+            assertTrue("the last chips are on a second line", wrapped.top > first.bottom)
+            assertTrue("the second line starts at the left edge", wrapped.left < onScreen(text("Kotlin")).left)
+            onView(withText("Kotlin")).perform(click())
+            awaitText("Picked: Rust, Kotlin")
+
+            // A positioned child is held at the stack's edges.
+            val stack = onScreen(described("Positioned stack"))
+            val corner = onScreen(text("NEW"))
+            assertTrue(kotlin.math.abs(dp(text("NEW"), stack.right - corner.right) - 8f) < 1f)
+            assertTrue(kotlin.math.abs(dp(text("NEW"), corner.top - stack.top) - 8f) < 1f)
+            val bottom = onScreen(text("Held at the bottom edge"))
+            assertTrue(bottom.bottom == stack.bottom && bottom.left == stack.left && bottom.right == stack.right)
+
+            // A maximum width wraps the text early.
+            val narrow = described("Narrow text") as android.widget.TextView
+            assertTrue(kotlin.math.abs(dp(narrow, narrow.width) - 160f) < 1f)
+            assertTrue(narrow.layout.lineCount > 1)
+
+            swipeTo("Tap me, or press and hold")
+            // An icon the application has is drawn; a name it lacks is not.
+            assertTrue((described("Add icon") as android.widget.ImageView).drawable != null)
+            assertTrue((described("Missing icon") as android.widget.ImageView).drawable == null)
+            onView(withText("Tap me, or press and hold")).perform(click())
+            awaitText("Taps: 1 · Holds: 0")
+            onView(withText("Tap me, or press and hold"))
+                .perform(androidx.test.espresso.action.ViewActions.longClick())
+            awaitText("Taps: 1 · Holds: 1")
+            tapBack()
+
+            openPage("Display pieces")
+            awaitText("A card")
+            // The badge shows the count, and lies partly outside its icon.
+            val badge = onScreen(text("3"))
+            val icon = onScreen(described("Unread icon"))
+            assertTrue(badge.right > icon.right && badge.top < icon.top)
+            onView(withText("Add unread")).perform(click())
+            awaitText("Unread: 4")
+            awaitText("4")
+            onView(withText("Wi-Fi")).perform(click())
+            awaitText("Tile taps: 1")
+            // The switch inside the tile keeps its own taps.
+            onView(withContentDescription("Wi-Fi switch")).perform(click())
+            awaitText("Off")
+            awaitText("Tile taps: 1")
+            swipeTo("Reset tags")
+            onView(withContentDescription("Remove urgent")).perform(click())
+            awaitNoText("urgent")
+            awaitText("draft")
+            swipeTo("Button taps: 0")
+            onView(withContentDescription("Share item")).perform(click())
+            awaitText("Button taps: 1")
+            tapBack()
+
+            openPage("Composed inputs")
+            onView(withText("Advanced")).perform(click())
+            awaitText("Hidden until expanded")
+            onView(withText("Advanced")).perform(click())
+            awaitNoText("Hidden until expanded")
+            onView(withContentDescription("Increase")).perform(click())
+            awaitText("Quantity: 3")
+            onView(withContentDescription("Decrease")).perform(click())
+            onView(withContentDescription("Decrease")).perform(click())
+            awaitText("Quantity: 1")
+            // At the end of the range the button does nothing.
+            onView(withContentDescription("Decrease")).perform(click())
+            awaitText("Quantity: 1")
+            swipeTo("To payment")
+            onView(withText("To payment")).perform(click())
+            awaitText("How do you pay?")
+            awaitNoText("Where should it go?")
+            tapBack()
+
+            openPage("Grid")
+            awaitText("A list with three equally wide items on a line.")
+            val one = onScreen(described("Tile 1"))
+            val two = onScreen(described("Tile 2"))
+            val three = onScreen(described("Tile 3"))
+            val four = onScreen(described("Tile 4"))
+            assertTrue(one.top == two.top && two.top == three.top)
+            assertTrue(kotlin.math.abs(one.width() - two.width()) <= 1)
+            assertTrue(kotlin.math.abs(two.width() - three.width()) <= 1)
+            assertTrue(four.left == one.left && four.top > one.bottom)
+            assertTrue(kotlin.math.abs(dp(described("Tile 1"), two.left - one.right) - 8f) < 1f)
+        }
     }
 }

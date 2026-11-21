@@ -80,6 +80,14 @@ pub struct RecyclerProps {
     pub revision: u64,
     /// Pull-to-refresh.
     pub refresh: Refresh,
+    /// Reports the index of a row the user swiped away; set, it lets rows
+    /// be swiped.
+    pub on_dismiss: crate::message::Handler<usize>,
+    /// Reports where a row was dragged from and to; set, it lets rows be
+    /// dragged.
+    pub on_reorder: crate::message::Handler<(usize, usize)>,
+    /// The indices of the items that are pinned headers, ascending.
+    pub sticky: Vec<usize>,
 }
 
 impl RecyclerProps {
@@ -90,6 +98,9 @@ impl RecyclerProps {
             item_height,
             revision: 0,
             refresh,
+            on_dismiss: crate::message::Handler::none(),
+            on_reorder: crate::message::Handler::none(),
+            sticky: Vec::new(),
         }
     }
 }
@@ -251,6 +262,22 @@ pub(crate) fn row_root(list: NodeId, index: usize) -> NodeId {
     let id = node_id(list, index, None, ROW_TAG);
     // The root must never collide with the synthetic tree root.
     if id == ROOT_ID { NodeId(id.0 ^ 1) } else { id }
+}
+
+/// Multiplies every text size in the tree by `scale`.
+///
+/// Like the colours, the sizes the renderers see are final, and a new
+/// factor reaches them as updates of the nodes that show text.
+pub(crate) fn scale_text(node: &mut UiNode, scale: f32) {
+    if scale == 1.0 {
+        return;
+    }
+    if let NodeKind::Widget(widget) = &mut node.kind {
+        widget.scale_text(scale);
+    }
+    for child in &mut node.children {
+        scale_text(child, scale);
+    }
 }
 
 /// Picks the value for `scheme` in every colour of the tree.
@@ -576,11 +603,16 @@ fn build_list(
         cx.info.recycled.insert(id, props.clone());
         return UiNode {
             id,
-            kind: NodeKind::Recycler(RecyclerProps::new(
-                props.item_count,
-                props.item_height,
-                props.refresh.clone(),
-            )),
+            kind: NodeKind::Recycler(RecyclerProps {
+                on_dismiss: props.on_dismiss.clone(),
+                on_reorder: props.on_reorder.clone(),
+                sticky: props.sticky.as_ref().map_or_else(Vec::new, |is_header| {
+                    (0..props.item_count)
+                        .filter(|index| is_header(*index))
+                        .collect()
+                }),
+                ..RecyclerProps::new(props.item_count, props.item_height, props.refresh.clone())
+            }),
             style: element.style.clone(),
             children: Vec::new(),
         };

@@ -619,6 +619,10 @@ no condition to wait for.
 
 ### Running them
 
+A project made by `krabik create --with-dsl` has no UI test targets; chapter 10 says what to add
+to its `app/build.gradle.kts` and `project.yml`. The commands below are for an app that has them,
+such as `example-todo-minimal`.
+
 Android, from the app's `android/` directory, with an emulator running or a device attached:
 
 ```sh
@@ -641,8 +645,7 @@ the unit tests and lints, APK and static-library builds, and two jobs named "and
 and "ios ui tests" that run the Espresso and XCUITest suites of every app on an emulator and a
 simulator. One caveat has to be stated plainly: the workflow has never actually run, because the
 repository's remote is not GitHub. The jobs describe the intended setup; nobody has seen them
-pass or fail there. Also note that the older `docs/08-project-layout.md` still says CI "does not
-run the UI tests", which predates those two jobs.
+pass or fail there.
 
 ## Where a test belongs
 

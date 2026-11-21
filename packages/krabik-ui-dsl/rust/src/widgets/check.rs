@@ -6,7 +6,7 @@ use crate::element::{Element, ElementKind, RawElement, style_builder, text_build
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
-use crate::message::Wrap;
+use crate::message::MessageMap;
 use crate::style::Color;
 use crate::style::FontWeight;
 use crate::widgets::IntrinsicSize;
@@ -146,7 +146,7 @@ pub(crate) const CHECK_GAP: f32 = 28.0;
 pub(crate) const CHECK_HEIGHT: f32 = 48.0;
 
 impl WidgetProps for CheckProps {
-    fn map_messages(&mut self, wrap: &Wrap) {
+    fn map_messages(&mut self, wrap: &MessageMap) {
         self.on_toggle.map(wrap);
     }
 

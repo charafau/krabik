@@ -4,7 +4,7 @@ use crate::android::handles::{Method, VOID, class, get as jni_handles, method, w
 use crate::android::widgets::text::apply_typeface;
 use crate::android::widgets::{Ctor, Site};
 use crate::android::{COMPLEX_UNIT_SP, TEXT_INPUT_CLASS};
-use crate::ui::{FontWeight, ImeAction, KeyboardType, TextFieldProps};
+use crate::ui::{ImeAction, KeyboardType, TextFieldProps};
 use jni::errors::Result as JniResult;
 use jni::objects::{JClass, JObject};
 use jni::refs::Global;
@@ -61,7 +61,7 @@ pub(crate) fn update_text_field(
     )?;
     // `configure` changes the input type and line mode, which can reset the
     // typeface, so the font is applied after the platform configuration.
-    apply_typeface(env, view, matches!(props.weight, FontWeight::Bold))?;
+    apply_typeface(env, view, props.weight)?;
     Ok(())
 }
 

@@ -102,7 +102,7 @@ All paths are under `rust/src/`.
 |---|---|
 | `lib.rs` | Declares the modules, re-exports `App`, `Component`, `set_app_factory`, `view!`, and gives the engine modules short paths such as `krabik_ui_dsl::runtime`. |
 | `app.rs` | The `Component` and `App` traits an application implements; `AnyApp`, the same thing with the message type erased; the app factory. |
-| `message.rs` | `Message` (a `Box<dyn Any>`), `Handler<A>` (an optional function from an event payload to a message) and `Wrap` (used by `Element::map`). |
+| `message.rs` | `Message` (a `Box<dyn Any>`), `Handler<A>` (an optional function from an event payload to a message) and `MessageMap` (used by `Element::map`). |
 | `element.rs` | `Element<M>` and `RawElement`, the description `view()` returns; `ElementKind`; the `style_builder!` and `text_builder!` macros. |
 | `style.rs` | Values shared by all widgets: `Style`, `Length`, `EdgeInsets`, `Color`, `ColorScheme`, `Animation`, `Transition`, `Icon`. |
 | `ui.rs` | A facade: re-exports everything an application needs to describe a UI. Most of the file is tests. |

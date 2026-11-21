@@ -1,13 +1,27 @@
 # Tutorial: building the Notes app
 
-This tutorial builds one small application, a notes app, from an empty folder to a finished app
-that runs on Android and iOS. Each chapter adds to the same code and explains the part of
+This tutorial builds one small application, a notes app, from the project `krabik create` makes
+to a finished app that runs on Android and iOS. Each chapter adds to the same code and explains the part of
 `krabik-ui-dsl` it uses: what it does, why it is built that way, and where it lives in the
 source. Chapters 1 to 6 end with the complete file up to that point and chapter 8 with the final
 one, so you can start anywhere.
 
 The first nine chapters need only a Rust toolchain: the app is written and tested on your
-development machine. Chapter 10 puts it on an emulator and a simulator.
+development machine. Chapter 10 puts it on an emulator and a simulator with `krabik run` and
+shows `krabik watch`, which puts every saved change into the running app. If you would rather
+see the app on a device from the start, read the first two sections of chapter 10 right after
+chapter 1.
+
+## Getting set up
+
+Install the [krabik CLI](../../../krabik-cli/README.md) from a checkout of the repository
+(`cargo install --path packages/krabik-cli`), then create the project the tutorial works in:
+
+```sh
+krabik create notes --with-dsl
+```
+
+The project refers to the checkout by path, so keep the checkout where it is.
 
 ## Chapters
 
@@ -32,7 +46,8 @@ development machine. Chapter 10 puts it on an emulator and a simulator.
    when to prefer which, and the complete final app.
 9. [Testing](09-testing.md): unit tests on the app, the framework's fake-platform tests, UI tests
    with Espresso and XCUITest, and the pitfalls the existing suites record.
-10. [Running on Android and iOS](10-running-on-android-and-ios.md): the layout of an app, the
+10. [Running on Android and iOS](10-running-on-android-and-ios.md): `krabik run`, hot reload
+    with `krabik watch`, and then what `krabik create` generated: the layout of an app, the
     install functions, the two host projects and how they build the Rust code, and device builds.
 11. [Background work and timers](11-background-work-and-timers.md): why `update` returns a
     `Command`, how a result comes back from another thread as a message, subscriptions, and how

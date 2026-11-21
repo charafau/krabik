@@ -139,6 +139,20 @@ pub struct AppBarAction {
     pub icon: Icon,
     /// What to tell the application when the item is tapped.
     pub on_tap: Handler<()>,
+    /// Whether the action is a line of the bar's "more" menu and not a
+    /// button on the bar.
+    pub in_menu: bool,
+}
+
+/// Which of `actions` are lines of the "more" menu, as one bit each.
+#[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+pub(crate) fn menu_mask(actions: &[AppBarAction]) -> u64 {
+    actions
+        .iter()
+        .take(64)
+        .enumerate()
+        .filter(|(_, action)| action.in_menu)
+        .fold(0, |mask, (index, _)| mask | 1 << index)
 }
 
 /// The native bar at the top of a screen.
@@ -202,6 +216,22 @@ impl<M: Clone + Send + Sync + 'static> AppBar<M> {
             label: label.into(),
             icon,
             on_tap: Handler::new(move |()| message.clone()),
+            in_menu: false,
+        });
+        self
+    }
+
+    /// Adds a line to the bar's "more" menu that sends `message`.
+    ///
+    /// The lines are behind one button at the end of the bar: the three
+    /// dots of the toolbar on Android, an ellipsis that opens a menu on iOS.
+    /// Use it for the actions that do not deserve a place on the bar.
+    pub fn menu_item(mut self, label: impl Into<String>, message: M) -> Self {
+        self.actions.push(AppBarAction {
+            label: label.into(),
+            icon: Icon::new(),
+            on_tap: Handler::new(move |()| message.clone()),
+            in_menu: true,
         });
         self
     }
@@ -455,6 +485,20 @@ impl<M> Snackbar<M> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn menu_items_are_actions_marked_for_the_more_menu() {
+        let bar = super::AppBar::new("Notes")
+            .action("Refresh", 1)
+            .menu_item("Settings", 2)
+            .action("Save", 3)
+            .menu_item("Help", 4);
+        let in_menu: Vec<bool> = bar.actions.iter().map(|action| action.in_menu).collect();
+        assert_eq!(in_menu, [false, true, false, true]);
+        // One bit per action, in order, so an index means the same action
+        // on the bar, in the menu and in the application.
+        assert_eq!(super::menu_mask(&bar.actions), 0b1010);
+    }
+
     use super::*;
     use crate::widgets::Text;
 

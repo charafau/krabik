@@ -3,9 +3,12 @@
 How the framework works is described in the [documentation](docs/README.md). This file tracks
 status: what is done, what is left, and what is known to be rough.
 
-**Where things stand.** Everything planned so far is done (sections 1 to 8). What is left needs
-something this machine does not have (a GitHub remote, a physical iPhone) or is a follow-up
-nobody has asked for yet; see the "Remaining" section below.
+**Where things stand.** Sections 1 to 10 are done, and section 11, the missing widgets, is in
+progress. What is left needs
+something this machine does not have (a GitHub remote, a physical iPhone) or is a follow-up; see
+the "Remaining" section below. What comes next is chosen from the comparison with Flutter in
+[MISSING.md](MISSING.md): text styling was first (section 10), screen information and the
+keyboard are next.
 
 ---
 
@@ -14,7 +17,7 @@ nobody has asked for yet; see the "Remaining" section below.
 > The entries below are a log, oldest first. Sections 1 to 5 were written before the
 > restructure (section 6): file names such as `rust/src/android.rs`, string actions and
 > `Event::…` in them refer to code that has since been reorganized. The commit-by-commit account
-> of sections 6 to 8 is in [docs/design/history.md](docs/design/history.md).
+> of sections 6 to 9 is in [docs/design/history.md](docs/design/history.md).
 
 ### 1. Decouple Application Code from Platform Renderer ✅
 
@@ -617,14 +620,139 @@ The list in [MISSING.md](MISSING.md), closed one at a time.
   SVG filter.
 
 - **Hot reload.** Behind the cargo feature `hot-reload`: a rebuilt app library adopts the
-  running application value and the session continues with its code. `shared/hot-reload.sh`
+  running application value and the session continues with its code. `krabik watch`
   builds and delivers it. Tried on the Android emulator (about 3 s) and the iOS simulator
   (about 1 s) with `example-todo-minimal`; limits and open items are in
   [docs/design/hot-reload.md](docs/design/hot-reload.md).
+- **Projects from the CLI.** `krabik create <name> --with-dsl` writes an app's crate and its
+  Android and iOS shells (a counter, with hot reload enabled), and `krabik run` builds, installs
+  and starts such an app on the emulator or the simulator. Tried end to end with a new project
+  on both. The template is `packages/krabik-cli/src/dsl.rs`; the Android boilerplate is copied
+  from `example-todo-minimal/android`, which therefore has to stay where it is.
+
+### 10. Text styling ✅
+
+The first item of the comparison with Flutter in [MISSING.md](MISSING.md).
+
+- **Weights.** `FontWeight` has the nine weights from `Thin` to `Black`; `.weight(...)` is on
+  every widget that shows text, next to `.bold()`. Controls that only know regular and bold
+  (`RadioGroup`, `TabBar`, `DatePicker` on Android) show semi-bold and heavier as bold.
+- **Italic, underline, strikethrough, letter spacing, line height** on `Text`. A line height
+  applies to every line, the first and the last and a single one too: Android uses a
+  `LineHeightSpan` for that, iOS a paragraph style with a baseline offset.
+- **Spans.** `Text::rich([Span::new("…").bold(), …])` is one native view with a spanned or
+  attributed string. A span sets what differs from the text: size, colour, weight, italic,
+  decorations, font.
+- **Fonts from a file.** `Font::asset("Name.ttf")` on `Text`, `Button` and `Span`, from the
+  place an image asset is in. One file is one face; weight and italic are not applied on top. A
+  missing file falls back to the system font and is logged once.
+- **The system text size on iOS.** The Swift host reports the factor of the user's setting, and
+  the engine scales every text size in the tree by it, so a change arrives as ordinary updates.
+  Android already followed it through `sp`.
+- **One path for measuring and drawing.** Both platforms set a text through one function that
+  the measurer and the renderer share, and the cache key of a measurement is built in one place
+  (`TextProps::measure_key`), with a test that every size-changing property changes it.
+
+Checked on the Android emulator and the iOS simulator with the showcase's Text page, one Espresso
+test and one XCUITest (`textStylesAreMeasuredForWhatIsDrawn`), and by changing the simulator's
+text size while the app ran.
+
+Known limits: italics have two weights on iOS (regular and bold); before Android 9 there are
+only regular and bold, and a span cannot have a font file of its own; on iOS before 16.4 a text
+with a line height sits slightly low in its line; the application cannot read the text scale or
+keep one text out of it.
+
+### 11. The missing widgets ✅
+
+The widgets Flutter has and this framework did not, from the list in
+[MISSING.md](MISSING.md). Built in phases; each was checked on the Android emulator and the iOS
+simulator, by hand and with a UI test per page of the showcase, before the next began.
+
+1. **Layout additions.** `Wrap` (a row with a `wrap` flag, no new node kind), `.positioned(Inset)`
+   for a child of a `Stack`, `.min_width`/`.max_width`/`.min_height`/`.max_height`, and
+   `Justify::SpaceAround`/`SpaceEvenly`. All four are Taffy's own features, mapped in
+   `engine/layout.rs`.
+2. **Long press.** `Container::on_long_press`, a `NodeEvent::LongPress`, an
+   `OnLongClickListener` on Android and a `UILongPressGestureRecognizer` on iOS.
+3. **Icons in content.** `Image::icon(Icon)` with `.tint` and `.size`: a drawable resource on
+   Android, an SF Symbol or a catalog image on iOS. Nine icons ship with the framework
+   (`Icon::add()` and the others).
+4. **Widgets assembled from containers**, with no native code: `Divider`, `Card`, `ListTile`,
+   `Avatar`, `Badge`, `Chip`, `IconButton`, `Button::filled`/`outlined`, `ExpansionTile`,
+   `Stepper`, `NumberStepper`, `SearchBar`, `Autocomplete`, `Grid`. A `Grid` is a `List` whose
+   rows are lines of equally wide cells, so recycling works unchanged.
+5. **Android lets children overflow.** A badge lies partly outside its icon, and Android clipped
+   it where iOS did not. The framework's containers no longer clip their children's content
+   (`KrabikViews.letChildrenOverflow`), and scroll views, recyclers and pagers clip themselves
+   instead (`clipToOwnBounds`), which Android otherwise leaves to the parent.
+
+6. **Menus.** `Menu` is a list of lines with a message each. A container opens one on a tap
+   (`Container::menu`) or on a long press (`Container::context_menu`): a `PopupMenu` anchored to
+   the view on Android; on iOS a clear `UIButton` over the container with
+   `showsMenuAsPrimaryAction`, or a `UIContextMenuInteraction`. A pick is reported as
+   `NodeEvent::Select`, and an index the current menu does not have is dropped. `MenuButton` and
+   `Dropdown` are containers with a menu.
+7. **A "more" menu on the app bar.** `AppBar::menu_item`. Such an action is an ordinary action
+   with a flag, so a pick travels the path of a tap; the platforms get one bit per action.
+8. **`SegmentedControl`**, assembled from containers, and **tooltips**: `.tooltip(text)` on any
+   widget, `TooltipCompat` on Android and a label shown by a long press on iOS.
+
+9. **`RangeSlider`.** Material's `RangeSlider` on Android; on iOS, which has none, a two-thumb
+   `UIControl` written in Swift (`shared/ios/KrabikRangeSlider.swift`) that Rust finds by its
+   Objective-C name. Both work between 0 and 1; Rust maps and snaps the values.
+10. **Copyable text.** `Text::selectable()`: `setTextIsSelectable` on Android; on iOS the label
+    stays a label, so it is measured as every other text, and a long press offers "Copy".
+11. **Native views from the application.** `NativeView::new(name)` with string properties and
+    string events; `KrabikNativeViews.register` on each platform. `WebView` is one the framework
+    registers itself. Decisions 1 and 4 say what this changes.
+
+12. **List gestures**, for recycled lists. `List::on_dismiss` (swipe a row away),
+    `List::on_reorder` (hold and drag) and `List::sticky_header` (section headers that stay at
+    the top). Android: an `ItemTouchHelper`, and an `ItemDecoration` that draws the header from
+    a holder of its own. iOS: a pan and a long-press recognizer on the collection view with its
+    interactive movement, and a cell of the list's kind kept at the top while scrolling. The
+    list is the application's state: after either gesture the rows are bound again from it, so
+    a row the application kept comes back.
+
+Known limits: a button cannot show an icon inside the native `Button` (use `IconButton` with
+`.text(..)`); the suggestions of an `Autocomplete` do not float; a dimmed `NumberStepper` button
+is not announced as a disabled button; a grid has no staggered layout and no span for single
+cells; a menu has no sub-menus, separators or disabled lines; on iOS a container with a tap
+menu covers the controls inside it, so it should hold only texts and icons; on iOS a
+selectable text is copied whole, a part of it cannot be selected; a map and a camera preview
+are not built in, an application embeds them itself; a windowed list ignores the three list
+gestures; a pinned header is a picture of its row and does not react to touches; nothing is
+shown behind a row while it is swiped.
+
+
+Not built: the collapsing app bar. See "A collapsing app bar" under Remaining.
 
 ---
 
 ## Remaining ❌
+
+### A collapsing app bar ❌
+
+Flutter's `SliverAppBar`, a large title that shrinks as the content scrolls, is the one widget of
+the list in [MISSING.md](MISSING.md) that was not built. Both shells pin a screen's content
+*below* the bar: `KrabikActivity` stacks toolbar and content in a `LinearLayout`, and the iOS
+host view is constrained to the safe area. A bar that changes height while the content scrolls
+would therefore resize the Rust host on every frame, run the layout again each time and move
+the list under the finger.
+
+What it needs:
+
+- **iOS:** the screen's scroll view has to extend under the navigation bar and take its inset
+  from UIKit (`setContentScrollView(_:for:)`, `prefersLargeTitles`), which means the host view
+  can no longer simply be pinned to the safe area, and Rust has to know which node is the
+  screen's scroll view.
+- **Android:** the activity's layout becomes a `CoordinatorLayout` with an `AppBarLayout` and a
+  `CollapsingToolbarLayout`, the content gets the scrolling behaviour, and the framework's
+  scroll view and recycler take part in nested scrolling. The inset handling in
+  `KrabikActivity` is written for the current stack and changes with it.
+
+Both change every screen of every application, so this is a piece of work of its own with its
+own regression run, not an addition.
 
 ### Run the CI workflow for the first time ❌
 
@@ -639,6 +767,24 @@ machine.
 
 The iOS projects build and link for a device (`aarch64-apple-ios`), but that was only checked
 without signing. Put `DEVELOPMENT_TEAM = <team id>` in an app's `ios/Local.xcconfig` and run it.
+
+### Publish the framework ❌
+
+An app made with `krabik create --with-dsl` refers to a krabik checkout by absolute path, in
+four files (`rust/Cargo.toml`, `android/settings.gradle.kts`, `ios/project.yml`,
+`ios/Sources/Bridging.h`). It builds only on a machine that has the checkout there. The crate,
+the Kotlin library and the Swift host need a published form (crates.io or a git dependency, a
+Maven artifact, a Swift package or files copied into the project) before a project can be
+shared.
+
+### The CLI for krabik-ui-dsl projects: what is left ❌
+
+- `krabik release` refuses such a project; a release is built with Gradle or Xcode.
+- A created project has no UI test targets (no `androidTest` setup, no `UITests` target).
+- `krabik watch` does not learn that the app refused a library; see
+  [docs/design/hot-reload.md](docs/design/hot-reload.md).
+- With `cargo install --git`, the default framework path is a checkout in cargo's cache; such
+  an install has to pass `--dsl-path`.
 
 ### Make the iOS showcase suite faster ❌
 

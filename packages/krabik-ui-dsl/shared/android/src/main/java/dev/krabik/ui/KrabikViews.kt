@@ -34,6 +34,7 @@ object KrabikViews {
         }
 
         val host = FrameLayout(context)
+        host.clipChildren = false
         host.isClickable = false
         host.isFocusable = false
         scroll.addView(
@@ -49,7 +50,21 @@ object KrabikViews {
         scroll.setFadingEdgeLength(fadingEdge)
         scroll.isVerticalFadingEdgeEnabled = !horizontal
         scroll.isHorizontalFadingEdgeEnabled = horizontal
+        clipToOwnBounds(scroll)
         return if (refreshable && !horizontal) KrabikRefreshLayout(context, root, scroll) else scroll
+    }
+
+    /**
+     * Keeps what a scrolling view draws inside the view. Android leaves that
+     * to the parent, and the parents here let their children overflow (see
+     * [letChildrenOverflow]), so a view whose content is larger than itself
+     * has to clip on its own.
+     */
+    @JvmStatic
+    fun clipToOwnBounds(view: View) {
+        view.addOnLayoutChangeListener { changed, left, top, right, bottom, _, _, _, _ ->
+            changed.clipBounds = android.graphics.Rect(0, 0, right - left, bottom - top)
+        }
     }
 
     /**
@@ -73,16 +88,51 @@ object KrabikViews {
     }
 
     /**
-     * Makes a container accept taps, or stops it. Rust set the root view as
-     * its click listener when it created the view; a tappable container also
-     * shows the theme's press highlight over its content.
+     * Lets what is inside a container's children show outside those
+     * children's own bounds, as UIKit does: a badge on the corner of an icon
+     * is a child of the icon's stack and lies partly outside it. A view with
+     * rounded corners still clips to its outline.
      */
     @JvmStatic
-    fun setTappable(view: View, tappable: Boolean) {
-        if (view.isClickable == tappable && (view.foreground != null) == tappable) return
+    fun letChildrenOverflow(view: View) {
+        (view as? ViewGroup)?.clipChildren = false
+    }
+
+    /**
+     * Sets or removes the text the platform shows while a view is pressed
+     * and held. A view that never had a tooltip is left alone, so its own
+     * long presses stay as they are.
+     */
+    @JvmStatic
+    fun setTooltip(view: View, text: String?) {
+        if (text == null && !tooltips.containsKey(view)) return
+        if (text == null) tooltips.remove(view) else tooltips[view] = true
+        androidx.appcompat.widget.TooltipCompat.setTooltipText(view, text)
+    }
+
+    private val tooltips = java.util.WeakHashMap<View, Boolean>()
+
+    /**
+     * Makes a container accept taps and long presses, or stops it. Rust set
+     * the root view as its listener for both when it created the view; a
+     * container that reacts to either also shows the theme's press highlight
+     * over its content.
+     */
+    @JvmStatic
+    fun setTappable(view: View, tappable: Boolean, longPressable: Boolean) {
+        val reacts = tappable || longPressable
+        // A tooltip is shown on a long press, by a listener of its own.
+        val longClickable = longPressable || tooltips.containsKey(view)
+        if (view.isClickable == tappable &&
+            view.isLongClickable == longClickable &&
+            (view.foreground != null) == reacts
+        ) {
+            return
+        }
         view.isClickable = tappable
-        view.isFocusable = tappable
-        view.foreground = if (tappable) pressHighlight(view.context) else null
+        view.isLongClickable = longClickable
+        view.isFocusable = reacts
+        view.foreground = if (reacts) pressHighlight(view.context) else null
     }
 
     private fun pressHighlight(context: Context): android.graphics.drawable.Drawable? {

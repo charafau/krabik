@@ -464,6 +464,7 @@ another screen now) and makes a screen the application kept come back without an
 // rust/src/host/events.rs
 pub(crate) enum NodeEvent {
     Click,
+    LongPress,
     Text(String),
     Submit,
     Focus { focused: bool, attached: bool },
@@ -472,15 +473,21 @@ pub(crate) enum NodeEvent {
     Select(usize),
     Picker(DatePickerValue),
     Scroll(f32),
+    Range(f32, f32),
+    Native(String),
+    Dismiss(usize),
+    Move(usize, usize),
 }
 
 pub(crate) struct Actions {
     pub click: Handler<()>,
+    pub long_press: Handler<()>,
     pub text: Handler<String>,
     pub submit: Handler<()>,
     pub focus: Handler<bool>,
     pub toggle: Handler<bool>,
     pub select: Handler<usize>,
+    pub select_count: Option<usize>,
     pub slider: Option<SliderAction>,
     pub picker: Option<PickerAction>,
 }

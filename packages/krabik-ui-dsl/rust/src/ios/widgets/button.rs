@@ -3,7 +3,7 @@
 use crate::ios::events::dispatch_click;
 use crate::ios::widgets::{Content, RenderNode, Site};
 use crate::ios::{ViewHandle, cast_view};
-use crate::ios::{add_action, color, schedule, system_font};
+use crate::ios::{add_action, color, font_of, schedule};
 use crate::tree::NodeId;
 use crate::ui::ButtonProps;
 use objc2::MainThreadMarker;
@@ -18,7 +18,7 @@ pub(crate) fn update_button(button: &UIButton, props: &ButtonProps) {
     button.setTitleColor_forState(Some(&text_color), UIControlState::Normal);
 
     if let Some(label) = button.titleLabel() {
-        let font = system_font(props.size, props.weight);
+        let font = font_of(&props.font, props.size, props.weight, false);
         // SAFETY: the font is retained by the label for as long as it is set.
         unsafe { label.setFont(Some(&font)) };
     }

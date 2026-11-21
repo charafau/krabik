@@ -30,6 +30,7 @@ const REFRESH_TIME: Duration = Duration::from_millis(1200);
 
 mod checklist;
 mod pages;
+mod widgets_demo;
 
 use checklist::Checklist;
 
@@ -124,6 +125,8 @@ pub enum Msg {
     BottomDest(usize),
     Volume(f32),
     Stepped(f32),
+    /// A message of the pages in `widgets_demo`.
+    Widgets(widgets_demo::WidgetsMsg),
 }
 
 /// The state of the showcase application.
@@ -132,6 +135,8 @@ pub struct ShowcaseApp {
     stack: Vec<&'static str>,
     /// The checklist demo, which has its own state.
     checklist: Checklist,
+    /// The layout additions and the assembled widgets, with their state.
+    widgets: widgets_demo::WidgetsDemo,
     name: String,
     submitted: String,
     taps: i64,
@@ -205,6 +210,7 @@ impl ShowcaseApp {
         Self {
             stack: vec!["home"],
             checklist: Checklist::new(),
+            widgets: widgets_demo::WidgetsDemo::new(),
             name: String::new(),
             submitted: String::new(),
             taps: 0,
@@ -442,6 +448,7 @@ impl Component for ShowcaseApp {
             Msg::BottomDest(index) => self.bottom_dest = index.min(2),
             Msg::Volume(value) => self.volume = value,
             Msg::Stepped(value) => self.stepped = value,
+            Msg::Widgets(message) => self.widgets.update(message),
         }
         Command::none()
     }
@@ -494,7 +501,9 @@ impl App for ShowcaseApp {
                     "Save",
                     Icon::new().drawable("ic_save").sf("square.and.arrow.down"),
                     Msg::Toolbar("Save"),
-                );
+                )
+                .menu_item("Settings", Msg::Toolbar("Settings"))
+                .menu_item("Help", Msg::Toolbar("Help"));
         }
         let scaffold = Scaffold::new().app_bar(app_bar).body(body);
         Some(match key {
@@ -738,6 +747,13 @@ mod tests {
             "tabs-view",
             "bottom-navigation",
             "toolbar",
+            "layout-extras",
+            "pieces",
+            "composed-inputs",
+            "grid",
+            "menus",
+            "native-views",
+            "list-gestures",
         ] {
             assert!(pages::screen(&app, key).is_some(), "missing page {key}");
             assert!(pages::screen_key(&format!("page:{key}")).is_some());
@@ -837,7 +853,13 @@ mod tests {
             toolbar.subtitle.as_deref(),
             Some("Host-level native chrome")
         );
-        assert_eq!(toolbar.actions.len(), 2);
+        // Two buttons on the bar and two lines in its "more" menu.
+        let in_menu: Vec<bool> = toolbar
+            .actions
+            .iter()
+            .map(|action| action.in_menu)
+            .collect();
+        assert_eq!(in_menu, [false, false, true, true]);
     }
 
     #[test]

@@ -469,6 +469,15 @@ configuration step is `configure_view`, the same function an update calls. A `Co
 only reaches this function when it is decorated (background, border, corner radius); then it
 becomes a `FrameLayout` so it can draw behind its children and clip them.
 
+Android clips what a view draws to the view's bounds, and it is the *parent* that does it
+(`clipChildren`). UIKit does not clip at all unless asked. A badge on the corner of an icon is a
+child of the icon's stack and lies partly outside it, so the containers the framework creates,
+the root view and the content host of a scroll view turn `clipChildren` off
+(`KrabikViews.letChildrenOverflow`). The views whose content is larger than themselves then have
+to clip on their own: scroll views, recyclers and the pager set their `clipBounds` to their size
+whenever it changes (`KrabikViews.clipToOwnBounds`). A view with rounded corners still clips to
+its outline.
+
 `set_tag` stores the node id on the view as a boxed `Long`. Two things read it in Kotlin: the
 root view's click listener (for stock buttons) and the scroll reporter.
 
@@ -538,7 +547,17 @@ A few widgets deviate, each for a visible reason:
   the layout engine already reserves the button's padding.
 - `text.rs`: `update_text` serves both `Text` and `Button`, which share label properties
   (`text_properties` picks the right fields). It also disables font padding so the rendered
-  metrics match what `measure.rs` measured.
+  metrics match what `measure.rs` measured. The string and its look (weight, slant,
+  decorations, letter spacing, line height, and the runs of a rich text) go to Kotlin in one
+  call, `apply_text`, which the measurer uses as well. `KrabikText.apply` picks the typeface
+  (`Typeface.create(family, weight, italic)` from Android 9, regular or bold before), sets the
+  letter spacing in ems, and for a line height or runs builds a `SpannableString`: a
+  `LineHeightSpan` that gives every line the height, and per run a typeface, colour, size and
+  decoration span. The runs cross as one `int[]`, seven numbers each (`pack_runs`). Font files
+  cross as a `String[]` of asset paths, and the text and each run name theirs by index; Kotlin
+  loads a file once with `Typeface.createFromAsset` and keeps it. Before Android 9 a run cannot
+  have a font file of its own, only the whole text can. Controls with a
+  label (`check.rs`, `text_field.rs`) only set a typeface, with `apply_typeface`.
 - `check.rs`: one file for `Checkbox` and `RadioButton`, with a `radio` flag.
 - `progress.rs`: a determinate bar and an indeterminate spinner, both `ProgressBar`.
 - `image.rs`: the view is a stock `ImageView`; loading goes through the `KrabikImages` helper.
@@ -610,10 +629,12 @@ The layout engine needs to know how big a piece of text is. Only the platform kn
 `AndroidMeasure` implements the engine's `Measure` trait with three methods.
 
 **Text.** It keeps one off-screen `TextView`, configured like a rendered one (no font padding, no
-padding). `measure_with` sets the text, size, typeface and line limits on it, calls
+padding). `measure_with` sets the size, the text with its look, and the line limits on it, calls
 `View.measure` with a width constraint, and reads the measured size. Results are cached in a
-`HashMap` keyed by content, size, weight, width, line limit and ellipsis, because Taffy asks for
-the same size several times per layout pass.
+`HashMap` keyed by the available width and `TextProps::measure_key()` (content, size, weight,
+slant, spacing, line height, line limit, runs), because Taffy asks for the same size several
+times per layout pass. It sets the text through the same `apply_text` as rendering does, so a
+frame is measured for exactly what will be drawn in it.
 
 The `Measure` trait gives no JNI environment, so `measure` obtains one with
 `vm.attach_current_thread`. On the main thread, which is where layout runs, that returns the

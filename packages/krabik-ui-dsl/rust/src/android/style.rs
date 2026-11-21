@@ -127,6 +127,19 @@ pub(crate) fn apply_accessibility(
             )?;
         }
     }
+    let tooltip = match &node.style.tooltip {
+        Some(text) => Some(jcall!(env, env.new_string(text))?),
+        None => None,
+    };
+    let null = JObject::null();
+    ids.container.set_tooltip.call_void(
+        env,
+        &ids.krabik_views,
+        &[
+            JValue::Object(view),
+            JValue::Object(tooltip.as_ref().map_or(&null, |text| text.as_ref())),
+        ],
+    )?;
     Ok(())
 }
 

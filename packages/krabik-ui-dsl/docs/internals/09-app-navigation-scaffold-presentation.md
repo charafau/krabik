@@ -754,7 +754,7 @@ application code          boundary                    session / engine
 ----------------          --------                    ----------------
 Button::on_click(Msg)   -- Handler::new ----------->  Handler<()>
 Element<Msg>            -- Element::into_raw ------>  RawElement
-child.view().map(f)     -- Handler::map (Wrap) ---->  handlers, wrapped
+child.view().map(f)     -- Handler::map (MessageMap) ---->  handlers, wrapped
 Scaffold<Msg>           -- Scaffold::erase -------->  (RawElement, Chrome)
 Dialog<Msg>             -- Dialog::erase ---------->  Dialog
 BottomSheet<Msg>        -- BottomSheet::erase ----->  BottomSheet

@@ -8,7 +8,7 @@
 
 mod common;
 
-use common::{FakeToolchain, cli};
+use common::{FakeToolchain, cli, fake_dsl};
 use predicates::prelude::*;
 use std::fs;
 use std::path::PathBuf;
@@ -293,4 +293,245 @@ fn a_failed_create_can_be_retried() {
         .failure()
         .code(1)
         .stderr(predicate::str::contains("already exists").not());
+}
+
+/// A toolchain without the `android` CLI: a krabik-ui-dsl project is created
+/// without it. The fake `xcodegen` records the directory it was run in.
+fn dsl_toolchain() -> FakeToolchain {
+    FakeToolchain::new(&[(
+        "xcodegen",
+        "#!/bin/sh\necho \"xcodegen $* in $(basename \"$PWD\")\" >> \"$FAKE_LOG\"\nexit 0\n",
+    )])
+}
+
+/// Runs `create --with-dsl` with a fake krabik-ui-dsl directory and returns
+/// the working directory, the project root and the framework's directory.
+fn create_dsl(args: &[&str]) -> (TempDir, PathBuf, PathBuf) {
+    let tools = dsl_toolchain();
+    let work = TempDir::new().unwrap();
+    // the path is written into the project in its canonical form
+    let dsl = fs::canonicalize(fake_dsl(work.path())).unwrap();
+
+    cli(&tools)
+        .current_dir(work.path())
+        .env("FAKE_LOG", work.path().join("calls.log"))
+        .args(["create", args[0], "--with-dsl", "--dsl-path"])
+        .arg(&dsl)
+        .args(&args[1..])
+        .assert()
+        .success();
+
+    let project = work.path().join(args[0]);
+    (work, project, dsl)
+}
+
+#[test]
+fn create_with_dsl_creates_an_app_crate_that_uses_the_framework() {
+    let (_work, project, dsl) = create_dsl(&["my-app"]);
+
+    let cargo_toml = fs::read_to_string(project.join("rust/Cargo.toml")).unwrap();
+    assert!(cargo_toml.contains("name = \"my-app\""), "{cargo_toml}");
+    assert!(
+        cargo_toml.contains(&format!(
+            "krabik-ui-dsl = {{ path = \"{}/rust\", features = [\"hot-reload\"] }}",
+            dsl.display()
+        )),
+        "{cargo_toml}"
+    );
+
+    let lib = fs::read_to_string(project.join("rust/src/lib.rs")).unwrap();
+    assert!(lib.contains("fn my_app_install()"), "{lib}");
+    assert!(
+        lib.contains("fn Java_com_example_my_1app_AppBridge_install"),
+        "{lib}"
+    );
+    assert!(lib.contains("hot_reload!(Counter)"), "{lib}");
+
+    // nothing of the UniFFI template is created
+    assert!(!project.join("rust/uniffi-bindgen").exists());
+    assert!(!project.join("rust/uniffi-bindgen-swift").exists());
+    assert!(!project.join("rust/build.rs").exists());
+    assert!(!project.join("ios/Generated").exists());
+
+    // the targets are declared like in every other project
+    let toolchain = fs::read_to_string(project.join("rust-toolchain.toml")).unwrap();
+    assert!(toolchain.contains("aarch64-linux-android"), "{toolchain}");
+    assert!(toolchain.contains("aarch64-apple-ios-sim"), "{toolchain}");
+}
+
+#[test]
+fn create_with_dsl_creates_an_android_shell_around_the_framework() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (_work, project, dsl) = create_dsl(&["my-app", "--package", "io.acme"]);
+    let android = project.join("android");
+
+    // the boilerplate comes from the template app of the framework
+    for file in [
+        "gradlew.bat",
+        "gradle/libs.versions.toml",
+        "gradle/wrapper/gradle-wrapper.properties",
+        "gradle.properties",
+        "build.gradle.kts",
+        ".gitignore",
+        "app/src/main/AndroidManifest.xml",
+        "app/src/main/res/values/themes.xml",
+    ] {
+        assert!(android.join(file).is_file(), "missing {file}");
+    }
+    let gradlew = fs::metadata(android.join("gradlew")).unwrap();
+    assert!(gradlew.permissions().mode() & 0o111 != 0, "not executable");
+
+    // the template's own sources, tests and build output are left out
+    assert!(!android.join("app/build").exists());
+    assert!(!android.join("app/src/androidTest").exists());
+    assert!(!android.join("app/src/main/java/com/example").exists());
+
+    let settings = fs::read_to_string(android.join("settings.gradle.kts")).unwrap();
+    assert!(
+        settings.contains("rootProject.name = \"my-app\""),
+        "{settings}"
+    );
+    assert!(
+        settings.contains(&format!("file(\"{}/shared/android\")", dsl.display())),
+        "{settings}"
+    );
+
+    let gradle = fs::read_to_string(android.join("app/build.gradle.kts")).unwrap();
+    assert!(
+        gradle.contains("namespace = \"io.acme.my_app\""),
+        "{gradle}"
+    );
+    assert!(
+        gradle.contains("applicationId = \"io.acme.my_app\""),
+        "{gradle}"
+    );
+
+    let sources = android.join("app/src/main/java/io/acme/my_app");
+    let activity = fs::read_to_string(sources.join("MainActivity.kt")).unwrap();
+    assert!(
+        activity.starts_with("package io.acme.my_app\n"),
+        "{activity}"
+    );
+    assert!(
+        activity.contains("System.loadLibrary(\"my_app\")"),
+        "{activity}"
+    );
+    let bridge = fs::read_to_string(sources.join("AppBridge.kt")).unwrap();
+    assert!(bridge.starts_with("package io.acme.my_app\n"), "{bridge}");
+
+    // the JNI function is the one the bridge declares
+    let lib = fs::read_to_string(project.join("rust/src/lib.rs")).unwrap();
+    assert!(
+        lib.contains("fn Java_io_acme_my_1app_AppBridge_install"),
+        "{lib}"
+    );
+
+    // the name of the template app is replaced
+    let strings = fs::read_to_string(android.join("app/src/main/res/values/strings.xml")).unwrap();
+    assert!(strings.contains(">my-app<"), "{strings}");
+}
+
+#[test]
+fn create_with_dsl_creates_an_ios_shell_around_the_framework() {
+    let (work, project, dsl) = create_dsl(&["my-app", "--package", "io.acme"]);
+    let ios = project.join("ios");
+
+    let yml = fs::read_to_string(ios.join("project.yml")).unwrap();
+    assert!(yml.contains("\nname: MyApp\n"), "{yml}");
+    assert!(
+        yml.contains("PRODUCT_BUNDLE_IDENTIFIER: io.acme.my-app"),
+        "{yml}"
+    );
+    assert!(yml.contains("RUST_LIB: my_app"), "{yml}");
+    assert!(
+        yml.contains(&format!("- path: \"{}/shared/ios\"", dsl.display())),
+        "{yml}"
+    );
+    assert!(
+        yml.contains(&format!("\"{}/shared/build-rust-ios.sh\"", dsl.display())),
+        "{yml}"
+    );
+
+    let header = fs::read_to_string(ios.join("Sources/Bridging.h")).unwrap();
+    assert!(header.contains("void my_app_install(void);"), "{header}");
+    let swift = fs::read_to_string(ios.join("Sources/MyAppApp.swift")).unwrap();
+    assert!(swift.contains("my_app_install()"), "{swift}");
+    assert!(ios.join("Signing.xcconfig").is_file());
+
+    // the Xcode project is generated in the iOS directory
+    let log = fs::read_to_string(work.path().join("calls.log")).unwrap();
+    assert!(log.contains("xcodegen generate in ios"), "{log}");
+}
+
+#[test]
+fn create_with_dsl_uses_the_checkout_of_the_cli_by_default() {
+    let tools = dsl_toolchain();
+    let work = TempDir::new().unwrap();
+
+    cli(&tools)
+        .current_dir(work.path())
+        .env("FAKE_LOG", work.path().join("calls.log"))
+        .args(["create", "demo", "--with-dsl"])
+        .assert()
+        .success();
+
+    let project = work.path().join("demo");
+    let cargo_toml = fs::read_to_string(project.join("rust/Cargo.toml")).unwrap();
+    assert!(
+        cargo_toml.contains("/packages/krabik-ui-dsl/rust\""),
+        "{cargo_toml}"
+    );
+
+    // the real Gradle wrapper and launcher icons are copied
+    assert!(
+        project
+            .join("android/gradle/wrapper/gradle-wrapper.jar")
+            .is_file()
+    );
+    assert!(
+        project
+            .join("android/app/src/main/res/mipmap-hdpi/ic_launcher.webp")
+            .is_file()
+    );
+    assert!(!project.join("android/app/src/androidTest").exists());
+}
+
+#[test]
+fn create_with_dsl_fails_for_a_directory_that_is_not_the_framework() {
+    let tools = dsl_toolchain();
+    let work = TempDir::new().unwrap();
+    let other = TempDir::new().unwrap();
+
+    cli(&tools)
+        .current_dir(work.path())
+        .args(["create", "demo", "--with-dsl", "--dsl-path"])
+        .arg(other.path())
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("is not a krabik-ui-dsl directory"))
+        .stderr(predicate::str::contains("--dsl-path"));
+
+    // nothing is left behind, not even the staging directory
+    let leftovers: Vec<_> = fs::read_dir(work.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(leftovers.is_empty(), "left over: {leftovers:?}");
+}
+
+#[test]
+fn create_rejects_a_dsl_path_without_with_dsl() {
+    let tools = dsl_toolchain();
+    let work = TempDir::new().unwrap();
+
+    cli(&tools)
+        .current_dir(work.path())
+        .args(["create", "demo", "--dsl-path", "."])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--with-dsl"));
+
+    assert!(!work.path().join("demo").exists());
 }

@@ -233,16 +233,157 @@ pub enum Justify {
     End,
     /// Spread children evenly, with no space at the edges.
     SpaceBetween,
+    /// Spread children evenly, with half a gap at each edge.
+    SpaceAround,
+    /// Spread children evenly, with a full gap at each edge.
+    SpaceEvenly,
 }
 
-/// Font weight of a text-bearing node.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Where a child of a [`Stack`](crate::ui::Stack) sits, as distances from the
+/// stack's edges.
+///
+/// A side that is not set does not hold the child. Two opposite sides
+/// stretch it between them, unless it has a size of its own.
+///
+/// ```ignore
+/// Stack::new()
+///     .child(avatar)
+///     .child(dot.positioned(Inset::new().top(0).right(0)))
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Inset {
+    /// Distance from the stack's top edge.
+    pub top: Option<f32>,
+    /// Distance from the stack's right edge.
+    pub right: Option<f32>,
+    /// Distance from the stack's bottom edge.
+    pub bottom: Option<f32>,
+    /// Distance from the stack's left edge.
+    pub left: Option<f32>,
+}
+
+impl Inset {
+    /// No side is held.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Every side at the same distance: the child fills the stack.
+    pub fn all(value: impl IntoPoints) -> Self {
+        let value = Some(value.into_points());
+        Self {
+            top: value,
+            right: value,
+            bottom: value,
+            left: value,
+        }
+    }
+
+    /// Sets the distance from the top edge.
+    pub fn top(mut self, value: impl IntoPoints) -> Self {
+        self.top = Some(value.into_points());
+        self
+    }
+
+    /// Sets the distance from the right edge.
+    pub fn right(mut self, value: impl IntoPoints) -> Self {
+        self.right = Some(value.into_points());
+        self
+    }
+
+    /// Sets the distance from the bottom edge.
+    pub fn bottom(mut self, value: impl IntoPoints) -> Self {
+        self.bottom = Some(value.into_points());
+        self
+    }
+
+    /// Sets the distance from the left edge.
+    pub fn left(mut self, value: impl IntoPoints) -> Self {
+        self.left = Some(value.into_points());
+        self
+    }
+}
+
+/// Font weight of a text-bearing node, from the thinnest to the heaviest.
+///
+/// The platform's font decides which weights it really has; a weight it
+/// lacks is drawn with the nearest one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FontWeight {
-    /// Regular text.
+    /// Weight 100.
+    Thin,
+    /// Weight 200.
+    ExtraLight,
+    /// Weight 300.
+    Light,
+    /// Regular text, weight 400.
     #[default]
     Normal,
-    /// Emphasized text.
+    /// Weight 500.
+    Medium,
+    /// Weight 600.
+    SemiBold,
+    /// Emphasized text, weight 700.
     Bold,
+    /// Weight 800.
+    ExtraBold,
+    /// Weight 900.
+    Black,
+}
+
+impl FontWeight {
+    /// The weight as the number CSS and Android use, 100 to 900.
+    pub const fn value(self) -> u16 {
+        match self {
+            Self::Thin => 100,
+            Self::ExtraLight => 200,
+            Self::Light => 300,
+            Self::Normal => 400,
+            Self::Medium => 500,
+            Self::SemiBold => 600,
+            Self::Bold => 700,
+            Self::ExtraBold => 800,
+            Self::Black => 900,
+        }
+    }
+
+    /// Whether a control that only knows regular and bold shows this weight
+    /// as bold: semi-bold and heavier.
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    pub(crate) const fn is_bold(self) -> bool {
+        self.value() >= 600
+    }
+}
+
+/// The font a text is drawn in.
+///
+/// A font file is one face: its weight and slant are those of the file, and
+/// the weight and the italic setting of the text are not applied on top. An
+/// application with a regular and a bold file names the one it wants.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Font {
+    /// The platform's font, in the weight and slant the text asks for.
+    #[default]
+    System,
+    /// A `.ttf` or `.otf` file bundled in the platform application's assets,
+    /// in the same place an image asset would be.
+    Asset(String),
+}
+
+impl Font {
+    /// A font file bundled with the application, e.g. `fonts/Inter-Medium.ttf`.
+    pub fn asset(path: impl Into<String>) -> Self {
+        Self::Asset(path.into())
+    }
+
+    /// The path of the font file, unless this is the system font.
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    pub(crate) fn asset_path(&self) -> Option<&str> {
+        match self {
+            Self::System => None,
+            Self::Asset(path) => Some(path),
+        }
+    }
 }
 
 /// Horizontal alignment of a text node inside its frame.
@@ -539,6 +680,56 @@ impl Icon {
         self
     }
 
+    /// An icon the framework brings itself, on both platforms.
+    fn built_in(drawable: &str, symbol: &str) -> Self {
+        Self::new().drawable(drawable).sf(symbol)
+    }
+
+    /// A plus sign.
+    pub fn add() -> Self {
+        Self::built_in("krabik_ic_add", "plus")
+    }
+
+    /// A minus sign.
+    pub fn remove() -> Self {
+        Self::built_in("krabik_ic_remove", "minus")
+    }
+
+    /// A cross, for closing, clearing and removing.
+    pub fn close() -> Self {
+        Self::built_in("krabik_ic_close", "xmark")
+    }
+
+    /// A check mark.
+    pub fn check() -> Self {
+        Self::built_in("krabik_ic_check", "checkmark")
+    }
+
+    /// A magnifying glass.
+    pub fn search() -> Self {
+        Self::built_in("krabik_ic_search", "magnifyingglass")
+    }
+
+    /// An arrowhead that points down: something opens below.
+    pub fn chevron_down() -> Self {
+        Self::built_in("krabik_ic_chevron_down", "chevron.down")
+    }
+
+    /// An arrowhead that points up: what is open below closes.
+    pub fn chevron_up() -> Self {
+        Self::built_in("krabik_ic_chevron_up", "chevron.up")
+    }
+
+    /// An arrowhead that points right: tapping goes further in.
+    pub fn chevron_right() -> Self {
+        Self::built_in("krabik_ic_chevron_right", "chevron.right")
+    }
+
+    /// Three dots: more actions.
+    pub fn more() -> Self {
+        Self::built_in("krabik_ic_more", "ellipsis")
+    }
+
     /// The name Android should resolve.
     pub fn android_name(&self) -> Option<&str> {
         self.android.as_deref().or(self.shared.as_deref())
@@ -561,10 +752,25 @@ pub struct Style {
     pub width: Length,
     /// Height of the node.
     pub height: Length,
+    /// Smallest width the node may have, in logical points.
+    pub min_width: Option<f32>,
+    /// Largest width the node may have, in logical points.
+    pub max_width: Option<f32>,
+    /// Smallest height the node may have, in logical points.
+    pub min_height: Option<f32>,
+    /// Largest height the node may have, in logical points.
+    pub max_height: Option<f32>,
     /// Width-to-height ratio, when the node derives one dimension from the other.
     pub aspect_ratio: Option<f32>,
     /// Space between children.
     pub gap: f32,
+    /// Space between the lines of a wrapping row. `None` uses `gap`.
+    pub run_gap: Option<f32>,
+    /// Whether a row continues on a new line when its children do not fit.
+    pub wrap: bool,
+    /// Takes the node out of the flow of a stack and holds it at these
+    /// distances from the stack's edges.
+    pub inset: Option<Inset>,
     /// Share of the remaining main-axis space the node claims.
     pub grow: f32,
     /// Cross-axis alignment of the node's children.
@@ -595,6 +801,8 @@ pub struct Style {
     pub exit: Option<Transition>,
     /// Accessibility label announced by screen readers, if any.
     pub accessibility_label: Option<String>,
+    /// A short explanation shown while the node is pressed and held.
+    pub tooltip: Option<String>,
 }
 
 impl Style {
@@ -611,6 +819,7 @@ impl Style {
     /// of their own frame, appearance or disappearance.
     pub fn needs_view(&self) -> bool {
         self.accessibility_label.is_some()
+            || self.tooltip.is_some()
             || self.animation.is_some()
             || self.enter.is_some()
             || self.exit.is_some()

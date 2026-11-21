@@ -43,6 +43,7 @@ class KrabikPager(
         isFocusable = true
         clipChildren = true
         clipToPadding = true
+        KrabikViews.clipToOwnBounds(this)
     }
 
     /** Applies the page count and selected index from Rust. */

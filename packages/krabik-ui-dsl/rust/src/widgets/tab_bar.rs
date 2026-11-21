@@ -6,7 +6,7 @@ use crate::element::{Element, ElementKind, RawElement, style_builder, text_build
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
 use crate::message::Handler;
-use crate::message::Wrap;
+use crate::message::MessageMap;
 use crate::style::Color;
 use crate::style::FontWeight;
 use crate::widgets::CONTROL_WIDTH;
@@ -147,7 +147,7 @@ text_builder!(TabBar);
 const TAB_BAR_HEIGHT: f32 = 48.0;
 
 impl WidgetProps for TabBarProps {
-    fn map_messages(&mut self, wrap: &Wrap) {
+    fn map_messages(&mut self, wrap: &MessageMap) {
         self.on_select.map(wrap);
     }
 

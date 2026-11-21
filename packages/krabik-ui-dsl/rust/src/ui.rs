@@ -81,6 +81,50 @@ mod tests {
     }
 
     #[test]
+    fn an_icon_is_a_small_image_in_the_text_color() {
+        let element: Element = Image::icon(Icon::new().shared("add")).into();
+        let ElementKind::Widget(Widget::Image(props)) = &element.kind else {
+            panic!("expected an image");
+        };
+        assert_eq!(props.source, ImageSource::Icon(Icon::new().shared("add")));
+        assert_eq!(props.tint, Some(Color::TEXT));
+        // Unsized, it measures as 24 points square, with no measurer asked.
+        let size = Widget::Image(props.clone())
+            .intrinsic_size(None, &crate::engine::measure::ApproximateMeasure);
+        assert_eq!((size.width, size.height), (24.0, 24.0));
+
+        let element: Element = Image::icon(Icon::new().sf("plus"))
+            .size(16)
+            .tint(Color::ACCENT)
+            .into();
+        assert_eq!(element.style.width, Length::Points(16.0));
+        assert_eq!(element.style.height, Length::Points(16.0));
+        let ElementKind::Widget(Widget::Image(props)) = &element.kind else {
+            panic!("expected an image");
+        };
+        assert_eq!(props.tint, Some(Color::ACCENT));
+        // An ordinary image has no tint.
+        let element: Element = Image::new(ImageSource::asset("a.png")).into();
+        let ElementKind::Widget(Widget::Image(props)) = &element.kind else {
+            panic!("expected an image");
+        };
+        assert_eq!(props.tint, None);
+    }
+
+    #[test]
+    fn a_wrap_is_a_row_that_wraps() {
+        let element: Element = Wrap::new()
+            .spacing(8)
+            .run_spacing(4)
+            .child(Text::new("a"))
+            .into();
+        assert!(matches!(element.kind, ElementKind::Row));
+        assert!(element.style.wrap);
+        assert_eq!(element.style.gap, 8.0);
+        assert_eq!(element.style.run_gap, Some(4.0));
+    }
+
+    #[test]
     fn slider_step_is_optional() {
         let element: Element = Slider::new(0.5).step(0.25).into();
         let ElementKind::Widget(Widget::Slider(props)) = &element.kind else {
@@ -442,5 +486,38 @@ mod tests {
             dim_color(Color::adaptive(0xFF00_0000, 0xFFFF_FFFF), false),
             Color::adaptive(0x6600_0000, 0x66FF_FFFF)
         );
+    }
+    /// The macro turns settings into method calls, so the text styles and
+    /// the second constructor need nothing from it.
+    #[test]
+    fn the_view_macro_takes_text_styles_and_rich_text() {
+        let from_macro: Element = crate::view! {
+            Column {
+                Text(
+                    "Title",
+                    weight: FontWeight::Medium,
+                    italic,
+                    underline,
+                    letter_spacing: 1,
+                    line_height: 24,
+                    font: Font::asset("Display.ttf"),
+                )
+                Text::rich([Span::new("a"), Span::new("b").bold()], size: 14)
+            }
+        };
+        let by_hand: Element = Column::new()
+            .child(
+                Text::new("Title")
+                    .weight(FontWeight::Medium)
+                    .italic()
+                    .underline()
+                    .letter_spacing(1)
+                    .line_height(24)
+                    .font(Font::asset("Display.ttf")),
+            )
+            .child(Text::rich([Span::new("a"), Span::new("b").bold()]).size(14))
+            .into();
+
+        assert_eq!(from_macro.into_raw(), by_hand.into_raw());
     }
 }

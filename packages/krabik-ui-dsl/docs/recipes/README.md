@@ -16,6 +16,7 @@ reaches Android and iOS.
 | [Add a widget](add-a-widget.md) | Adds a new leaf widget end to end, carrying an invented `Stepper` through the properties, the event path, Android (Rust and Kotlin), iOS, tests and the showcase. |
 | [Add a chrome slot](add-a-chrome-slot.md) | Adds a piece of native chrome around a screen, following the floating action button for plain configuration and the snackbar for chrome the platform can dismiss on its own. |
 | [Write tests](write-tests.md) | Shows how to test at each level, from an app's `update` to the engine, the session with its fake platform, the macros, Espresso and XCUITest, and how to run a single test. |
+| [Embed a native view](embed-a-native-view.md) | For applications, not for changing the framework: placing a view made by the app's own Kotlin and Swift code (a map, a video player) in a Rust-described screen. |
 | [Debug a render](debug-a-render.md) | Gives a stage-by-stage procedure for finding out why something on screen is wrong, and the causes that have occurred in this codebase. |
 
 ## Three commands worth memorising

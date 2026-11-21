@@ -117,10 +117,10 @@ impl<M> Button<M> {
 impl<M> From<Button<M>> for Element<M> { /* Element::from_raw(component.0) */ }
 
 crate::element::style_builder!(Button);   // padding, width, background, key, ...
-crate::element::text_builder!(Button);    // size, color, bold   (because of `text`)
+crate::element::text_builder!(Button);    // size, color, bold, weight   (because of `text`)
 
 impl crate::widgets::WidgetProps for ButtonProps {
-    fn map_messages(&mut self, wrap: &Wrap) {
+    fn map_messages(&mut self, wrap: &MessageMap) {
         self.on_click.map(wrap);                       // one line per Handler field
     }
     fn text_style(&mut self) -> Option<TextStyleMut<'_>> {   // because of `text`
@@ -237,6 +237,26 @@ Other options used elsewhere: `set(name = text_align)` renames the method (`Text
 `set(some)` wraps the argument in `Some` (`RadioGroupProps::selected`), and `set(flag = true)`
 makes a method with no argument (`TextProps::ellipsis`).
 
+One field option is not about a setter. A colour is resolved for light or dark mode wherever the
+derive finds a `Color`, an `Option<Color>` or a `Vec<Color>` field. A list of values that carry
+colours of their own is marked `#[widget(colors)]`, and the derive calls `resolve_colors(scheme)`
+on each item; `TextProps::spans`, a `Vec<Span>`, is the one case.
+
+### `Text` is more than its derive
+
+`rust/src/widgets/text.rs` adds three things by hand to what the derive generates:
+
+- `Text::rich(spans)`, a second constructor. It stores the spans and sets `content` to their
+  texts joined, so everything that reads `content` keeps working.
+- `TextProps::runs()`, which the renderers use: one `TextRun` per span, with what the span does
+  not set filled in from the text and its place counted in UTF-16 code units, the way both
+  platforms index a string.
+- `TextProps::measure_key()`, the part of the platforms' measurement cache key that describes
+  the text. Every property that changes the size of a text is in it (size, weight, slant, letter
+  spacing, line height, line limit, the runs); a test changes each one and checks that the key
+  changes. A property that is missing there would make two different texts share one cached
+  size.
+
 `set(into)` on the colour is what makes `.color(0xFF00_897B)` work: `u32` converts into a fixed
 `Color` (chapter 9).
 
@@ -261,7 +281,8 @@ points, from `widgets/mod.rs`) when the width is unbounded, and is 40 points tal
 ```rust,ignore
 // rust/src/widgets/mod.rs
 // Tags must never be reused: they are part of a node's identity. The
-// containers in `ElementKind` use 1, 2, 3, 8, 9, 11 and 20.
+// containers in `ElementKind` use 1, 2, 3, 8, 9, 11 and 20 to 24, and 26
+// is a text that can be selected.
 widgets! {
     /// A run of text rendered by a native label.
     Text(TextProps) = 4,
@@ -328,7 +349,7 @@ each would be a 13-arm match. Instead the enum forwards to a trait:
 // rust/src/widgets/mod.rs
 pub(crate) trait WidgetProps: IntrinsicSize {
     /// Re-wraps every message the widget can produce.
-    fn map_messages(&mut self, wrap: &Wrap);
+    fn map_messages(&mut self, wrap: &MessageMap);
 
     /// The text style, for a widget that shows text.
     fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
@@ -348,7 +369,7 @@ and `Widget` has four one-line methods that call them through `props()` / `props
 
 ```rust,ignore
 impl Widget {
-    pub(crate) fn map_messages(&mut self, wrap: &Wrap) { self.props_mut().map_messages(wrap); }
+    pub(crate) fn map_messages(&mut self, wrap: &MessageMap) { self.props_mut().map_messages(wrap); }
     pub(crate) fn intrinsic_size(&self, max_width: Option<f32>, measurer: &dyn Measure) -> Size {
         self.props().intrinsic_size(max_width, measurer)
     }
@@ -516,6 +537,50 @@ on `Column` and `Row` writes `style.gap`. `Spacer::new` sets `style.grow = 1.0`.
 `Column::child` takes `impl Into<Element<M>>`. That bound is the whole type-safety story for
 messages: a `Button<Other>` does not convert into `Element<Msg>`, so it cannot be added to a
 `Column<Msg>` without a `map`.
+
+`Wrap` is not a kind of its own: it builds an `ElementKind::Row` and sets `style.wrap`, which the
+layout turns into flexbox wrapping. `Container` has a properties struct with two handlers,
+`on_tap` and `on_long_press`.
+
+### Widgets assembled from others
+
+`divider.rs`, `card.rs`, `list_tile.rs`, `avatar.rs`, `badge.rs`, `chip.rs`, `icon_button.rs`,
+`expansion_tile.rs`, `stepper.rs`, `number_stepper.rs`, `search_bar.rs`, `autocomplete.rs` and
+`grid.rs` add no `Widget` variant and no native code. Each is a builder whose conversion into an
+`Element` assembles containers, texts and images. The engine and the renderers never learn that a
+chip exists; they see a container with a row in it.
+
+The simple ones (`Divider`, `Card`) are one element and are built eagerly, as `TabsView` is. The
+others collect their parts and assemble on conversion, so the order of the builder calls does not
+matter:
+
+```rust,ignore
+// rust/src/widgets/list_tile.rs (trimmed)
+pub struct ListTile<M = ()>(pub(crate) RawElement, pub(crate) PhantomData<fn() -> M>, Parts);
+
+impl<M: 'static> From<ListTile<M>> for Element<M> {
+    fn from(component: ListTile<M>) -> Self {
+        let ListTile(shell, _, parts) = component;
+        // ... build a row from parts.title, parts.leading, parts.trailing ...
+        finish(shell, Container::new().handler(parts.on_tap).child(row))
+    }
+}
+
+style_builder!(ListTile);
+```
+
+The first field is a *shell*: an element that exists only so `style_builder!` has a style and a
+key to write to. `finish` (`rust/src/element.rs`) moves both onto the assembled root. Two rules
+follow. The style the root needs (a chip's height and radius, a tile's minimum height) is set on
+the shell in `new`, where the application's own style calls replace it. And a style set on the
+assembled root inside `from` is lost, so nothing is set there.
+
+Handlers are stored already erased, as `Handler<()>`, which is why these builders need no
+`M: Clone` to be converted. A widget that reports a value keeps the application's function in an
+`Arc` and makes one handler per button from it, as `NumberStepper` does for minus and plus.
+
+`Grid` is the one that wraps a widget with behaviour: it builds a `List` over line numbers whose
+rows are `Row`s of `columns` cells, so windowing and the recyclers work without knowing about it.
 
 ## What adding a widget touches on the core side
 

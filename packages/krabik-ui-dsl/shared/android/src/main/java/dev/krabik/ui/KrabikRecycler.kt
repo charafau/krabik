@@ -4,6 +4,8 @@ import android.content.Context
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.graphics.Canvas
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
@@ -35,15 +37,134 @@ object KrabikRecyclers {
         recycler.adapter = adapter
         adapter.recycler = recycler
         recycler.setHasFixedSize(itemHeightPx > 0)
+        KrabikViews.clipToOwnBounds(recycler)
         return if (refreshable) KrabikRefreshLayout(context, root, recycler) else recycler
     }
 
+    /**
+     * Applies what the description says about the list. `dismissible` and
+     * `reorderable` say which gestures on a row the application listens
+     * for; `sticky` holds the positions of the rows that stay at the top
+     * while their section scrolls, ascending.
+     */
     @JvmStatic
-    fun update(view: ViewGroup, count: Int, itemHeightPx: Int, revision: Long) {
+    fun update(
+        view: ViewGroup,
+        count: Int,
+        itemHeightPx: Int,
+        revision: Long,
+        dismissible: Boolean,
+        reorderable: Boolean,
+        sticky: IntArray,
+    ) {
         val recycler = KrabikViews.scrolling(view) as? RecyclerView ?: return
         val adapter = recycler.adapter as? RowAdapter ?: return
+        adapter.setGestures(dismissible, reorderable)
+        adapter.setSticky(sticky)
         adapter.update(count, itemHeightPx, revision)
         recycler.setHasFixedSize(itemHeightPx > 0)
+    }
+}
+
+/**
+ * Swiping a row away and dragging a row to another place.
+ *
+ * The recycler shows the gesture; what the list holds is the application's
+ * to say. So each gesture ends by telling Rust and then binding the rows
+ * again from the state, which puts a row back when the application kept it.
+ */
+private class RowGestures(private val adapter: RowAdapter) : ItemTouchHelper.Callback() {
+    private var draggedFrom = RecyclerView.NO_POSITION
+    private var draggedTo = RecyclerView.NO_POSITION
+
+    override fun getMovementFlags(recycler: RecyclerView, holder: RecyclerView.ViewHolder): Int {
+        val drag = if (adapter.reorderable) ItemTouchHelper.UP or ItemTouchHelper.DOWN else 0
+        val swipe = if (adapter.dismissible) ItemTouchHelper.START or ItemTouchHelper.END else 0
+        return makeMovementFlags(drag, swipe)
+    }
+
+    override fun isLongPressDragEnabled(): Boolean = adapter.reorderable
+
+    override fun isItemViewSwipeEnabled(): Boolean = adapter.dismissible
+
+    override fun onMove(
+        recycler: RecyclerView,
+        holder: RecyclerView.ViewHolder,
+        target: RecyclerView.ViewHolder,
+    ): Boolean {
+        if (draggedFrom == RecyclerView.NO_POSITION) {
+            draggedFrom = holder.bindingAdapterPosition
+        }
+        draggedTo = target.bindingAdapterPosition
+        adapter.notifyItemMoved(holder.bindingAdapterPosition, target.bindingAdapterPosition)
+        return true
+    }
+
+    override fun onSwiped(holder: RecyclerView.ViewHolder, direction: Int) {
+        val position = holder.bindingAdapterPosition
+        if (position != RecyclerView.NO_POSITION) {
+            adapter.dismissed(position)
+        }
+    }
+
+    override fun clearView(recycler: RecyclerView, holder: RecyclerView.ViewHolder) {
+        super.clearView(recycler, holder)
+        val (from, to) = draggedFrom to draggedTo
+        draggedFrom = RecyclerView.NO_POSITION
+        draggedTo = RecyclerView.NO_POSITION
+        if (from != RecyclerView.NO_POSITION && to != RecyclerView.NO_POSITION && from != to) {
+            // The recycler is still laying out; tell Rust once it is done.
+            recycler.post { adapter.moved(from, to) }
+        }
+    }
+}
+
+/**
+ * Draws the current section's header over the top of the list.
+ *
+ * The header is an ordinary row. Its picture comes from a holder of its own
+ * that is never attached: Rust binds the row into it as into any holder, and
+ * the decoration draws that view at the top, pushed up by the next header.
+ */
+private class StickyHeaders(private val adapter: RowAdapter) : RecyclerView.ItemDecoration() {
+    private var holder: RowAdapter.Holder? = null
+    private var shown = RecyclerView.NO_POSITION
+    private var shownRevision = Long.MIN_VALUE
+    private var shownWidth = 0
+
+    override fun onDrawOver(canvas: Canvas, recycler: RecyclerView, state: RecyclerView.State) {
+        val layout = recycler.layoutManager as? LinearLayoutManager ?: return
+        val first = layout.findFirstVisibleItemPosition()
+        if (first == RecyclerView.NO_POSITION) return
+        val header = adapter.sticky.lastOrNull { it <= first } ?: return
+        // The header row itself is still fully in place: nothing to pin.
+        val own = layout.findViewByPosition(header)
+        if (own != null && own.top >= 0) return
+
+        val pinned = holder ?: adapter.createViewHolder(recycler, 0).also { holder = it }
+        if (header != shown || adapter.revision != shownRevision || recycler.width != shownWidth) {
+            adapter.bindDetached(pinned, header, recycler.width)
+            shown = header
+            shownRevision = adapter.revision
+            shownWidth = recycler.width
+        }
+        val view = pinned.host
+        val height = view.layoutParams.height.coerceAtLeast(0)
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(recycler.width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+        )
+        view.layout(0, 0, recycler.width, height)
+
+        // The next header pushes this one up as it arrives.
+        val next = adapter.sticky.firstOrNull { it > first }
+        val nextTop = next?.let { layout.findViewByPosition(it)?.top }
+        val offset = if (nextTop != null && nextTop < height) nextTop - height else 0
+        canvas.save()
+        canvas.clipRect(0, 0, recycler.width, (height + offset).coerceAtLeast(0))
+        canvas.translate(0f, offset.toFloat())
+        view.draw(canvas)
+        canvas.restore()
     }
 }
 
@@ -59,7 +180,62 @@ private class RowAdapter(
 
     private var count = count
     private var itemHeightPx = itemHeightPx
-    private var revision = Long.MIN_VALUE
+    var revision = Long.MIN_VALUE
+        private set
+
+    var dismissible = false
+        private set
+    var reorderable = false
+        private set
+    var sticky = IntArray(0)
+        private set
+    private var gestures: ItemTouchHelper? = null
+    private var headers: StickyHeaders? = null
+
+    /** Says which gestures on a row the application listens for. */
+    fun setGestures(dismissible: Boolean, reorderable: Boolean) {
+        this.dismissible = dismissible
+        this.reorderable = reorderable
+        if ((dismissible || reorderable) && gestures == null) {
+            gestures = ItemTouchHelper(RowGestures(this)).also { it.attachToRecyclerView(recycler) }
+        }
+    }
+
+    /** Says which rows stay at the top while their section scrolls. */
+    fun setSticky(positions: IntArray) {
+        val changed = !positions.contentEquals(sticky)
+        sticky = positions
+        if (positions.isNotEmpty() && headers == null) {
+            headers = StickyHeaders(this).also { recycler?.addItemDecoration(it) }
+        }
+        if (changed) recycler?.invalidateItemDecorations()
+    }
+
+    /** A row was swiped away: tell Rust, then show what the state says. */
+    fun dismissed(position: Int) {
+        root.onRowDismissed(nodeId, position)
+        // The helper keeps a swiped view where the finger took it, because
+        // it expects the row to be removed. This holder goes on to show
+        // whatever the state has at its position, so the helper is made to
+        // let go of it: detaching puts every view it holds back in place.
+        gestures?.let {
+            it.attachToRecyclerView(null)
+            it.attachToRecyclerView(recycler)
+        }
+        if (position < count) notifyItemChanged(position)
+    }
+
+    /** A row was dropped at another place: tell Rust, then show what the state says. */
+    fun moved(from: Int, to: Int) {
+        root.onRowMoved(nodeId, from, to)
+        if (count > 0) notifyItemRangeChanged(0, count)
+    }
+
+    /** Binds a row into a holder the recycler does not manage. */
+    fun bindDetached(holder: Holder, position: Int, width: Int) {
+        val measured = root.bindRow(nodeId, position, holder.id, holder.host, width)
+        applyHeight(holder.host, rowHeight(measured))
+    }
 
     class Holder(val host: FrameLayout) : RecyclerView.ViewHolder(host) {
         /** Identifies this holder to Rust, which caches the row it shows. */

@@ -540,7 +540,9 @@ input type can call `setText`). The try-lock in the entry points (chapter 2) cat
 
 ## How an app uses it
 
-An app's Android project has three framework-specific pieces. The example app shows them all.
+An app's Android project has three framework-specific pieces. The example app shows them all;
+`krabik create <name> --with-dsl` writes the same three for a new app, with the bridge object
+named `AppBridge`.
 
 **A `MainActivity`** that names the native library and the bridge:
 

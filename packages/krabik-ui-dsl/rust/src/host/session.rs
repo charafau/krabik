@@ -58,6 +58,9 @@ pub(crate) struct Session<P: Platform> {
     /// The device's language, and the appearance every host resolves its
     /// colours for.
     environment: Environment,
+    /// What every text size is multiplied by; one unless the platform says
+    /// otherwise.
+    text_scale: f32,
     /// The environment the application was last told about.
     told: Option<Environment>,
     /// The height the sheet's content had when the controller last heard
@@ -106,6 +109,7 @@ impl<P: Platform> Session<P> {
             hot_library: 0,
             navigation_synced: false,
             environment: Environment::default(),
+            text_scale: 1.0,
             told: running.told,
             native_pop: false,
             sheet_height: None,
@@ -253,6 +257,14 @@ impl<P: Platform> Session<P> {
         self.environment.color_scheme = scheme;
     }
 
+    /// Records the factor the user's text size setting asks for, on a
+    /// platform whose text views do not apply it themselves. The next
+    /// render scales every text.
+    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    pub(crate) fn set_text_scale(&mut self, scale: f32) {
+        self.text_scale = scale;
+    }
+
     /// Records the user's language as a BCP 47 tag. The next render tells
     /// the application.
     pub(crate) fn set_locale(&mut self, locale: &str) {
@@ -339,6 +351,7 @@ impl<P: Platform> Session<P> {
             if let Some(element) = element {
                 host.runtime_mut()
                     .set_color_scheme(self.environment.color_scheme);
+                host.runtime_mut().set_text_scale(self.text_scale);
                 host.render(cx, &element)?;
             }
         }
@@ -569,6 +582,11 @@ impl<P: Platform> Session<P> {
             NodeEvent::Toggle(_)
                 | NodeEvent::Text(_)
                 | NodeEvent::Slider(_)
+                | NodeEvent::Range(..)
+                // The platform's list already shows the row gone or moved;
+                // it is rebound from the state whatever the application did.
+                | NodeEvent::Dismiss(_)
+                | NodeEvent::Move(..)
                 | NodeEvent::Select(_)
                 | NodeEvent::Picker(_)
                 // The pull left the indicator spinning; it stops unless the

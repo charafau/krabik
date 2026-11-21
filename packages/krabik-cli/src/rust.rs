@@ -291,6 +291,63 @@ uniffi = {{ git = "{UNIFFI_GIT}", rev = "{UNIFFI_REV}", default-features = false
     )
 }
 
+/// The name of the krabik-ui-dsl crate, as it appears in a manifest.
+pub(crate) const DSL_CRATE: &str = "krabik-ui-dsl";
+
+/// Whether the project in the current directory is a krabik-ui-dsl app.
+///
+/// Gradle and Xcode build the Rust library of such a project themselves, and
+/// it has no UniFFI bindings.
+pub fn is_dsl_project() -> bool {
+    fs::read_to_string("./rust/Cargo.toml")
+        .map(|cargo_toml| dsl_dependency(&cargo_toml).is_some())
+        .unwrap_or(false)
+}
+
+/// Finds the krabik-ui-dsl dependency in a `Cargo.toml` and returns how it is
+/// declared: the value of `krabik-ui-dsl = ...`, or the body of the
+/// `[dependencies.krabik-ui-dsl]` table.
+pub(crate) fn dsl_dependency(cargo_toml: &str) -> Option<String> {
+    let table = format!("dependencies.{DSL_CRATE}");
+
+    let mut in_dependencies = false;
+    let mut in_table = false;
+    let mut body: Option<String> = None;
+
+    for line in cargo_toml.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        if let Some(section) = line.strip_prefix('[') {
+            if in_table {
+                break;
+            }
+            let section = section.split(']').next().unwrap_or("").trim();
+            in_dependencies = section == "dependencies";
+            in_table = section == table;
+            if in_table {
+                body = Some(String::new());
+            }
+            continue;
+        }
+
+        if in_table {
+            let body = body.get_or_insert_with(String::new);
+            body.push_str(line);
+            body.push('\n');
+        } else if in_dependencies
+            && let Some((key, value)) = line.split_once('=')
+            && key.trim().trim_matches('"') == DSL_CRATE
+        {
+            return Some(value.trim().to_string());
+        }
+    }
+
+    body
+}
+
 /// Reads `./rust/Cargo.toml` and returns the sanitized Rust library name.
 pub fn get_lib_name() -> Result<String> {
     let cargo_toml =
@@ -344,6 +401,37 @@ mod tests {
     fn test_installed_targets_ignores_surrounding_whitespace() {
         let targets = InstalledTargets::from_list("  aarch64-linux-android  \n");
         assert!(targets.contains("aarch64-linux-android"));
+    }
+
+    #[test]
+    fn test_dsl_dependency_inline() {
+        let toml = "[package]\nname = \"demo\"\n\n[dependencies]\n\
+                    krabik-ui-dsl = { path = \"../dsl/rust\", features = [\"hot-reload\"] }\n\
+                    jni = \"0.22\"\n";
+        assert_eq!(
+            dsl_dependency(toml).as_deref(),
+            Some("{ path = \"../dsl/rust\", features = [\"hot-reload\"] }")
+        );
+    }
+
+    #[test]
+    fn test_dsl_dependency_table() {
+        let toml = "[dependencies.krabik-ui-dsl]\npath = \"../dsl/rust\"\n\
+                    features = [\"svg\"]\n\n[workspace]\n";
+        assert_eq!(
+            dsl_dependency(toml).as_deref(),
+            Some("path = \"../dsl/rust\"\nfeatures = [\"svg\"]\n")
+        );
+    }
+
+    #[test]
+    fn test_dsl_dependency_missing() {
+        // a UniFFI project
+        assert_eq!(dsl_dependency(&lib_cargo_toml("demo")), None);
+        // only a comment, or another section, mentions the crate
+        let toml = "[dependencies]\n# krabik-ui-dsl = \"1\"\njni = \"0.22\"\n\n\
+                    [features]\nkrabik-ui-dsl = []\n";
+        assert_eq!(dsl_dependency(toml), None);
     }
 
     #[test]

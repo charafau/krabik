@@ -234,7 +234,7 @@ and one in the table:
     /// A native tab bar.
     TabBar(TabBarProps) = 19,
     /// A native minus/plus control that holds a whole number.
-    Stepper(StepperProps) = 21,
+    Stepper(StepperProps) = 28,
 ```
 
 The `widgets!` macro, defined a few lines above the table, expands each line into a `Widget`
@@ -247,12 +247,12 @@ variant and into one arm of three matches: `tag`, `props` and `props_mut`. So th
 ```rust,ignore
 // rust/src/widgets/mod.rs
 // Tags must never be reused: they are part of a node's identity. The
-// containers in `ElementKind` use 1, 2, 3, 8, 9, 11 and 20.
+// containers in `ElementKind` use 1, 2, 3, 8, 9, 11 and 20 to 24.
 ```
 
 The tag is mixed into every node id (`node_id` in `rust/src/engine/tree.rs` hashes the parent id,
-the tag, and the key or index). The widgets use 4 to 7, 10 and 12 to 19. The next free number is
-21. Why uniqueness matters: if two variants shared a tag, replacing one with the other at the same
+the tag, and the key or index). The widgets use 4 to 7, 10, 12 to 19, 25 and 27. The next free number is
+28. Why uniqueness matters: if two variants shared a tag, replacing one with the other at the same
 position would keep the same node id. The diff in `rust/src/engine/render.rs` decides "replace"
 versus "update" by comparing `std::mem::discriminant` of the `NodeKind`, and every widget is the
 same `NodeKind::Widget`, so it would emit an `Op::Update` carrying stepper properties for a view
@@ -788,7 +788,7 @@ pub(crate) mod stepper;
             ) => {}
 
 // in `IosState::create_widget`
-            Widget::Stepper(props) => stepper::create(props, node, site),
+            Widget::Stepper(_) => stepper::create(node, site),
 ```
 
 `update_content` matches on the pair `(widget, content)`. The first new arm handles the pair that
@@ -805,14 +805,18 @@ accessibility label:
 ```rust,ignore
 // rust/src/ios/style.rs, in `apply_accessibility`
         // A radio group must stay a plain container so its options remain
-        // individually reachable by accessibility services.
-        view.setIsAccessibilityElement(
-            !matches!(
-                node.kind,
-                NodeKind::Widget(Widget::RadioGroup(_)) | NodeKind::Widget(Widget::TabBar(_))
-            ),
-            mtm,
-        );
+        // individually reachable by accessibility services. A text field is
+        // already exposed by UIKit as an editable element; forcing the flag
+        // would turn it into a plain labelled view.
+        if !matches!(node.kind, NodeKind::Widget(Widget::TextField(_))) {
+            view.setIsAccessibilityElement(
+                !matches!(
+                    node.kind,
+                    NodeKind::Widget(Widget::RadioGroup(_)) | NodeKind::Widget(Widget::TabBar(_))
+                ),
+                mtm,
+            );
+        }
 ```
 
 A stepper with `.accessibility_label("Quantity")` would become one opaque element, and neither
@@ -825,7 +829,7 @@ VoiceOver nor XCUITest could reach its minus and plus halves. Add
 ## What the compiler points at when you add the enum variant
 
 These are all the exhaustive matches on `Widget` in the crate (no `_ =>` arm), found by searching
-for `Widget::` across `rust/src`. Adding `Stepper(StepperProps) = 21` breaks each hand-written one.
+for `Widget::` across `rust/src`. Adding `Stepper(StepperProps) = 28` breaks each hand-written one.
 
 | Where | Function | Target that compiles it | What it is for |
 |---|---|---|---|
@@ -1014,7 +1018,7 @@ In this order, cheapest first:
 This is the list to reread before calling the widget done. Each item compiles cleanly when
 forgotten.
 
-**A unique tag.** The compiler does not check that `21` is unused: the macro emits one match arm
+**A unique tag.** The compiler does not check that `28` is unused: the macro emits one match arm
 per variant returning a number, and two arms returning the same number are valid Rust. The
 consequence is described in step 2. A unit test does check it (`every_widget_tag_is_unique` in
 `rust/src/widgets/mod.rs`), so this one is caught by `cargo test`, not by `cargo check`.
@@ -1075,7 +1079,8 @@ above.
 the next render applies the value the application now holds. If the application does *not* change
 its state (it ignores the message, or clamps the value back to what it was), the rebuilt tree
 equals the old one. The session covers this: after a value event (`Toggle`, `Text`, `Slider`,
-`Select`, `Picker`) it asks the runtime to update that node on the next render even if nothing
+`Select`, `Picker`; the list is `changes_value` in `Session::node_event`,
+`rust/src/host/session.rs`, and a new value event must be added to it by hand) it asks the runtime to update that node on the next render even if nothing
 about it changed. What the widget owes in return is an update function that compares against the
 value the native view shows *now*. A function that compares against a copy it stored at the last
 render will see no difference and leave the control wrong.

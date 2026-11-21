@@ -25,6 +25,10 @@ void krabik_ios_set_locale(uint64_t handle, const char *locale);
 /// Reports a switch between the light and the dark appearance.
 void krabik_ios_set_color_scheme(uint64_t handle, bool dark);
 
+/// Reports the factor the user's text size setting asks for; one is the
+/// default size. Every text Rust draws is scaled by it.
+void krabik_ios_set_text_scale(uint64_t handle, double scale);
+
 /// Rebuilds the tree for the given host viewport and applies the changes.
 void krabik_ios_render(uint64_t handle, uint64_t host, double width, double height);
 

@@ -308,7 +308,9 @@ Only the implicit kind exists.
 | React Native | Here |
 |---|---|
 | Metro bundles JavaScript; the native app loads the bundle | cargo compiles the app and the framework into one native library; Gradle and Xcode invoke cargo |
-| Fast Refresh | hot reload of `view` and `update` code on the emulator and the simulator ([how](../design/hot-reload.md)) |
+| `npx @react-native-community/cli init` | `krabik create <name> --with-dsl`; the project refers to a local checkout of the framework |
+| `run-android`, `run-ios` | `krabik run`, `krabik run --platform ios` |
+| Fast Refresh | `krabik watch`: hot reload of `view` and `update` code on the emulator and the simulator ([how](../design/hot-reload.md)) |
 | Over-the-air JavaScript updates | not possible; everything is compiled native code |
 | Flipper / React DevTools | the platform's view inspectors show the real views; logs under the `krabik` tag |
 | Jest, React Native Testing Library | Rust tests against a fake platform that assert on operations and messages |

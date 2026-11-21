@@ -211,6 +211,20 @@ pub extern "system" fn native_on_click<'caller>(
     });
 }
 
+/// A container was pressed and held.
+#[unsafe(export_name = native_name!("nativeOnLongClick"))]
+pub extern "system" fn native_on_long_click<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    host: jlong,
+    node_id: jlong,
+) {
+    run(&mut unenv, "nativeOnLongClick", |env| {
+        on_node_event(env, handle, host, node_id, NodeEvent::LongPress)
+    });
+}
+
 /// The text of an input changed.
 #[unsafe(export_name = native_name!("nativeOnTextChanged"))]
 pub extern "system" fn native_on_text_changed<'caller>(
@@ -338,6 +352,71 @@ pub extern "system" fn native_on_checked_changed<'caller>(
 ) {
     run(&mut unenv, "nativeOnCheckedChanged", |env| {
         on_node_event(env, handle, host, node_id, NodeEvent::Toggle(checked))
+    });
+}
+
+/// A row of a recycled list was swiped away.
+#[unsafe(export_name = native_name!("nativeOnRowDismissed"))]
+pub extern "system" fn native_on_row_dismissed<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    host: jlong,
+    node_id: jlong,
+    position: jint,
+) {
+    run(&mut unenv, "nativeOnRowDismissed", |env| {
+        let event = NodeEvent::Dismiss(position.max(0) as usize);
+        on_node_event(env, handle, host, node_id, event)
+    });
+}
+
+/// A row of a recycled list was dragged to another place.
+#[unsafe(export_name = native_name!("nativeOnRowMoved"))]
+pub extern "system" fn native_on_row_moved<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    host: jlong,
+    node_id: jlong,
+    from: jint,
+    to: jint,
+) {
+    run(&mut unenv, "nativeOnRowMoved", |env| {
+        let event = NodeEvent::Move(from.max(0) as usize, to.max(0) as usize);
+        on_node_event(env, handle, host, node_id, event)
+    });
+}
+
+/// A view of the application's own sent a string.
+#[unsafe(export_name = native_name!("nativeOnNativeEvent"))]
+pub extern "system" fn native_on_native_event<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    host: jlong,
+    node_id: jlong,
+    value: JString<'caller>,
+) {
+    run(&mut unenv, "nativeOnNativeEvent", |env| {
+        let value = value.try_to_string(env)?;
+        on_node_event(env, handle, host, node_id, NodeEvent::Native(value))
+    });
+}
+
+/// A thumb of a range slider moved.
+#[unsafe(export_name = native_name!("nativeOnRangeChanged"))]
+pub extern "system" fn native_on_range_changed<'caller>(
+    mut unenv: EnvUnowned<'caller>,
+    _this: JObject<'caller>,
+    handle: jlong,
+    host: jlong,
+    node_id: jlong,
+    low: jfloat,
+    high: jfloat,
+) {
+    run(&mut unenv, "nativeOnRangeChanged", |env| {
+        on_node_event(env, handle, host, node_id, NodeEvent::Range(low, high))
     });
 }
 

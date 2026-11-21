@@ -41,7 +41,7 @@ impl<A: 'static> Handler<A> {
 
     /// Passes every message this handler produces through `wrap`. Used to
     /// lift a child component's messages into its parent's message type.
-    pub(crate) fn map(&mut self, wrap: &Wrap) {
+    pub(crate) fn map(&mut self, wrap: &MessageMap) {
         if let Some(make) = self.0.take() {
             let wrap = wrap.clone();
             self.0 = Some(Arc::new(move |payload| wrap(make(payload))));
@@ -50,7 +50,7 @@ impl<A: 'static> Handler<A> {
 }
 
 /// A function that re-wraps a message; see [`Handler::map`].
-pub(crate) type Wrap = Arc<dyn Fn(Message) -> Message + Send + Sync>;
+pub(crate) type MessageMap = Arc<dyn Fn(Message) -> Message + Send + Sync>;
 
 impl<A> Clone for Handler<A> {
     fn clone(&self) -> Self {

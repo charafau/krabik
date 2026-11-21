@@ -72,6 +72,8 @@ pub struct Runtime {
     revision: u64,
     /// The appearance colours are resolved for.
     scheme: ColorScheme,
+    /// What every text size is multiplied by; see [`Runtime::set_text_scale`].
+    text_scale: f32,
     /// The height each list had in the last layout, which is what its window
     /// has to cover.
     list_heights: HashMap<NodeId, f32>,
@@ -100,6 +102,7 @@ impl Runtime {
             viewport: Size::ZERO,
             revision: 0,
             scheme: ColorScheme::Light,
+            text_scale: 1.0,
             list_heights: HashMap::new(),
             reapply: None,
             row_reapply: None,
@@ -110,6 +113,21 @@ impl Runtime {
     /// carries the colours that changed.
     pub fn set_color_scheme(&mut self, scheme: ColorScheme) {
         self.scheme = scheme;
+    }
+
+    /// Sets the factor every text size, line height and letter spacing is
+    /// multiplied by. The next update carries the texts that changed.
+    ///
+    /// This is for a platform whose text views do not follow the user's
+    /// text size by themselves (iOS). The sizes are scaled in the tree, so
+    /// layout, measurement and the renderer all see the scaled values, and a
+    /// new factor reaches them as ordinary updates.
+    pub fn set_text_scale(&mut self, scale: f32) {
+        self.text_scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
     }
 
     /// Makes the next render update the control `id` from the description,
@@ -263,6 +281,7 @@ impl Runtime {
             &self.list_heights,
         );
         tree::resolve_colors(&mut tree, self.scheme);
+        tree::scale_text(&mut tree, self.text_scale);
         (tree, info)
     }
 
@@ -482,6 +501,7 @@ impl Runtime {
     pub(crate) fn build_subtree(&self, element: &RawElement, root: NodeId) -> UiNode {
         let mut tree = tree::build_at(element, root).0;
         tree::resolve_colors(&mut tree, self.scheme);
+        tree::scale_text(&mut tree, self.text_scale);
         tree
     }
 
@@ -792,6 +812,35 @@ mod tests {
 
         let switch = runtime.tree().children[0].children[0].id;
         assert!(actions(&runtime, switch).toggle.is_set());
+    }
+
+    #[test]
+    fn a_container_reports_taps_and_long_presses_apart() {
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        let element: Element<&'static str> = Column::new()
+            .child(Container::new().on_tap("open").on_long_press("menu"))
+            .child(Container::new().on_long_press("only"))
+            .into();
+        runtime.update(&element, viewport());
+
+        let both = actions(&runtime, runtime.tree().children[0].children[0].id);
+        let message = |actions: &Actions, event| {
+            actions
+                .message(&event)
+                .and_then(|message| message.downcast::<&'static str>().ok())
+                .map(|message| *message)
+        };
+        assert_eq!(message(&both, crate::host::NodeEvent::Click), Some("open"));
+        assert_eq!(
+            message(&both, crate::host::NodeEvent::LongPress),
+            Some("menu")
+        );
+        let held = actions(&runtime, runtime.tree().children[0].children[1].id);
+        assert_eq!(message(&held, crate::host::NodeEvent::Click), None);
+        assert_eq!(
+            message(&held, crate::host::NodeEvent::LongPress),
+            Some("only")
+        );
     }
 
     #[test]
@@ -1291,6 +1340,58 @@ mod tests {
             .message(())
             .expect("handler");
         assert_eq!(message.downcast_ref::<i32>(), Some(&5));
+    }
+
+    #[test]
+    fn a_new_text_scale_updates_the_texts_and_lays_them_out_again() {
+        fn page() -> Element {
+            Column::new()
+                .align_items(crate::style::Align::Start)
+                .child(Text::new("Hello").line_height(20).letter_spacing(1))
+                .child(Text::rich([crate::ui::Span::new("big").size(30)]))
+                .into()
+        }
+        let text = |runtime: &Runtime, index: usize| match &runtime.tree().children[0].children
+            [index]
+            .kind
+        {
+            NodeKind::Widget(Widget::Text(props)) => props.clone(),
+            other => panic!("expected text, got {other:?}"),
+        };
+        let height = |runtime: &Runtime| {
+            let id = runtime.tree().children[0].children[0].id;
+            runtime.frames().get(&id).expect("laid out").height
+        };
+
+        let mut runtime = Runtime::new(Box::new(ApproximateMeasure));
+        runtime.update(&page().into_raw(), viewport());
+        assert_eq!(text(&runtime, 0).size, 16.0);
+        assert_eq!(height(&runtime), 20.0);
+
+        runtime.set_text_scale(1.5);
+        let update = runtime.update(&page().into_raw(), viewport());
+
+        let first = text(&runtime, 0);
+        assert_eq!(first.size, 24.0);
+        assert_eq!(first.line_height, Some(30.0));
+        assert_eq!(first.letter_spacing, 1.5);
+        assert_eq!(text(&runtime, 1).spans[0].size, Some(45.0));
+        // The frame was measured again for the larger text.
+        assert_eq!(height(&runtime), 30.0);
+        assert!(
+            update
+                .ops
+                .iter()
+                .filter(|op| matches!(op, Op::Update(_)))
+                .count()
+                >= 2,
+            "{:?}",
+            update.ops
+        );
+
+        // The same factor again changes nothing.
+        let update = runtime.update(&page().into_raw(), viewport());
+        assert!(update.ops.is_empty(), "{:?}", update.ops);
     }
 
     #[test]

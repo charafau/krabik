@@ -21,9 +21,11 @@ pub(crate) mod button;
 pub(crate) mod check;
 pub(crate) mod container;
 pub(crate) mod date_picker;
+pub(crate) mod native_view;
 pub(crate) mod pager;
 pub(crate) mod progress;
 pub(crate) mod radio_group;
+pub(crate) mod range_slider;
 pub(crate) mod refresh;
 pub(crate) mod scroll;
 pub(crate) mod slider;
@@ -68,6 +70,12 @@ pub(crate) fn update_content(
             }
             (Widget::TabBar(props), Content::TabBar(control)) => update_tab_bar(control, props),
             (Widget::Slider(props), Content::Slider(slider)) => update_slider(slider, props),
+            (Widget::NativeView(props), Content::NativeView(view)) => {
+                native_view::update_native_view(view, props)
+            }
+            (Widget::RangeSlider(props), Content::RangeSlider(slider)) => {
+                range_slider::update_range_slider(slider, props)
+            }
             (Widget::Progress(props), Content::Progress(progress)) => {
                 update_progress(progress, props);
             }
@@ -88,6 +96,8 @@ pub(crate) fn update_content(
             | (Widget::DatePicker(_), _)
             | (Widget::TabBar(_), _)
             | (Widget::Slider(_), _)
+            | (Widget::RangeSlider(_), _)
+            | (Widget::NativeView(_), _)
             | (Widget::Progress(_), _)
             | (Widget::Spinner(_), _) => {}
         },
@@ -127,8 +137,27 @@ pub(crate) fn update_content(
             }
         }
         NodeKind::Container(props) => {
-            if let Content::Container { tap, .. } = content {
-                container::update_container(tap, props);
+            if let Content::Container {
+                host,
+                tap,
+                long_press,
+                menu_button,
+                context_menu,
+                target,
+            } = content
+            {
+                container::update_container(
+                    container::Parts {
+                        host,
+                        tap,
+                        long_press,
+                        menu_button,
+                        context_menu,
+                        target,
+                    },
+                    props,
+                    mtm,
+                );
             }
         }
         NodeKind::Scroll(props) => {
@@ -181,6 +210,8 @@ impl IosState {
             Widget::TabBar(_) => tab_bar::create(node, site),
             Widget::DatePicker(_) => date_picker::create(node, site),
             Widget::Slider(_) => slider::create(node, site),
+            Widget::RangeSlider(_) => range_slider::create(node, site),
+            Widget::NativeView(_) => native_view::create(node, site),
             Widget::Progress(_) => progress::create(node, site),
             Widget::Spinner(_) => progress::create_spinner(node, site),
             Widget::Image(props) => self.create_image(props, node, site.mtm),

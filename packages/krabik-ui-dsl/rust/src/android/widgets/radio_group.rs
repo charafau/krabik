@@ -3,7 +3,7 @@
 use crate::android::RADIO_GROUP_CLASS;
 use crate::android::handles::{Method, VOID, class, get as jni_handles, method, widget_ctor};
 use crate::android::widgets::{Ctor, Site};
-use crate::ui::{FontWeight, RadioGroupProps};
+use crate::ui::RadioGroupProps;
 use jni::errors::Result as JniResult;
 use jni::jni_sig;
 use jni::objects::{JClass, JObject};
@@ -37,7 +37,8 @@ pub(crate) fn update_radio_group(
             JValue::Float(props.size),
             JValue::Int(props.color.argb() as jint),
             JValue::Float(props.spacing),
-            JValue::Bool(matches!(props.weight, FontWeight::Bold)),
+            // the control only knows regular and bold
+            JValue::Bool(props.weight.is_bold()),
         ],
     )
 }

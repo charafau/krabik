@@ -7,7 +7,7 @@
 
 mod common;
 
-use common::{FakeToolchain, cli};
+use common::{FakeToolchain, cli, fake_dsl};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
@@ -145,4 +145,121 @@ fn run_help_documents_the_abi_flag() {
         .assert()
         .success()
         .stdout(predicate::str::contains("--abi"));
+}
+
+/// A fake `adb` that reports a single arm64 device and records its calls.
+const FAKE_ADB_LOGGING: &str = r#"#!/bin/sh
+echo "adb $*" >> "$FAKE_LOG"
+case "$1" in
+    devices)
+        printf 'List of devices attached\n'
+        printf 'TEST1234               device product:sdk_gphone model:Pixel_7 device:emu64a transport_id:1\n'
+        exit 0
+        ;;
+esac
+
+if [ "$1" = "-s" ] && [ "$3" = "shell" ] && [ "$4" = "getprop" ] && [ "$5" = "ro.product.cpu.abi" ]; then
+    printf 'arm64-v8a\n'
+    exit 0
+fi
+
+exit 0
+"#;
+
+/// The tools of a krabik-ui-dsl project: `cargo` must not be called, Gradle
+/// builds the Rust library.
+fn dsl_tools() -> FakeToolchain {
+    FakeToolchain::new(&[
+        ("adb", FAKE_ADB_LOGGING),
+        (
+            "cargo",
+            "#!/bin/sh\necho \"cargo $*\" >> \"$FAKE_LOG\"\nexit 0\n",
+        ),
+        ("xcodegen", "#!/bin/sh\nexit 0\n"),
+    ])
+}
+
+/// Creates a krabik-ui-dsl project named `demo` and returns its root.
+fn create_dsl_project(tools: &FakeToolchain, work: &TempDir) -> std::path::PathBuf {
+    let dsl = fake_dsl(work.path());
+    cli(tools)
+        .current_dir(work.path())
+        .env("FAKE_LOG", work.path().join("create.log"))
+        .args(["create", "demo", "--with-dsl", "--dsl-path"])
+        .arg(&dsl)
+        .assert()
+        .success();
+    work.path().join("demo")
+}
+
+#[test]
+fn run_lets_gradle_build_a_dsl_project() {
+    let tools = dsl_tools();
+    let work = TempDir::new().unwrap();
+    let project = create_dsl_project(&tools, &work);
+    let log = work.path().join("calls.log");
+
+    cli(&tools)
+        .current_dir(&project)
+        .env("FAKE_LOG", &log)
+        .env_remove("ANDROID_NDK_HOME")
+        .arg("run")
+        .assert()
+        .success();
+
+    let calls = std::fs::read_to_string(&log).unwrap();
+    // Gradle builds the library for the device and installs the app
+    assert!(
+        calls.contains("gradlew -p android app:installDebug -PkrabikAbis=arm64-v8a"),
+        "{calls}"
+    );
+    assert!(
+        calls.contains(
+            "adb -s TEST1234 shell am start -n com.example.demo/com.example.demo.MainActivity"
+        ),
+        "{calls}"
+    );
+    // neither the library nor UniFFI bindings are built by the CLI
+    assert!(!calls.contains("cargo"), "{calls}");
+}
+
+#[test]
+fn run_passes_the_abi_flag_to_gradle_in_a_dsl_project() {
+    let tools = dsl_tools();
+    let work = TempDir::new().unwrap();
+    let project = create_dsl_project(&tools, &work);
+    let log = work.path().join("calls.log");
+
+    cli(&tools)
+        .current_dir(&project)
+        .env("FAKE_LOG", &log)
+        .args(["run", "--abi", "x86_64"])
+        .assert()
+        .success();
+
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(calls.contains("-PkrabikAbis=x86_64"), "{calls}");
+}
+
+#[test]
+fn bindings_and_release_are_refused_in_a_dsl_project() {
+    let tools = dsl_tools();
+    let work = TempDir::new().unwrap();
+    let project = create_dsl_project(&tools, &work);
+
+    cli(&tools)
+        .current_dir(&project)
+        .arg("bindings")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("no UniFFI bindings"));
+
+    cli(&tools)
+        .current_dir(&project)
+        .arg("release")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("not supported for krabik-ui-dsl"));
 }

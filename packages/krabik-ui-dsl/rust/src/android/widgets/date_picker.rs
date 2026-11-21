@@ -3,7 +3,7 @@
 use crate::android::DATE_PICKER_CLASS;
 use crate::android::handles::{Method, VOID, class, get as jni_handles, method, widget_ctor};
 use crate::android::widgets::{Ctor, Site};
-use crate::ui::{DatePickerMode, DatePickerProps, DatePickerValue, FontWeight};
+use crate::ui::{DatePickerMode, DatePickerProps, DatePickerValue};
 use jni::errors::Result as JniResult;
 use jni::objects::{JClass, JObject};
 use jni::refs::Global;
@@ -85,7 +85,8 @@ pub(crate) fn update_date_picker(
         &[
             JValue::Float(props.size),
             JValue::Int(props.color.argb() as jint),
-            JValue::Bool(matches!(props.weight, FontWeight::Bold)),
+            // the control only knows regular and bold
+            JValue::Bool(props.weight.is_bold()),
         ],
     )
 }

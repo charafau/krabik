@@ -21,14 +21,21 @@ does not use Dioxus's `subsecond`.
    krabik_ui_dsl::hot_reload!(Notes);
    ```
 
-3. Build, install and start the app as usual, then run the script and edit the Rust sources:
+3. Start the app, then watch it with [krabik](../../../krabik-cli) from the app's directory and
+   edit the Rust sources:
 
    ```sh
-   shared/hot-reload.sh example-todo-minimal android   # or: ios
+   cd example-todo-minimal
+   krabik run      # or: krabik run --platform ios
+   krabik watch    # or: krabik watch --platform ios
    ```
 
-`example-todo-minimal` is set up this way. The script needs `ANDROID_HOME` for Android and a
-booted simulator with the app installed for iOS.
+`example-todo-minimal` is set up this way, and so is every app made with
+`krabik create <name> --with-dsl`, which writes steps 1 and 2 for you. The other apps in this
+package (`harness`, `example`, `example-todo`) do not enable the feature; `krabik watch` in one
+of those rebuilds and relaunches the app on every change instead. `krabik watch` hot reloads when the app's `rust/Cargo.toml`
+enables the feature; it needs `adb` on the `PATH` and `ANDROID_NDK_HOME` for Android, and the
+app running on a booted simulator for iOS.
 
 ## How it works
 
@@ -38,7 +45,7 @@ An application is a library, and the runtime reaches it through one trait object
 ```text
   save a file
       |
-  shared/hot-reload.sh   cargo build of the app's crate (the framework is a cached dependency)
+  krabik watch           cargo build of the app's crate (the framework is a cached dependency)
       |                  copy the library into a directory inside the app's storage, new name
       v
   watcher thread         sees the file, wakes every session (the mailbox's waker)
@@ -64,9 +71,9 @@ An application is a library, and the runtime reaches it through one trait object
   and handlers. Its session maps and platform entry points are never called; the running
   session stays in the library the app started with.
 - **Delivery.** A process may only load code from its own storage. The watcher polls
-  `code_cache/krabik-hot` on Android and `tmp/krabik-hot` in the app's container on iOS. The
-  script writes under another name and renames, so a library is never seen half written. No
-  socket and no permission is involved.
+  `code_cache/krabik-hot` on Android and `tmp/krabik-hot` in the app's container on iOS.
+  `krabik watch` writes under another name and renames, so a library is never seen half
+  written. No socket and no permission is involved.
 
 The code is `rust/src/hot.rs`, `Session::hot_swap` and the two lines in `Session::drain` and
 `Session::set_waker` (`rust/src/host/session.rs`), all behind the cargo feature `hot-reload`.
@@ -116,8 +123,8 @@ missing file refused. It runs with `cargo test --features hot-reload`.
   takes the newest library when it is woken.
 - **Statics in the app's crate start again** in each library. State that should survive belongs
   in the `App` value.
-- **The script reports "reloaded" when the library was delivered.** A refusal is only in the
-  app's log (`adb logcat -s krabik`).
+- **`krabik watch` reports "reloaded" when the library was delivered.** A refusal is only in
+  the app's log (`adb logcat -s krabik`).
 
 ## Why not Dioxus's `subsecond`
 
@@ -147,9 +154,7 @@ Both stop at the same wall: neither can change the layout of live state.
 - Make the Android link faster. Most of the three seconds is linking debug information; a
   development profile with `debug = "line-tables-only"` or split debug info should bring it
   close to the simulator's time. Not tried.
-- Move the script into `krabik-cli`, which already has a file watcher
-  (`packages/krabik-cli/src/watch.rs`) but only knows UniFFI projects.
-- Report a refusal back to the script.
+- Report a refusal back to `krabik watch`.
 - A restart that restores state, for the changes a reload cannot apply: an opt-in
   `save`/`restore` pair on `App`, which would also give Android process-death restoration.
 - Run the layout and panic checks on the iOS simulator, and try an Android device.

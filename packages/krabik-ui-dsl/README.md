@@ -46,7 +46,8 @@ The [documentation](docs/README.md) is in five parts:
 1. [Tutorial](docs/tutorial/README.md): build a Notes app step by step.
 2. How it works: [the engine](docs/internals/README.md) and
    [the platforms](docs/platforms/README.md), file by file.
-3. Design: [why it is built this way](docs/design/decisions.md) and
+3. Design: [why it is built this way](docs/design/decisions.md),
+   [hot reload](docs/design/hot-reload.md) and
    [what was done, in order](docs/design/history.md).
 4. [Recipes](docs/recipes/README.md): add a widget, add native chrome, write tests, debug a render.
 5. [Comparisons](docs/comparisons/README.md): the internals next to
@@ -60,15 +61,29 @@ The [documentation](docs/README.md) is in five parts:
 | [`harness/`](harness) | The gallery the framework is developed and UI-tested against |
 | [`example/`](example) | A showcase with one screen per widget, navigation, dialog and sheet |
 | [`example-todo/`](example-todo) | A todo app with filtering, sorting and a recycled list |
-| [`example-todo-minimal/`](example-todo-minimal) | The smallest complete app; copy it to start your own |
+| [`example-todo-minimal/`](example-todo-minimal) | The smallest complete app; `krabik create <name> --with-dsl` starts your own from its shells |
 
 ## Quick start
+
+Your own app, with the [krabik CLI](../krabik-cli) installed from this checkout:
+
+```sh
+krabik create my-app --with-dsl   # a counter app with Android and iOS shells
+cd my-app
+krabik run                        # build, install and start it on the emulator
+krabik watch                      # hot reload: every saved change, state kept
+```
+
+Add `--platform ios` to `run` and `watch` for the simulator. The
+[tutorial](docs/tutorial/README.md) starts from exactly this project.
+
+The framework and the apps in this directory:
 
 ```sh
 # the Rust targets are installed automatically from rust-toolchain.toml
 
 # unit tests
-cargo test --manifest-path rust/Cargo.toml --workspace
+cargo test --manifest-path rust/Cargo.toml --workspace --all-features
 
 # Android (emulator running)
 cd example/android && ./gradlew :app:installDebug -PkrabikAbis=arm64-v8a

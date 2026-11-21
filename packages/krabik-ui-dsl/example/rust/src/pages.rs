@@ -6,9 +6,10 @@ use krabik_ui_dsl::presentation::{BottomSheet, Dialog};
 use krabik_ui_dsl::scaffold::{Drawer, DrawerItem, Fab, Scaffold, Snackbar};
 use krabik_ui_dsl::ui::{
     Align, AnimationCurve, Appearance, Button, Checkbox, Color, ColorScheme, Column, Container,
-    DatePicker, DatePickerMode, DateValue, EdgeInsets, Element, Gradient, Icon, Image, ImageScale,
-    ImageSource, Justify, List, Pager, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView,
-    Slider, Spacer, Switch, TabBar, Tabs, TabsView, Text, TextAlign, TextField, TimeValue,
+    DatePicker, DatePickerMode, DateValue, EdgeInsets, Element, Font, FontWeight, Gradient, Icon,
+    Image, ImageScale, ImageSource, Justify, List, Pager, ProgressIndicator, RadioButton,
+    RadioGroup, Row, ScrollView, Slider, Spacer, Span, Switch, TabBar, Tabs, TabsView, Text,
+    TextAlign, TextField, TimeValue,
 };
 
 use krabik_ui_dsl::ui::Stack;
@@ -20,6 +21,9 @@ pub(crate) const COLOR_MUTED: Color = Color::adaptive(0xFF66_6666, 0xFFA0_A4A8);
 pub(crate) const COLOR_SURFACE: Color = Color::adaptive(0xFFF4_F4F4, 0xFF2A_2B2E);
 pub(crate) const COLOR_DONE: Color = Color::adaptive(0xFFE6_F4EA, 0xFF1E_3A2A);
 pub(crate) const COLOR_ACCENT: Color = Color::adaptive(0xFF00_897B, 0xFF4D_B6AC);
+/// A font file bundled with both platform apps (Pacifico, SIL Open Font
+/// License; see `Pacifico-OFL.txt`).
+const FONT_SCRIPT: &str = "Pacifico-Regular.ttf";
 const COLOR_BLUE: Color = Color::fixed(0xFF15_65C0);
 const COLOR_AMBER: Color = Color::fixed(0xFFF9_A825);
 const COLOR_PURPLE: Color = Color::fixed(0xFF6A_1B9A);
@@ -91,6 +95,13 @@ pub(crate) fn screen_key(action: &str) -> Option<&'static str> {
         "bottom-navigation" => "bottom-navigation",
         "toolbar" => "toolbar",
         "slider" => "slider",
+        "layout-extras" => "layout-extras",
+        "pieces" => "pieces",
+        "composed-inputs" => "composed-inputs",
+        "grid" => "grid",
+        "menus" => "menus",
+        "native-views" => "native-views",
+        "list-gestures" => "list-gestures",
         "progress" => "progress",
         "spinner" => "spinner",
         "image" => "image",
@@ -137,6 +148,13 @@ pub(crate) fn title(key: &str) -> &'static str {
         "bottom-navigation" => "Bottom navigation",
         "toolbar" => "Toolbar",
         "slider" => "Slider",
+        "layout-extras" => "Wrap & position",
+        "pieces" => "Display pieces",
+        "composed-inputs" => "Composed inputs",
+        "grid" => "Grid",
+        "menus" => "Menus & choices",
+        "native-views" => "Native views",
+        "list-gestures" => "List gestures",
         "progress" => "Progress",
         "spinner" => "Spinner",
         "image" => "Image",
@@ -183,6 +201,11 @@ pub(crate) fn screen(app: &ShowcaseApp, key: &str) -> Option<Element<Msg>> {
         "bottom-navigation" => bottom_navigation_page(app),
         "toolbar" => toolbar_page(app),
         "slider" => slider_page(app),
+        "grid" => app.widgets.grid().map(Msg::Widgets),
+        "list-gestures" => app.widgets.list_gestures().map(Msg::Widgets),
+        "layout-extras" | "pieces" | "composed-inputs" | "menus" | "native-views" => {
+            widgets_page(app, key)?
+        }
         "progress" => progress_page(app),
         "spinner" => spinner_page(),
         "image" => image_page(),
@@ -209,7 +232,7 @@ fn page_button(label: &'static str, action: &'static str) -> Button<Msg> {
 }
 
 pub(crate) fn home() -> Element<Msg> {
-    let catalog: [(&str, &[(&str, &str)]); 8] = [
+    let catalog: [(&str, &[(&str, &str)]); 9] = [
         (
             "Text & layout",
             &[
@@ -272,6 +295,18 @@ pub(crate) fn home() -> Element<Msg> {
             ],
         ),
         (
+            "More widgets",
+            &[
+                ("Wrap & position", "page:layout-extras"),
+                ("Display pieces", "page:pieces"),
+                ("Composed inputs", "page:composed-inputs"),
+                ("Grid", "page:grid"),
+                ("Menus & choices", "page:menus"),
+                ("Native views", "page:native-views"),
+                ("List gestures", "page:list-gestures"),
+            ],
+        ),
+        (
             "Extras",
             &[
                 ("Styling", "page:styling"),
@@ -316,10 +351,43 @@ pub(crate) fn home() -> Element<Msg> {
         .into()
 }
 
+/// A page of `widgets_demo` in the standard scrolling frame.
+fn widgets_page(app: &ShowcaseApp, key: &str) -> Option<Element<Msg>> {
+    let (title, subtitle) = match key {
+        "layout-extras" => (
+            "Wrap & position",
+            "Wrapping rows, children held at a stack's edges, size limits, icons and long presses.",
+        ),
+        "pieces" => (
+            "Display pieces",
+            "Cards, tiles, avatars, badges, chips and button looks, assembled from containers.",
+        ),
+        "native-views" => (
+            "Native views",
+            "Views the application's own Kotlin and Swift code makes, laid out by Rust, and a web view.",
+        ),
+        "menus" => (
+            "Menus & choices",
+            "The platform's popup menu on a button or any container, a dropdown and a segmented control.",
+        ),
+        _ => (
+            "Composed inputs",
+            "Controls assembled from fields, icons and buttons; their state is the application's.",
+        ),
+    };
+    let body = app
+        .widgets
+        .body(key)?
+        .into_iter()
+        .map(|element| element.map(Msg::Widgets))
+        .collect();
+    Some(page(title, subtitle, body))
+}
+
 fn text_page() -> Element<Msg> {
     page(
         "Text",
-        "Sizes, weights, colors, alignment and truncation.",
+        "Sizes, weights, styles, spacing, colors, alignment and truncation.",
         body![
             Text::new("Display 34 / bold")
                 .size(34)
@@ -335,6 +403,99 @@ fn text_page() -> Element<Msg> {
                 .color(COLOR_TEXT),
             Text::new("Caption 12 / muted").size(12).color(COLOR_MUTED),
             Text::new("Accent 16 / teal").size(16).color(COLOR_ACCENT),
+            Text::new("Thin 100")
+                .size(18)
+                .weight(FontWeight::Thin)
+                .color(COLOR_TEXT),
+            Text::new("Light 300")
+                .size(18)
+                .weight(FontWeight::Light)
+                .color(COLOR_TEXT),
+            Text::new("Medium 500")
+                .size(18)
+                .weight(FontWeight::Medium)
+                .color(COLOR_TEXT),
+            Text::new("Semi-bold 600")
+                .size(18)
+                .weight(FontWeight::SemiBold)
+                .color(COLOR_TEXT),
+            Text::new("Black 900")
+                .size(18)
+                .weight(FontWeight::Black)
+                .color(COLOR_TEXT),
+            Text::new("Italic").size(16).italic().color(COLOR_TEXT),
+            Text::new("Bold italic")
+                .size(16)
+                .bold()
+                .italic()
+                .color(COLOR_TEXT),
+            Text::new("Underlined")
+                .size(16)
+                .underline()
+                .color(COLOR_BLUE),
+            Text::new("Struck through")
+                .size(16)
+                .strikethrough()
+                .color(COLOR_MUTED),
+            Text::new("LETTER SPACING 2")
+                .size(12)
+                .letter_spacing(2)
+                .color(COLOR_MUTED),
+            Text::rich([
+                Span::new("Rich text: "),
+                Span::new("bold").bold(),
+                Span::new(", "),
+                Span::new("italic").italic(),
+                Span::new(", "),
+                Span::new("teal").color(COLOR_ACCENT),
+                Span::new(", "),
+                Span::new("underlined").underline(),
+                Span::new(" and "),
+                Span::new("large").size(24),
+                Span::new("."),
+            ])
+            .size(16)
+            .color(COLOR_TEXT)
+            .width_percent(1.0),
+            Text::rich([
+                Span::new("Was "),
+                Span::new("19.99").strikethrough().color(COLOR_MUTED),
+                Span::new(" now "),
+                Span::new("12.50")
+                    .weight(FontWeight::Black)
+                    .color(COLOR_BLUE),
+            ])
+            .size(16)
+            .color(COLOR_TEXT),
+            Text::new("A font from a file")
+                .size(24)
+                .font(Font::asset(FONT_SCRIPT))
+                .color(COLOR_TEXT),
+            Text::rich([
+                Span::new("One word in "),
+                Span::new("another").font(Font::asset(FONT_SCRIPT)).size(20),
+                Span::new(" font."),
+            ])
+            .size(16)
+            .color(COLOR_TEXT),
+            Text::new("A missing font file falls back")
+                .size(16)
+                .font(Font::asset("no-such-font.ttf"))
+                .color(COLOR_TEXT),
+            Text::new("One line, 40 high")
+                .size(16)
+                .line_height(40)
+                .color(COLOR_TEXT)
+                .background(COLOR_SURFACE),
+            Text::new(
+                "Line height 28: this paragraph wraps onto several lines, and every one of them \
+                 is twenty-eight points tall.",
+            )
+            .size(16)
+            .line_height(28)
+            .color(COLOR_TEXT)
+            .background(COLOR_SURFACE)
+            .width_percent(1.0),
             Text::new("Centered text")
                 .size(16)
                 .text_align(TextAlign::Center)
@@ -362,6 +523,9 @@ fn button_page(app: &ShowcaseApp) -> Element<Msg> {
             Button::new("Add one").on_click(Msg::Tap),
             Button::new("Reset").on_click(Msg::ResetTaps),
             Button::new("Disabled").enabled(false),
+            Button::new("In a font from a file")
+                .font(Font::asset(FONT_SCRIPT))
+                .on_click(Msg::Tap),
         ],
     )
 }

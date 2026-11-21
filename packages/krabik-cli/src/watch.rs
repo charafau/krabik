@@ -1,17 +1,25 @@
-//! Watches the Rust sources of a project and rebuilds it on every change.
+//! Watches the Rust sources of a project and brings the app up to date on
+//! every change.
 //!
-//! The build itself is incremental, so a cycle only has to recompile the
-//! changed crate, reinstall the app and launch it again. That makes the
-//! edit-compile-run loop a lot shorter than running the whole build by hand.
+//! A krabik-ui-dsl app with the `hot-reload` feature is hot reloaded: the
+//! crate is rebuilt and the library is handed to the running app, which keeps
+//! its state. That takes a few seconds.
+//!
+//! Every other project is rebuilt. The build itself is incremental, so a
+//! cycle only has to recompile the changed crate, reinstall the app and
+//! launch it again. That makes the edit-compile-run loop a lot shorter than
+//! running the whole build by hand.
 
 use anyhow::{Context, Result, anyhow};
 use notify::event::{AccessKind, AccessMode};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::Platforms;
+use crate::hot::{self, HotTarget};
 use crate::{android, ios};
 
 /// How long the file system has to be quiet before the project is rebuilt.
@@ -25,7 +33,9 @@ struct WatchPath {
     recursive: bool,
 }
 
-/// Watches the Rust sources of the project and rebuilds it on every change.
+/// Watches the Rust sources of the project and brings the app up to date on
+/// every change: a krabik-ui-dsl app with the `hot-reload` feature is hot
+/// reloaded, every other project is rebuilt.
 ///
 /// The project is built once up front, so that the app is up to date when
 /// the watch starts. Afterwards every change triggers another build. A build
@@ -37,6 +47,12 @@ pub fn watch(device: &str, platforms: Platforms) -> Result<()> {
         return Err(anyhow!(
             "no Rust sources found, run this from the root of a project"
         ));
+    }
+
+    let hot_reload = fs::read_to_string("rust/Cargo.toml")
+        .is_ok_and(|cargo_toml| hot::is_hot_reload_project(&cargo_toml));
+    if hot_reload {
+        return watch_hot(device, platforms, &paths);
     }
 
     // The device is resolved once, so that the watch does not ask for it
@@ -64,6 +80,67 @@ pub fn watch(device: &str, platforms: Platforms) -> Result<()> {
         wait_for_change(&events)?;
         println!("\nChange detected, rebuilding...");
         rebuild(device, platforms, serial.as_deref());
+    }
+}
+
+/// Hot reloads the running app on every change.
+///
+/// The app has to be running already; it is neither installed nor started
+/// here. Its state survives a reload as long as the layout of its state and
+/// message types stays the same.
+fn watch_hot(device: &str, platforms: Platforms, paths: &[WatchPath]) -> Result<()> {
+    // The devices are resolved once, so that the watch does not ask for them
+    // again on every reload.
+    let mut targets = Vec::new();
+    if platforms.includes_android() {
+        targets.push(HotTarget::android(device)?);
+    }
+    if platforms.includes_ios() {
+        targets.push(HotTarget::ios(device)?);
+    }
+
+    // The watcher has to be kept alive for as long as the events are read.
+    let (_watcher, events) = start_watching(paths)?;
+
+    println!("Hot reloading on changes in {}...", describe(paths));
+    println!("The app has to be running; start it with `krabik run`.");
+    println!(
+        "A library the app refuses, because the layout of its state or message type \
+         changed, is only reported in the app's log (Android: `adb logcat -s krabik`); \
+         restart the app with `krabik run` then."
+    );
+
+    // The first reload brings the app up to date with the sources. A failure
+    // is reported, but the watch continues.
+    hot_reload(&targets);
+
+    loop {
+        wait_for_change(&events)?;
+        println!("\nChange detected, reloading...");
+        hot_reload(&targets);
+    }
+}
+
+/// Builds the app's library for every target and hands it to the app.
+fn hot_reload(targets: &[HotTarget]) {
+    for target in targets {
+        let platform = target.platform();
+        let started = Instant::now();
+
+        if let Err(err) = target.build() {
+            eprintln!(
+                "{platform}: the build failed ({err:#}); the app keeps running the code it has"
+            );
+            continue;
+        }
+
+        match target.deliver() {
+            Ok(()) => println!(
+                "{platform}: reloaded in {:.1}s",
+                started.elapsed().as_secs_f64()
+            ),
+            Err(err) => eprintln!("{platform}: the library was not delivered: {err:#}"),
+        }
     }
 }
 

@@ -26,9 +26,9 @@
 //!
 //! On a device or a simulator a thread watches one directory inside the
 //! app's own storage, which is the only place a process may load code
-//! from. A development script builds the library and drops it there under
-//! a new name; `shared/hot-reload.sh` is that script. The watcher wakes the
-//! sessions, and each loads the newest library on its UI thread.
+//! from. A development tool builds the library and drops it there under
+//! a new name; `krabik watch` of krabik-cli is that tool. The watcher wakes
+//! the sessions, and each loads the newest library on its UI thread.
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::sync::{Arc, Mutex};

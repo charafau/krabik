@@ -137,6 +137,13 @@ pub(crate) fn update_recycler(
     props: &RecyclerProps,
     density: f32,
 ) -> JniResult<()> {
+    let positions: Vec<jint> = props
+        .sticky
+        .iter()
+        .map(|index| (*index).min(i32::MAX as usize) as jint)
+        .collect();
+    let sticky = env.new_int_array(positions.len())?;
+    sticky.set_region(env, 0, &positions)?;
     let ids = jni_handles(env)?;
     let height = row_height_px(props, density);
     ids.rows.update.call_void(
@@ -147,6 +154,9 @@ pub(crate) fn update_recycler(
             JValue::Int(props.item_count.min(i32::MAX as usize) as jint),
             JValue::Int(height),
             JValue::Long(props.revision as jlong),
+            JValue::Bool(props.on_dismiss.is_set()),
+            JValue::Bool(props.on_reorder.is_set()),
+            JValue::Object(&sticky),
         ],
     )
 }
@@ -191,7 +201,7 @@ impl Handles {
                 env,
                 &krabik_recyclers,
                 "update",
-                "(Landroid/view/ViewGroup;IIJ)V",
+                "(Landroid/view/ViewGroup;IIJZZ[I)V",
                 VOID
             ),
             snapshot: static_method!(

@@ -35,9 +35,9 @@ use jni::strings::JNIStr;
 use jni::{Env, jni_sig, jni_str};
 
 use super::{
-    FRAME_LAYOUT_CLASS, FRAME_PARAMS_CLASS, KRABIK_STYLE_CLASS, KRABIK_VIEWS_CLASS,
-    LAYOUT_PARAMS_CLASS, LONG_CLASS, MEASURE_SPEC_CLASS, ROOT_VIEW_DESCRIPTOR,
-    RUST_ROOT_VIEW_CLASS, TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, TYPEFACE_CLASS, VIEW_CLASS, checked,
+    FRAME_LAYOUT_CLASS, FRAME_PARAMS_CLASS, KRABIK_STYLE_CLASS, KRABIK_TEXT_CLASS,
+    KRABIK_VIEWS_CLASS, LAYOUT_PARAMS_CLASS, LONG_CLASS, MEASURE_SPEC_CLASS, ROOT_VIEW_DESCRIPTOR,
+    RUST_ROOT_VIEW_CLASS, TEXT_UTILS_CLASS, TEXT_VIEW_CLASS, VIEW_CLASS, checked,
 };
 
 pub(crate) const VOID: JavaType = JavaType::Primitive(Primitive::Void);
@@ -246,11 +246,11 @@ pub(crate) struct Jni {
     pub(crate) frame_layout: Global<JClass<'static>>,
     pub(crate) layout_params: Global<JClass<'static>>,
     pub(crate) frame_params: Global<JClass<'static>>,
-    pub(crate) typeface: Global<JClass<'static>>,
     pub(crate) truncate_at: Global<JClass<'static>>,
     pub(crate) long: Global<JClass<'static>>,
     pub(crate) measure_spec: Global<JClass<'static>>,
     pub(crate) krabik_style: Global<JClass<'static>>,
+    pub(crate) krabik_text: Global<JClass<'static>>,
     pub(crate) krabik_views: Global<JClass<'static>>,
     /// Only keeps `RustRootView` loaded for the cached `applyFrame` ID.
     pub(crate) rust_root_view: Global<JClass<'static>>,
@@ -283,12 +283,10 @@ pub(crate) struct Jni {
     pub(crate) set_text: Method,
     pub(crate) set_text_size: Method,
     pub(crate) set_text_color: Method,
-    pub(crate) set_letter_spacing: Method,
     pub(crate) set_include_font_padding: Method,
     pub(crate) set_gravity: Method,
     pub(crate) set_max_lines: Method,
     pub(crate) set_ellipsize: Method,
-    pub(crate) set_typeface: Method,
     pub(crate) set_hint: Method,
 
     // The Rust root view batches one node's frame into a single call.
@@ -310,8 +308,10 @@ pub(crate) struct Jni {
     /// `KrabikViews.setRefreshing`: the pull-to-refresh indicator.
     pub(crate) set_refreshing: StaticMethod,
     pub(crate) apply_style: StaticMethod,
-    pub(crate) typeface_default: StaticField,
-    pub(crate) typeface_default_bold: StaticField,
+    /// `KrabikText.apply`: the string and the look of a text.
+    pub(crate) apply_text: StaticMethod,
+    /// `KrabikText.applyTypeface`: the font of a control's label.
+    pub(crate) apply_typeface: StaticMethod,
     pub(crate) truncate_at_end: StaticField,
 
     // Constructors.
@@ -331,6 +331,8 @@ pub(crate) struct Jni {
     pub(crate) pager: crate::android::widgets::pager::Handles,
     pub(crate) date_picker: crate::android::widgets::date_picker::Handles,
     pub(crate) slider: crate::android::widgets::slider::Handles,
+    pub(crate) range_slider: crate::android::widgets::range_slider::Handles,
+    pub(crate) native_view: crate::android::widgets::native_view::Handles,
     pub(crate) progress: crate::android::widgets::progress::Handles,
     pub(crate) container: crate::android::widgets::container::Handles,
     pub(crate) image: crate::android::widgets::image::Handles,
@@ -347,11 +349,11 @@ impl Jni {
         let frame_layout = class(env, FRAME_LAYOUT_CLASS)?;
         let layout_params = class(env, LAYOUT_PARAMS_CLASS)?;
         let frame_params = class(env, FRAME_PARAMS_CLASS)?;
-        let typeface = class(env, TYPEFACE_CLASS)?;
         let truncate_at = class(env, TEXT_UTILS_CLASS)?;
         let long = class(env, LONG_CLASS)?;
         let measure_spec = class(env, MEASURE_SPEC_CLASS)?;
         let krabik_style = class(env, KRABIK_STYLE_CLASS)?;
+        let krabik_text = class(env, KRABIK_TEXT_CLASS)?;
         let krabik_views = class(env, KRABIK_VIEWS_CLASS)?;
         let rust_root_view = class(env, RUST_ROOT_VIEW_CLASS)?;
 
@@ -371,6 +373,14 @@ impl Jni {
                 &widget_signature,
             )?,
             slider: crate::android::widgets::slider::Handles::load(env, &widget_signature)?,
+            native_view: crate::android::widgets::native_view::Handles::load(
+                env,
+                &widget_signature,
+            )?,
+            range_slider: crate::android::widgets::range_slider::Handles::load(
+                env,
+                &widget_signature,
+            )?,
             progress: crate::android::widgets::progress::Handles::load(env, &widget_signature)?,
             container: crate::android::widgets::container::Handles::load(env, &widget_signature)?,
             image: crate::android::widgets::image::Handles::load(env, &widget_signature)?,
@@ -445,8 +455,6 @@ impl Jni {
 
             set_text_color: method!(env, &text_view, "setTextColor", "(I)V", VOID),
 
-            set_letter_spacing: method!(env, &text_view, "setLetterSpacing", "(F)V", VOID),
-
             set_include_font_padding: method!(
                 env,
                 &text_view,
@@ -464,14 +472,6 @@ impl Jni {
                 &text_view,
                 "setEllipsize",
                 "(Landroid/text/TextUtils$TruncateAt;)V",
-                VOID
-            ),
-
-            set_typeface: method!(
-                env,
-                &text_view,
-                "setTypeface",
-                "(Landroid/graphics/Typeface;)V",
                 VOID
             ),
 
@@ -565,20 +565,20 @@ impl Jni {
                 VOID
             ),
 
-            typeface_default: static_field!(
+            apply_text: static_method!(
                 env,
-                &typeface,
-                "DEFAULT",
-                "Landroid/graphics/Typeface;",
-                OBJECT
+                &krabik_text,
+                "apply",
+                "(Landroid/widget/TextView;Ljava/lang/String;IIFF[I[Ljava/lang/String;I)V",
+                VOID
             ),
 
-            typeface_default_bold: static_field!(
+            apply_typeface: static_method!(
                 env,
-                &typeface,
-                "DEFAULT_BOLD",
-                "Landroid/graphics/Typeface;",
-                OBJECT
+                &krabik_text,
+                "applyTypeface",
+                "(Landroid/widget/TextView;IZ)V",
+                VOID
             ),
 
             truncate_at_end: static_field!(
@@ -611,8 +611,6 @@ impl Jni {
 
             frame_params,
 
-            typeface,
-
             truncate_at,
 
             long,
@@ -620,6 +618,8 @@ impl Jni {
             measure_spec,
 
             krabik_style,
+
+            krabik_text,
 
             krabik_views,
 

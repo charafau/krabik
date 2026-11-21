@@ -3,7 +3,7 @@
 use std::marker::PhantomData;
 
 use crate::element::{Element, ElementKind, RawElement};
-use crate::message::{Handler, Wrap};
+use crate::message::{Handler, MessageMap};
 use crate::style::{IntoPoints, Length};
 use crate::widgets::Refresh;
 use std::fmt;
@@ -39,6 +39,13 @@ pub(crate) struct ListProps {
     pub(crate) refresh: Refresh,
     pub(crate) keys: Arc<dyn Fn(usize) -> String + Send + Sync>,
     pub(crate) rows: Arc<dyn Fn(usize) -> RawElement + Send + Sync>,
+    /// Reports the index of a row the user swiped away.
+    pub(crate) on_dismiss: Handler<usize>,
+    /// Reports where a row was dragged from and to.
+    pub(crate) on_reorder: Handler<(usize, usize)>,
+    /// Says which items are headers that stay at the top while their
+    /// section scrolls.
+    pub(crate) sticky: Option<Arc<dyn Fn(usize) -> bool + Send + Sync>>,
 }
 
 impl fmt::Debug for ListProps {
@@ -64,14 +71,19 @@ impl PartialEq for ListProps {
             && self.revision == other.revision
             && self.row_transition_ms == other.row_transition_ms
             && self.refresh == other.refresh
+            && self.on_dismiss.is_set() == other.on_dismiss.is_set()
+            && self.on_reorder.is_set() == other.on_reorder.is_set()
+            && self.sticky.is_some() == other.sticky.is_some()
             && Arc::ptr_eq(&self.keys, &other.keys)
     }
 }
 
 impl ListProps {
     /// Re-wraps the messages of every row the list builds.
-    pub(crate) fn map_messages(&mut self, wrap: &Wrap) {
+    pub(crate) fn map_messages(&mut self, wrap: &MessageMap) {
         self.refresh.on_refresh.map(wrap);
+        self.on_dismiss.map(wrap);
+        self.on_reorder.map(wrap);
         let rows = Arc::clone(&self.rows);
         let wrap = Arc::clone(wrap);
         self.rows = Arc::new(move |index| {
@@ -87,6 +99,12 @@ type KeyBuilder<T> = Box<dyn Fn(&T) -> String + Send + Sync>;
 
 /// Builds the element of one list item.
 type RowBuilder<T> = Box<dyn Fn(&T) -> RawElement + Send + Sync>;
+
+/// Makes the handler of an event on one item, once the items are known.
+type ItemHandler<T> = Box<dyn FnOnce(Arc<Vec<T>>) -> Handler<usize> + Send + Sync>;
+
+/// Says whether an item is a header that stays at the top.
+type StickyTest<T> = Box<dyn Fn(&T) -> bool + Send + Sync>;
 
 /// A virtualized vertical list.
 ///
@@ -109,6 +127,9 @@ pub struct List<T, M = ()> {
     refresh: Refresh,
     key: Option<KeyBuilder<T>>,
     row: Option<RowBuilder<T>>,
+    on_dismiss: Option<ItemHandler<T>>,
+    on_reorder: Handler<(usize, usize)>,
+    sticky: Option<StickyTest<T>>,
 }
 
 impl<T: Send + Sync + 'static, M> List<T, M> {
@@ -128,6 +149,9 @@ impl<T: Send + Sync + 'static, M> List<T, M> {
             refresh: Refresh::default(),
             key: None,
             row: None,
+            on_dismiss: None,
+            on_reorder: Handler::none(),
+            sticky: None,
         }
     }
 
@@ -217,6 +241,58 @@ impl<T: Send + Sync + 'static, M> List<T, M> {
         self.row = Some(Box::new(move |item| row(item).into_raw()));
         self
     }
+
+    /// Keeps the items for which `is_header` is true at the top of the list
+    /// while the items after them scroll, until the next header pushes them
+    /// out: section headers.
+    ///
+    /// A header is an ordinary item with an ordinary row. Only a
+    /// [`recycled`](Self::recycled) list pins it; the pinned copy is a
+    /// picture of the row and does not react to touches.
+    pub fn sticky_header(mut self, is_header: impl Fn(&T) -> bool + Send + Sync + 'static) -> Self {
+        self.sticky = Some(Box::new(is_header));
+        self
+    }
+}
+
+impl<T: Send + Sync + 'static, M: 'static> List<T, M> {
+    /// Lets the user swipe a row off the list, and reports which item it
+    /// was.
+    ///
+    /// ```ignore
+    /// List::new(self.notes.clone())
+    ///     .recycled()
+    ///     .on_dismiss(|note| Msg::Delete(note.id))
+    /// ```
+    ///
+    /// The list is the application's state: the row comes back unless
+    /// `update` removes the item. Only a [`recycled`](Self::recycled) list
+    /// can be swiped.
+    pub fn on_dismiss(mut self, message: impl Fn(&T) -> M + Send + Sync + 'static) -> Self {
+        self.on_dismiss = Some(Box::new(move |items: Arc<Vec<T>>| {
+            Handler::new(move |index: usize| message(&items[index]))
+        }));
+        self
+    }
+
+    /// Lets the user drag a row to another place after a long press, and
+    /// reports the index it came from and the index it was dropped at.
+    ///
+    /// ```ignore
+    /// .on_reorder(|from, to| Msg::Move { from, to })
+    /// ```
+    ///
+    /// In `update`, `let item = items.remove(from); items.insert(to, item);`
+    /// is the whole move. The rows return to their order unless `update`
+    /// does it. Only a [`recycled`](Self::recycled) list can be reordered,
+    /// and it should have an [`item_height`](Self::item_height).
+    pub fn on_reorder(
+        mut self,
+        message: impl Fn(usize, usize) -> M + Send + Sync + 'static,
+    ) -> Self {
+        self.on_reorder = Handler::new(move |(from, to): (usize, usize)| message(from, to));
+        self
+    }
 }
 
 impl<T: Send + Sync + 'static, M: Clone + Send + Sync + 'static> List<T, M> {
@@ -259,6 +335,16 @@ impl<T: Send + Sync + 'static, M> From<List<T, M>> for Element<M> {
             refresh: list.refresh,
             keys,
             rows,
+            on_dismiss: match list.on_dismiss {
+                Some(make) => make(Arc::clone(&items)),
+                None => Handler::none(),
+            },
+            on_reorder: list.on_reorder,
+            sticky: list.sticky.map(|is_header| {
+                let items = Arc::clone(&items);
+                Arc::new(move |index: usize| items.get(index).is_some_and(&is_header))
+                    as Arc<dyn Fn(usize) -> bool + Send + Sync>
+            }),
         }));
         // A list is a scroll region: it grows into the space its flex parent
         // leaves and spans the cross axis.

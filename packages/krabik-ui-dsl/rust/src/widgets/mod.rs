@@ -1,40 +1,77 @@
 //! The built-in widgets, one module each.
 
+mod autocomplete;
+mod avatar;
+mod badge;
 mod button;
+mod card;
 mod check;
+mod chip;
 mod containers;
 mod date_picker;
+mod divider;
+mod expansion_tile;
+mod grid;
+mod icon_button;
 mod image;
 mod list;
+mod list_tile;
+mod menu;
+mod native_view;
+mod number_stepper;
 mod pager;
 mod progress;
 mod radio_group;
+mod range_slider;
 mod scroll;
+mod search_bar;
+mod segmented_control;
 mod slider;
+mod stepper;
 mod switch;
 mod tab_bar;
 mod text;
 mod text_field;
 
+pub use autocomplete::*;
+pub use avatar::*;
+pub use badge::*;
 pub use button::*;
+pub use card::*;
 pub use check::*;
+pub use chip::*;
 pub use containers::*;
 pub use date_picker::*;
+pub use divider::*;
+pub use expansion_tile::*;
+pub use grid::*;
+pub use icon_button::*;
 pub use image::*;
 pub use list::*;
+pub use list_tile::*;
+pub use menu::*;
+pub use native_view::*;
+pub use number_stepper::*;
 pub use pager::*;
 pub use progress::*;
 pub use radio_group::*;
+pub use range_slider::*;
 pub use scroll::*;
+pub use search_bar::*;
+pub use segmented_control::*;
 pub use slider::*;
+pub use stepper::*;
 pub use switch::*;
 pub use tab_bar::*;
 pub use text::*;
 pub use text_field::*;
 
+#[cfg(test)]
+mod composed_tests;
+
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
-use crate::message::Wrap;
+use crate::message::MessageMap;
 use crate::style::{Color, ColorScheme, FontWeight};
 
 /// Declares [`Widget`] from one table: a variant, its properties type and its
@@ -83,7 +120,8 @@ macro_rules! widgets {
 }
 
 // Tags must never be reused: they are part of a node's identity. The
-// containers in `ElementKind` use 1, 2, 3, 8, 9, 11 and 20 to 24.
+// containers in `ElementKind` use 1, 2, 3, 8, 9, 11 and 20 to 24, and 26
+// is a text that can be selected.
 widgets! {
     /// A run of text rendered by a native label.
     Text(TextProps) = 4,
@@ -101,6 +139,10 @@ widgets! {
     RadioButton(CheckProps) = 13,
     /// A native slider.
     Slider(SliderProps) = 14,
+    /// A native slider with two thumbs.
+    RangeSlider(RangeSliderProps) = 25,
+    /// A view made by the application's own platform code.
+    NativeView(NativeViewProps) = 27,
     /// A native determinate progress indicator.
     Progress(ProgressProps) = 15,
     /// A native group of mutually exclusive radio buttons.
@@ -116,7 +158,7 @@ widgets! {
 impl Widget {
     /// Re-wraps every message the widget can produce; see
     /// [`Element::map`](crate::element::Element::map).
-    pub(crate) fn map_messages(&mut self, wrap: &Wrap) {
+    pub(crate) fn map_messages(&mut self, wrap: &MessageMap) {
         self.props_mut().map_messages(wrap);
     }
 
@@ -135,6 +177,25 @@ impl Widget {
     pub(crate) fn text_style(&mut self) -> Option<TextStyleMut<'_>> {
         self.props_mut().text_style()
     }
+
+    /// Multiplies the size of the text the widget shows by `scale`, and
+    /// what else is measured in the unit of that size.
+    pub(crate) fn scale_text(&mut self, scale: f32) {
+        if let Some(style) = self.text_style() {
+            *style.size *= scale;
+        }
+        if let Widget::Text(props) = self {
+            props.letter_spacing *= scale;
+            if let Some(line_height) = &mut props.line_height {
+                *line_height *= scale;
+            }
+            for span in &mut props.spans {
+                if let Some(size) = &mut span.size {
+                    *size *= scale;
+                }
+            }
+        }
+    }
 }
 
 /// What every widget's properties provide to the framework.
@@ -144,7 +205,7 @@ impl Widget {
 /// implementation.
 pub(crate) trait WidgetProps: IntrinsicSize {
     /// Re-wraps every message the widget can produce.
-    fn map_messages(&mut self, wrap: &Wrap);
+    fn map_messages(&mut self, wrap: &MessageMap);
 
     /// The text style, for a widget that shows text.
     fn text_style(&mut self) -> Option<TextStyleMut<'_>> {

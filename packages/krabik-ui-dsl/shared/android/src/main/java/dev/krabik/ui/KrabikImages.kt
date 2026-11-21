@@ -1,9 +1,11 @@
 package dev.krabik.ui
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.BitmapFactory
 import android.util.Log
 import android.widget.ImageView
+import coil3.dispose
 import coil3.load
 import coil3.request.crossfade
 import java.util.WeakHashMap
@@ -29,6 +31,7 @@ object KrabikImages {
             ImageView.ScaleType.FIT_CENTER
         }
 
+        view.imageTintList = null
         if (source.isEmpty()) {
             svgs.remove(view)
             view.setImageDrawable(null)
@@ -45,6 +48,35 @@ object KrabikImages {
             crossfade(true)
         }
     }
+
+    /**
+     * Shows a drawable resource of the application by name, in one color
+     * when `tinted`. A name the application does not have shows nothing and
+     * is logged once.
+     */
+    @JvmStatic
+    fun loadIcon(view: ImageView, name: String, tint: Int, tinted: Boolean) {
+        svgs.remove(view)
+        view.dispose()
+        view.scaleType = ImageView.ScaleType.FIT_CENTER
+        view.imageTintList = if (tinted) ColorStateList.valueOf(tint) else null
+        val context = view.context
+        val id = if (name.isEmpty()) {
+            0
+        } else {
+            context.resources.getIdentifier(name, "drawable", context.packageName)
+        }
+        if (id == 0) {
+            if (name.isNotEmpty() && missingIcons.add(name)) {
+                Log.w("krabik", "no drawable named \"$name\" for an icon")
+            }
+            view.setImageDrawable(null)
+        } else {
+            view.setImageResource(id)
+        }
+    }
+
+    private val missingIcons = HashSet<String>()
 
     /**
      * Returns the pixel dimensions of a bundled asset, packed as

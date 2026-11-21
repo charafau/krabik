@@ -1,8 +1,10 @@
 //! Recycled lists: the collection view data source and binding rows into its cells.
 
 use crate::geometry::Size;
+use crate::host::NodeEvent;
 use crate::host::rows::Bind;
 use crate::ios::cast_view;
+use crate::ios::events::dispatch;
 use crate::ios::host::{Content, IosState, ViewHandle};
 use crate::ios::motion::{animation_is_enabled, run_animation};
 use crate::ios::widgets::Site;
@@ -15,18 +17,33 @@ use crate::ui::{AnimationCurve, RawElement};
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
+use objc2::runtime::{AnyObject, Bool};
 use objc2::runtime::{NSObject, NSObjectProtocol};
 use objc2::{ClassType, DefinedClass};
 use objc2::{MainThreadMarker, MainThreadOnly};
+use objc2_core_foundation::CGAffineTransform;
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSArray, NSIndexPath, NSString};
 use objc2_ui_kit::{NSIndexPathUIKitAdditions, UICollectionViewFlowLayout, UIEdgeInsets};
 use objc2_ui_kit::{
     UICollectionView, UICollectionViewCell, UICollectionViewDataSource, UICollectionViewDelegate,
-    UICollectionViewDelegateFlowLayout, UICollectionViewLayout, UIScrollViewDelegate, UIView,
-    UIViewAnimatingPosition,
+    UICollectionViewDelegateFlowLayout, UICollectionViewLayout, UIGestureRecognizer,
+    UIGestureRecognizerDelegate, UIGestureRecognizerState, UILongPressGestureRecognizer,
+    UIPanGestureRecognizer, UIScrollView, UIScrollViewDelegate, UIView, UIViewAnimatingPosition,
+    UIViewAnimationOptions,
 };
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+/// The header that stays at the top of a list while its section scrolls: a
+/// cell of the list's own kind that the collection view does not manage.
+pub(crate) struct Pinned {
+    cell: Retained<UICollectionViewCell>,
+    /// The item, the revision and the width the cell was last bound for.
+    bound: Cell<Option<(usize, u64, u64)>>,
+    /// The item the cell should show now.
+    wanted: Cell<usize>,
+}
 
 /// The reuse identifier of a recycled-list row cell.
 pub(crate) const ROW_CELL_ID: &str = "KrabikRow";
@@ -54,6 +71,16 @@ pub(crate) struct RecyclerIvars {
     pub(crate) needs_layout: AtomicBool,
     /// A revision change needs the visible cells rebound.
     pub(crate) needs_refresh: AtomicBool,
+    /// The application listens for a row being swiped away.
+    pub(crate) dismissible: AtomicBool,
+    /// The application listens for a row being dragged elsewhere.
+    pub(crate) reorderable: AtomicBool,
+    /// The items that are pinned headers, ascending.
+    pub(crate) sticky: RefCell<Vec<usize>>,
+    /// The pinned header, once one was needed.
+    pub(crate) pinned: RefCell<Option<Pinned>>,
+    /// The row under a horizontal pan, and its item.
+    pub(crate) swiped: RefCell<Option<(Retained<UICollectionViewCell>, usize)>>,
 }
 
 /// The changes one sync block should apply to a collection view.
@@ -74,7 +101,101 @@ objc2::define_class!(
 
     unsafe impl NSObjectProtocol for RecyclerDataSource {}
 
-    unsafe impl UIScrollViewDelegate for RecyclerDataSource {}
+    unsafe impl UIScrollViewDelegate for RecyclerDataSource {
+        #[unsafe(method(scrollViewDidScroll:))]
+        fn scroll_view_did_scroll(&self, scroll_view: &UIScrollView) {
+            let any: &AnyObject = scroll_view.as_ref();
+            if let Some(collection) = any.downcast_ref::<UICollectionView>() {
+                self.place_header(collection);
+            }
+        }
+    }
+
+    unsafe impl UIGestureRecognizerDelegate for RecyclerDataSource {
+        #[unsafe(method(gestureRecognizerShouldBegin:))]
+        fn should_begin(&self, recognizer: &UIGestureRecognizer) -> bool {
+            let ivars = self.ivars();
+            let any: &AnyObject = recognizer.as_ref();
+            if let Some(pan) = any.downcast_ref::<UIPanGestureRecognizer>() {
+                // Only a clearly sideways pan is a swipe; anything else is
+                // the list scrolling.
+                let velocity = pan.velocityInView(pan.view().as_deref());
+                ivars.dismissible.load(Ordering::Relaxed)
+                    && velocity.x.abs() > velocity.y.abs() * 1.5
+            } else if any.downcast_ref::<UILongPressGestureRecognizer>().is_some() {
+                ivars.reorderable.load(Ordering::Relaxed)
+            } else {
+                true
+            }
+        }
+    }
+
+    impl RecyclerDataSource {
+        /// A long press picks a row up; the collection view moves it with
+        /// the finger and tells the data source where it was dropped.
+        #[unsafe(method(reorder:))]
+        fn reorder(&self, recognizer: &UILongPressGestureRecognizer) {
+            let Some(view) = recognizer.view() else {
+                return;
+            };
+            let any: &AnyObject = view.as_ref();
+            let Some(collection) = any.downcast_ref::<UICollectionView>() else {
+                return;
+            };
+            let point = recognizer.locationInView(Some(&view));
+            let state = recognizer.state();
+            if state == UIGestureRecognizerState::Began {
+                if let Some(path) = collection.indexPathForItemAtPoint(point) {
+                    collection.beginInteractiveMovementForItemAtIndexPath(&path);
+                }
+            } else if state == UIGestureRecognizerState::Changed {
+                collection.updateInteractiveMovementTargetPosition(point);
+            } else if state == UIGestureRecognizerState::Ended {
+                collection.endInteractiveMovement();
+            } else {
+                collection.cancelInteractiveMovement();
+            }
+        }
+
+        /// A sideways pan slides a row; far or fast enough, it leaves.
+        #[unsafe(method(swipe:))]
+        fn swipe(&self, recognizer: &UIPanGestureRecognizer) {
+            let Some(view) = recognizer.view() else {
+                return;
+            };
+            let any: &AnyObject = view.as_ref();
+            let Some(collection) = any.downcast_ref::<UICollectionView>() else {
+                return;
+            };
+            let ivars = self.ivars();
+            let state = recognizer.state();
+            let offset = recognizer.translationInView(Some(&view)).x;
+            if state == UIGestureRecognizerState::Began {
+                let point = recognizer.locationInView(Some(&view));
+                let row = collection.indexPathForItemAtPoint(point).and_then(|path| {
+                    let index = path.item().max(0) as usize;
+                    collection.cellForItemAtIndexPath(&path).map(|cell| (cell, index))
+                });
+                *ivars.swiped.borrow_mut() = row;
+            } else if state == UIGestureRecognizerState::Changed {
+                if let Some((cell, _)) = ivars.swiped.borrow().as_ref() {
+                    cell.contentView().setTransform(translation(offset));
+                }
+            } else {
+                let Some((cell, index)) = ivars.swiped.borrow_mut().take() else {
+                    return;
+                };
+                let width = collection.bounds().size.width;
+                let speed = recognizer.velocityInView(Some(&view)).x;
+                let leaves = state == UIGestureRecognizerState::Ended
+                    && (offset.abs() > width * 0.4 || speed.abs() > 900.0);
+                let (handle, host, id) = (ivars.handle, ivars.host, ivars.id);
+                finish_swipe(cell, leaves.then_some(offset.signum() * width), self.mtm(), move || {
+                    dispatch(handle, host, id, NodeEvent::Dismiss(index));
+                });
+            }
+        }
+    }
 
     unsafe impl UICollectionViewDataSource for RecyclerDataSource {
         #[unsafe(method(collectionView:numberOfItemsInSection:))]
@@ -105,6 +226,29 @@ objc2::define_class!(
                 state.bind_row(ivars.id, index, &cell, width);
             });
             cell
+        }
+
+        #[unsafe(method(collectionView:canMoveItemAtIndexPath:))]
+        fn can_move_item(&self, _collection_view: &UICollectionView, _path: &NSIndexPath) -> bool {
+            self.ivars().reorderable.load(Ordering::Relaxed)
+        }
+
+        /// The row is already shown at its new place. The application hears
+        /// where it came from and went to; the rows are bound again from
+        /// the state after the render that follows.
+        #[unsafe(method(collectionView:moveItemAtIndexPath:toIndexPath:))]
+        fn move_item(
+            &self,
+            _collection_view: &UICollectionView,
+            from: &NSIndexPath,
+            to: &NSIndexPath,
+        ) {
+            let ivars = self.ivars();
+            let (handle, host, id) = (ivars.handle, ivars.host, ivars.id);
+            let (from, to) = (from.item().max(0) as usize, to.item().max(0) as usize);
+            if from != to {
+                schedule(move || dispatch(handle, host, id, NodeEvent::Move(from, to)));
+            }
         }
     }
 
@@ -167,6 +311,11 @@ impl RecyclerDataSource {
             needs_batch: AtomicBool::new(false),
             needs_layout: AtomicBool::new(false),
             needs_refresh: AtomicBool::new(false),
+            dismissible: AtomicBool::new(props.on_dismiss.is_set()),
+            reorderable: AtomicBool::new(props.on_reorder.is_set()),
+            sticky: RefCell::new(props.sticky.clone()),
+            pinned: RefCell::new(None),
+            swiped: RefCell::new(None),
         });
         // SAFETY: `NSObject`'s initializer returns an initialized instance of
         // this class with the ivars already set.
@@ -182,6 +331,15 @@ impl RecyclerDataSource {
         let count = props.item_count as u64;
         let height = props.item_height.map_or(0.0, f64::from).to_bits();
         let ivars = self.ivars();
+        ivars
+            .dismissible
+            .store(props.on_dismiss.is_set(), Ordering::Relaxed);
+        ivars
+            .reorderable
+            .store(props.on_reorder.is_set(), Ordering::Relaxed);
+        if *ivars.sticky.borrow() != props.sticky {
+            *ivars.sticky.borrow_mut() = props.sticky.clone();
+        }
         let count_changed = ivars.target_count.swap(count, Ordering::Relaxed) != count;
         let height_changed = ivars.item_height.swap(height, Ordering::Relaxed) != height;
         let revision_changed =
@@ -202,6 +360,88 @@ impl RecyclerDataSource {
             let host = ivars.host;
             let id = ivars.id;
             schedule(move || sync_recycler(handle, host, id));
+        }
+    }
+
+    /// Puts the current section's header at the top of the visible part of
+    /// the list, pushed up by the next header as it arrives, or hides it.
+    ///
+    /// This runs while the list scrolls and may run while the state is
+    /// locked, so it only asks the collection view. What the header shows
+    /// is bound a turn later by [`bind_pinned`].
+    pub(crate) fn place_header(&self, collection: &UICollectionView) {
+        let ivars = self.ivars();
+        let hide = || {
+            if let Some(pinned) = ivars.pinned.borrow().as_ref() {
+                pinned.cell.setHidden(true);
+            }
+        };
+        let sticky = ivars.sticky.borrow();
+        if sticky.is_empty() {
+            return hide();
+        }
+        let top = collection.contentOffset().y;
+        let frame_of = |index: usize| {
+            let path = NSIndexPath::indexPathForItem_inSection(index as isize, 0);
+            collection
+                .layoutAttributesForItemAtIndexPath(&path)
+                .map(|attributes| attributes.frame())
+        };
+        let Some(first) = collection
+            .indexPathForItemAtPoint(CGPoint::new(1.0, top + 1.0))
+            .map(|path| path.item().max(0) as usize)
+        else {
+            return hide();
+        };
+        let Some(header) = sticky.iter().rev().find(|index| **index <= first).copied() else {
+            return hide();
+        };
+        let Some(own) = frame_of(header) else {
+            return hide();
+        };
+        // The header row itself is still fully in place: nothing to pin.
+        if own.origin.y >= top {
+            return hide();
+        }
+        let height = own.size.height;
+        let next_top = sticky
+            .iter()
+            .find(|index| **index > first)
+            .and_then(|index| frame_of(*index))
+            .map(|frame| frame.origin.y);
+        let y = next_top.map_or(top, |next| top.min(next - height));
+
+        let mut slot = ivars.pinned.borrow_mut();
+        let pinned = slot.get_or_insert_with(|| {
+            let cell = UICollectionViewCell::initWithFrame(
+                UICollectionViewCell::alloc(self.mtm()),
+                CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(0.0, 0.0)),
+            );
+            // A picture of the row, as on Android; and above the rows.
+            cell.setUserInteractionEnabled(false);
+            cell.layer().setZPosition(1000.0);
+            collection.addSubview(&cell);
+            Pinned {
+                cell,
+                bound: Cell::new(None),
+                wanted: Cell::new(header),
+            }
+        });
+        let width = collection.bounds().size.width;
+        pinned.cell.setFrame(CGRect::new(
+            CGPoint::new(0.0, y),
+            CGSize::new(width, height),
+        ));
+        pinned.cell.setHidden(false);
+        pinned.wanted.set(header);
+        let wanted = Some((
+            header,
+            ivars.revision.load(Ordering::Relaxed),
+            width.to_bits(),
+        ));
+        if pinned.bound.get() != wanted {
+            let (handle, host, id) = (ivars.handle, ivars.host, ivars.id);
+            schedule(move || bind_pinned(handle, host, id));
         }
     }
 
@@ -504,7 +744,94 @@ pub(crate) fn sync_recycler(handle: u64, host: u64, id: NodeId) {
         if changes.refresh {
             with_state(handle, host, |state| state.rebind_visible_rows(id));
         }
+        data_source.place_header(&collection);
     });
+}
+
+/// Binds the pinned header to the item it should show now.
+///
+/// Runs on a main-queue turn of its own, because binding a row needs the
+/// state, which may be locked while the list scrolls.
+pub(crate) fn bind_pinned(handle: u64, host: u64, id: NodeId) {
+    guard("pinned header", || {
+        let Some((collection, data_source)) =
+            with_state(handle, host, |state| state.recycler_for(id)).flatten()
+        else {
+            return;
+        };
+        let ivars = data_source.ivars();
+        let slot = ivars.pinned.borrow();
+        let Some(pinned) = slot.as_ref() else {
+            return;
+        };
+        let width = collection.bounds().size.width;
+        let wanted = (
+            pinned.wanted.get(),
+            ivars.revision.load(Ordering::Relaxed),
+            width.to_bits(),
+        );
+        if pinned.bound.get() == Some(wanted) {
+            return;
+        }
+        pinned.bound.set(Some(wanted));
+        with_state(handle, host, |state| {
+            state.bind_row(id, wanted.0, &pinned.cell, width);
+        });
+    });
+}
+
+fn translation(x: f64) -> CGAffineTransform {
+    CGAffineTransform {
+        a: 1.0,
+        b: 0.0,
+        c: 0.0,
+        d: 1.0,
+        tx: x,
+        ty: 0.0,
+    }
+}
+
+/// Ends a swipe: the row slides off to `leave_to` and `dismissed` runs, or
+/// it slides back when it was not swiped far enough.
+fn finish_swipe(
+    cell: Retained<UICollectionViewCell>,
+    leave_to: Option<f64>,
+    mtm: MainThreadMarker,
+    dismissed: impl Fn() + Send + Clone + 'static,
+) {
+    let content = cell.contentView();
+    let sliding = content.clone();
+    let slide = RcBlock::new(move || sliding.setTransform(translation(leave_to.unwrap_or(0.0))));
+    let leaves = leave_to.is_some();
+    let done = RcBlock::new(move |_: Bool| {
+        if !leaves {
+            return;
+        }
+        // The row stays out of sight until the list is bound again from the
+        // state, which shows this cell's next content, or the same row when
+        // the application kept it.
+        content.setAlpha(0.0);
+        content.setTransform(translation(0.0));
+        schedule(dismissed.clone());
+        let returning = content.clone();
+        let back = RcBlock::new(move || returning.setAlpha(1.0));
+        UIView::animateWithDuration_delay_options_animations_completion(
+            0.1,
+            0.25,
+            UIViewAnimationOptions::empty(),
+            &back,
+            None,
+            mtm,
+        );
+    });
+    UIView::animateWithDuration_delay_options_animations_completion(
+        0.2,
+        0.0,
+        UIViewAnimationOptions::empty(),
+        &slide,
+        Some(&done),
+        mtm,
+    );
 }
 
 pub(crate) fn focus_row_async(handle: u64, host: u64, field: NodeId) {
@@ -558,6 +885,26 @@ pub(crate) fn create_recycler(props: &RecyclerProps, node: &RenderNode, site: &S
     // only reads the collection view's size and index paths.
     unsafe {
         collection.setDelegate(Some(ProtocolObject::from_ref(&*data_source)));
+    }
+    // The gestures on a row. Their delegate lets each begin only while the
+    // application listens for it.
+    // SAFETY: `reorder:` and `swipe:` are methods of the data source that
+    // take their recognizer; the handle keeps the data source alive.
+    unsafe {
+        let hold: Retained<UILongPressGestureRecognizer> = objc2::msg_send![
+            UILongPressGestureRecognizer::alloc(site.mtm),
+            initWithTarget: &*data_source,
+            action: objc2::sel!(reorder:),
+        ];
+        hold.setDelegate(Some(ProtocolObject::from_ref(&*data_source)));
+        collection.addGestureRecognizer(&hold);
+        let pan: Retained<UIPanGestureRecognizer> = objc2::msg_send![
+            UIPanGestureRecognizer::alloc(site.mtm),
+            initWithTarget: &*data_source,
+            action: objc2::sel!(swipe:),
+        ];
+        pan.setDelegate(Some(ProtocolObject::from_ref(&*data_source)));
+        collection.addGestureRecognizer(&pan);
     }
     crate::ios::widgets::refresh::attach(&collection, &props.refresh, site);
     let view = cast_view(collection.clone());

@@ -10,6 +10,7 @@ use jni::errors::Result as JniResult;
 use jni::objects::{JClass, JObject};
 use jni::refs::Global;
 use jni::signature::RuntimeMethodSignature;
+use jni::sys::jint;
 use jni::{Env, JValue};
 use jni::{jni_sig, jni_str};
 
@@ -21,6 +22,20 @@ pub(crate) fn update_image(
     let (source, is_asset) = match &props.source {
         ImageSource::Asset(path) => (path.as_str(), true),
         ImageSource::Url(url) => (url.as_str(), false),
+        ImageSource::Icon(icon) => {
+            let name = jcall!(env, env.new_string(icon.android_name().unwrap_or_default()))?;
+            let ids = jni_handles(env)?;
+            return ids.image.load_icon.call_void(
+                env,
+                &ids.image.images_class,
+                &[
+                    JValue::Object(view),
+                    JValue::Object(name.as_ref()),
+                    JValue::Int(props.tint.map_or(0, |tint| tint.argb() as jint)),
+                    JValue::Bool(props.tint.is_some()),
+                ],
+            );
+        }
     };
     let source = jcall!(env, env.new_string(source))?;
     let ids = jni_handles(env)?;
@@ -49,6 +64,7 @@ pub(crate) struct Handles {
     pub(crate) ctor: Ctor,
     pub(crate) images_class: Global<JClass<'static>>,
     pub(crate) load: StaticMethod,
+    pub(crate) load_icon: StaticMethod,
     pub(crate) size: StaticMethod,
 }
 
@@ -66,6 +82,13 @@ impl Handles {
                 &krabik_images,
                 "load",
                 "(Landroid/widget/ImageView;Ljava/lang/String;ZZ)V",
+                VOID
+            ),
+            load_icon: static_method!(
+                env,
+                &krabik_images,
+                "loadIcon",
+                "(Landroid/widget/ImageView;Ljava/lang/String;IZ)V",
                 VOID
             ),
             size: static_method!(

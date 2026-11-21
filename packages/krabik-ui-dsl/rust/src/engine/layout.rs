@@ -9,8 +9,9 @@ use std::collections::HashMap;
 use taffy::Overflow;
 use taffy::geometry::{Line, Point as TaffyPoint, Rect as TaffyRect, Size as TaffySize};
 use taffy::prelude::{
-    AlignItems, AvailableSpace, Dimension, Display, FlexDirection, JustifyContent,
-    LengthPercentage, LengthPercentageAuto, NodeId as TaffyId, Style as TaffyStyle, TaffyTree,
+    AlignContent, AlignItems, AvailableSpace, Dimension, Display, FlexDirection, FlexWrap,
+    JustifyContent, LengthPercentage, LengthPercentageAuto, NodeId as TaffyId, Position,
+    Style as TaffyStyle, TaffyTree,
 };
 use taffy::style::GridPlacement;
 use taffy::style_helpers::line;
@@ -151,6 +152,8 @@ fn taffy_style(node: &UiNode, parent: Parent) -> TaffyStyle {
     } else {
         Line::default()
     };
+    // Only a stack places children by their distance from its edges.
+    let positioned = node.style.inset.filter(|_| parent == Parent::Stack);
     let direction = match &node.kind {
         NodeKind::Row => FlexDirection::Row,
         NodeKind::Pager(_) => FlexDirection::Row,
@@ -211,13 +214,42 @@ fn taffy_style(node: &UiNode, parent: Parent) -> TaffyStyle {
         // from shrinking next to a sibling (for example in a list row). A text
         // node may shrink to the space its parent leaves and wrap instead.
         min_size: TaffySize {
-            width: if pager_child || matches!(node.kind, NodeKind::Widget(Widget::Text(_))) {
-                LengthPercentageAuto::length(0.0)
-            } else {
-                LengthPercentageAuto::auto()
+            width: match node.style.min_width {
+                Some(width) => margin(width),
+                None if pager_child || matches!(node.kind, NodeKind::Widget(Widget::Text(_))) => {
+                    margin(0.0)
+                }
+                None => LengthPercentageAuto::auto(),
             },
-            height: LengthPercentageAuto::auto(),
+            height: limit(node.style.min_height),
         },
+        max_size: TaffySize {
+            width: limit(node.style.max_width),
+            height: limit(node.style.max_height),
+        },
+        // Only a row wraps: a column in a scroll view has no height to wrap at.
+        flex_wrap: if node.style.wrap && matches!(node.kind, NodeKind::Row) {
+            FlexWrap::Wrap
+        } else {
+            FlexWrap::NoWrap
+        },
+        // The lines of a wrapping row keep their own height and start at the top.
+        align_content: if node.style.wrap {
+            AlignContent::FLEX_START
+        } else {
+            AlignContent::NORMAL
+        },
+        position: if positioned.is_some() {
+            Position::Absolute
+        } else {
+            Position::Relative
+        },
+        inset: positioned.map_or(TaffyRect::auto(), |inset| TaffyRect {
+            left: limit(inset.left),
+            right: limit(inset.right),
+            top: limit(inset.top),
+            bottom: limit(inset.bottom),
+        }),
         aspect_ratio: node.style.aspect_ratio,
         padding: TaffyRect {
             left: length_percentage(node.style.padding.left),
@@ -233,7 +265,7 @@ fn taffy_style(node: &UiNode, parent: Parent) -> TaffyStyle {
         },
         gap: TaffySize {
             width: length_percentage(node.style.gap),
-            height: length_percentage(node.style.gap),
+            height: length_percentage(node.style.run_gap.unwrap_or(node.style.gap)),
         },
         flex_grow: node.style.grow,
         // Scroll containers must let their content keep its natural size in
@@ -269,6 +301,11 @@ fn length_percentage(value: f32) -> LengthPercentage {
 
 fn margin(value: f32) -> LengthPercentageAuto {
     LengthPercentageAuto::length(value)
+}
+
+/// A length that is only set when the style gives one.
+fn limit(value: Option<f32>) -> LengthPercentageAuto {
+    value.map_or(LengthPercentageAuto::auto(), margin)
 }
 
 /// Sizes an image whose natural dimensions are known.
@@ -311,6 +348,8 @@ fn justify_content(justify: Justify) -> JustifyContent {
         Justify::Center => JustifyContent::CENTER,
         Justify::End => JustifyContent::FLEX_END,
         Justify::SpaceBetween => JustifyContent::SPACE_BETWEEN,
+        Justify::SpaceAround => JustifyContent::SPACE_AROUND,
+        Justify::SpaceEvenly => JustifyContent::SPACE_EVENLY,
     }
 }
 
@@ -411,12 +450,12 @@ mod tests {
     use crate::geometry::Constraints;
     use crate::measure::ApproximateMeasure;
     use crate::tree::ROOT_ID;
-    use crate::ui::Stack;
     use crate::ui::{
         Button, Checkbox, Column, DatePicker, DatePickerMode, DateValue, EdgeInsets, Element,
         Image, ImageSource, Pager, ProgressIndicator, RadioButton, RadioGroup, Row, ScrollView,
         Slider, Spacer, Switch, TabBar, Text, TextField, TimeValue,
     };
+    use crate::ui::{Inset, Stack, Wrap};
     use crate::widgets::TextProps;
 
     /// Measures every text as the same fixed box.
@@ -1028,5 +1067,110 @@ mod tests {
             button.x + button.width <= 300.5,
             "button was pushed outside the row: {button:?}"
         );
+    }
+
+    #[test]
+    fn a_wrapping_row_continues_on_the_next_line() {
+        // Three 100-point children with a gap of 10 in 250 points: two fit.
+        let element: Element = Wrap::new()
+            .spacing(10)
+            .run_spacing(4)
+            .width(250)
+            .child(Column::new().width(100).height(30))
+            .child(Column::new().width(100).height(20))
+            .child(Column::new().width(100).height(20))
+            .into();
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(600.0, 600.0), &ApproximateMeasure).frames;
+        let wrap = &tree.children[0];
+        let child = |index: usize| frames[&wrap.children[index].id];
+        assert_eq!(child(0), Rect::new(0.0, 0.0, 100.0, 30.0));
+        assert_eq!(child(1), Rect::new(110.0, 0.0, 100.0, 20.0));
+        // The second line starts under the tallest child of the first.
+        assert_eq!(child(2), Rect::new(0.0, 34.0, 100.0, 20.0));
+        assert_eq!(frames[&wrap.id].height, 54.0);
+    }
+
+    #[test]
+    fn a_size_stays_between_its_minimum_and_maximum() {
+        let element: Element = Column::new()
+            .align_items(Align::Start)
+            .child(
+                Column::new()
+                    .width(10)
+                    .height(10)
+                    .min_width(44)
+                    .min_height(44),
+            )
+            .child(
+                Column::new()
+                    .width(500)
+                    .max_width(120)
+                    .height(300)
+                    .max_height(50),
+            )
+            .into();
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(600.0, 600.0), &ApproximateMeasure).frames;
+        let column = &tree.children[0];
+        let small = frames[&column.children[0].id];
+        assert_eq!((small.width, small.height), (44.0, 44.0));
+        let large = frames[&column.children[1].id];
+        assert_eq!((large.width, large.height), (120.0, 50.0));
+    }
+
+    #[test]
+    fn a_positioned_child_is_held_at_the_edges_of_its_stack() {
+        let element: Element = Stack::new()
+            .width(100)
+            .height(60)
+            .child(Column::new())
+            .child(
+                Column::new()
+                    .width(20)
+                    .height(10)
+                    .positioned(Inset::new().top(4).right(6)),
+            )
+            .child(
+                Column::new()
+                    .height(8)
+                    .positioned(Inset::new().left(0).right(0).bottom(0)),
+            )
+            .into();
+        let tree = tree::build(&element);
+        let frames = compute(&tree, Size::new(600.0, 600.0), &ApproximateMeasure).frames;
+        let stack = &tree.children[0];
+        // The positioned children do not make the stack larger.
+        assert_eq!(frames[&stack.id], Rect::new(0.0, 0.0, 100.0, 60.0));
+        assert_eq!(
+            frames[&stack.children[1].id],
+            Rect::new(74.0, 4.0, 20.0, 10.0)
+        );
+        // Two opposite sides stretch the child between them.
+        assert_eq!(
+            frames[&stack.children[2].id],
+            Rect::new(0.0, 52.0, 100.0, 8.0)
+        );
+    }
+
+    #[test]
+    fn space_is_distributed_around_and_evenly() {
+        let row = |justify| -> Vec<f32> {
+            let element: Element = Row::new()
+                .width(100)
+                .justify_content(justify)
+                .child(Column::new().width(20).height(10))
+                .child(Column::new().width(20).height(10))
+                .into();
+            let tree = tree::build(&element);
+            let frames = compute(&tree, Size::new(600.0, 600.0), &ApproximateMeasure).frames;
+            let row = &tree.children[0];
+            row.children
+                .iter()
+                .map(|child| frames[&child.id].x)
+                .collect()
+        };
+        assert_eq!(row(Justify::SpaceAround), vec![15.0, 65.0]);
+        assert_eq!(row(Justify::SpaceEvenly), vec![20.0, 60.0]);
     }
 }

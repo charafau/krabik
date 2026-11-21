@@ -18,6 +18,11 @@ container"). That is what the platforms offer, twice, in two different shapes. A
 the same on both platforms, is plain data that a unit test can inspect, and removes a whole class
 of bugs where the screen and the state drift apart because one update was forgotten.
 
+**One exception.** An application may supply a native view of its own, by name, for what the
+two platforms do not have in common: a map, a video player. It still does not touch the views
+the framework makes, and the description still decides where that view is and what it is told
+(`NativeView`; see [the recipe](../recipes/embed-a-native-view.md)).
+
 **Cost.** The framework has to find out what changed. That is the job of the tree, the layout
 and the diff, and it is most of the engine. See [the big picture](../internals/01-the-big-picture.md).
 
@@ -81,7 +86,9 @@ new variant is a compile error at each place that must handle it, and the error 
 checklist.
 
 **Cost.** A widget cannot be added from outside the crate. That is accepted: a widget needs
-native code on two platforms anyway.
+native code on two platforms anyway. What an application can add is a native *view*, through
+the one `NativeView` variant, whose properties and events are strings; and a widget assembled
+from existing ones, which is an ordinary function.
 
 ## 5. One session shared by both platforms
 
@@ -193,6 +200,10 @@ and the Kotlin package name was written into 26 exported function names.
 **Why.** A fix in a shell file had to be made four times. The package name now appears in one
 Rust macro, and an app's Gradle file is about 45 lines.
 
+**What it made possible.** Because an app's shells are a few short files with nothing but names
+in them, `krabik create <name> --with-dsl` can write them from a template, and `krabik run`
+needs to know nothing about the framework: it starts Gradle or Xcode.
+
 ## 11. Slow work is a value returned from `update`; its result is a message
 
 **Decision.** `update` returns a `Command`. The framework runs it on another thread and delivers
@@ -261,3 +272,6 @@ the "platform-specific extensions" item in the backlog, and not a style value.
 - Creating a widget's native view is still one `match` per platform. It is exhaustive, so it
   cannot be forgotten, but it is one more file to touch.
 - A screen's description is rebuilt after every message; see decision 7.
+- The framework is not published. An app made with `krabik create --with-dsl` refers to a
+  krabik checkout by absolute path, so it builds only where that checkout is, and
+  `krabik release` does not handle such an app yet.

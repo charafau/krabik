@@ -348,6 +348,11 @@ says how the entry point takes the state map: `lock` blocks, `try` gives up when
 | `nativeDestroy(handle, retain)` | lock | Removes all views and the session; with `retain` keeps the app and returns its id. |
 | `nativeDropRetainedApp(id)` (static) | none | Drops an app that was retained but never picked up. |
 | `nativeOnClick(handle, host, node)` | try | A stock button was pressed. |
+| `nativeOnLongClick(handle, host, node)` | try | A container was pressed and held. |
+| `nativeOnRangeChanged(..., low, high)` | try | A thumb of a range slider moved; both places from 0 to 1. |
+| `nativeOnNativeEvent(..., value)` | try | A view of the application's own sent a string. |
+| `nativeOnRowDismissed(..., position)` | try | A row of a recycled list was swiped away. |
+| `nativeOnRowMoved(..., from, to)` | try | A row of a recycled list was dragged elsewhere. |
 | `nativeOnTextChanged(..., text)` | try | A text field's content changed. |
 | `nativeOnSubmitted(...)` | try | A text field was submitted from the keyboard. |
 | `nativeOnFocusChanged(..., focused, attached)` | try | A text field gained or lost focus. |
@@ -394,6 +399,7 @@ All are declared in `shared/ios/KrabikIOS.h` and defined in `rust/src/ios/entry.
 | `krabik_ios_create(root, width, height, dark, locale)` | Creates the session and its main host, renders once, returns the handle. |
 | `krabik_ios_set_locale(handle, locale)` | The user's language changed while the app runs; tell the application and re-render. |
 | `krabik_ios_set_color_scheme(handle, dark)` | The device switched appearance; re-render with the other colours. |
+| `krabik_ios_set_text_scale(handle, scale)` | The factor of the user's text size setting, at startup and when it changes; re-render with every text scaled. |
 | `krabik_ios_render(handle, host, width, height)` | Sets the host's viewport and renders every host. |
 | `krabik_ios_attach_host(handle, host, root)` | Adopts a screen or sheet view, then renders. |
 | `krabik_ios_destroy_host(handle, host)` | Drops one host; called from the host view's `deinit`. |

@@ -5,6 +5,8 @@
 //! without spawning a process.
 
 pub mod android;
+pub mod dsl;
+pub mod hot;
 pub mod ios;
 pub mod naming;
 pub mod remove;
@@ -165,6 +167,14 @@ pub enum Commands {
         /// Package prefix for the generated app id (com.example.my_app by default)
         #[arg(long, default_value = "com.example")]
         package: String,
+
+        /// Create a krabik-ui-dsl app (native views built in Rust) instead of a UniFFI project
+        #[arg(long)]
+        with_dsl: bool,
+
+        /// The krabik-ui-dsl directory of a krabik checkout [default: the checkout this CLI was built from]
+        #[arg(long, value_name = "DIR", requires = "with_dsl")]
+        dsl_path: Option<PathBuf>,
     },
 
     /// Install necessary rust toolchains
@@ -213,7 +223,7 @@ pub enum Commands {
         platform: Platform,
     },
 
-    /// Watch the Rust sources and rebuild on every change
+    /// Watch the Rust sources: hot reload a krabik-ui-dsl app, rebuild any other project
     Watch {
         /// The device to run on (Android) or the simulator to use (iOS)
         #[arg(default_value = "")]
@@ -232,10 +242,23 @@ pub enum Commands {
 }
 
 /// Creates the Rust, Android and iOS parts of the project in `root`.
-fn create_project(project: &ProjectName, package_prefix: &str, root: &Path) -> Result<()> {
-    rust::create_rust(project, root)?;
-    android::create_android(project, package_prefix, root)?;
-    ios::create_ios(project, package_prefix, root)?;
+///
+/// With `dsl`, the krabik-ui-dsl directory of a checkout, the project is a
+/// krabik-ui-dsl app. Otherwise it is a UniFFI project.
+fn create_project(
+    project: &ProjectName,
+    package_prefix: &str,
+    root: &Path,
+    dsl: Option<&str>,
+) -> Result<()> {
+    match dsl {
+        Some(dsl) => dsl::create_dsl_project(project, package_prefix, root, dsl)?,
+        None => {
+            rust::create_rust(project, root)?;
+            android::create_android(project, package_prefix, root)?;
+            ios::create_ios(project, package_prefix, root)?;
+        }
+    }
 
     // The project declares the targets it needs, so it does not depend on the
     // machine being set up beforehand.
@@ -303,7 +326,12 @@ pub fn run(args: Args) -> Result<()> {
                 return Err(anyhow!("one or more doctor checks failed"));
             }
         }
-        Commands::Create { name, package } => {
+        Commands::Create {
+            name,
+            package,
+            with_dsl,
+            dsl_path,
+        } => {
             println!("create: {name}");
 
             naming::validate_package_prefix(&package)?;
@@ -311,6 +339,14 @@ pub fn run(args: Args) -> Result<()> {
             // Validate the name before touching the filesystem so that an
             // invalid name never leaves a half-created project behind.
             let project = ProjectName::parse(&name)?;
+
+            // The framework is found before anything is created, relative
+            // paths are meant from the current directory.
+            let dsl = if with_dsl {
+                Some(dsl::resolve_dsl_path(dsl_path.as_deref())?)
+            } else {
+                None
+            };
 
             let target = PathBuf::from(format!("./{}", project.dir_name()));
             if fs::metadata(&target).is_ok() {
@@ -320,7 +356,7 @@ pub fn run(args: Args) -> Result<()> {
             // The project is built in a staging directory and only moved to
             // its final location once every part was created successfully.
             let staging = StagingDir::create(project.dir_name())?;
-            if let Err(err) = create_project(&project, &package, staging.path()) {
+            if let Err(err) = create_project(&project, &package, staging.path(), dsl.as_deref()) {
                 staging.cleanup();
                 return Err(err);
             }
@@ -359,14 +395,29 @@ pub fn run(args: Args) -> Result<()> {
                 ios::build_ios_debug(&device)?
             }
         },
-        Commands::Release { platform } => match platform {
-            Platform::Android => android::build_android_release()?,
-            Platform::Ios => ios::build_ios_release()?,
-        },
-        Commands::Bindings { platform } => match platform {
-            Platform::Android => android::generate_android_bindings()?,
-            Platform::Ios => ios::generate_ios_bindings()?,
-        },
+        Commands::Release { platform } => {
+            if rust::is_dsl_project() {
+                return Err(anyhow!(
+                    "release builds are not supported for krabik-ui-dsl projects yet; \
+                     build them with Gradle or Xcode"
+                ));
+            }
+            match platform {
+                Platform::Android => android::build_android_release()?,
+                Platform::Ios => ios::build_ios_release()?,
+            }
+        }
+        Commands::Bindings { platform } => {
+            if rust::is_dsl_project() {
+                return Err(anyhow!(
+                    "a krabik-ui-dsl project has no UniFFI bindings to generate"
+                ));
+            }
+            match platform {
+                Platform::Android => android::generate_android_bindings()?,
+                Platform::Ios => ios::generate_ios_bindings()?,
+            }
+        }
         Commands::Watch { device, platform } => watch::watch(&device, platform)?,
         Commands::Clean { purge } => {
             println!("clean\n");

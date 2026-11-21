@@ -1,11 +1,12 @@
 //! Text and control measurement through off-screen Android views.
 
 use crate::android::handles::get as jni_handles;
-use crate::android::widgets::text::{apply_text_limits, apply_typeface};
+use crate::android::widgets::text::{TextLook, apply_text, apply_text_limits};
 use crate::android::{COMPLEX_UNIT_SP, MEASURE_AT_MOST, MEASURE_UNSPECIFIED, WRAP_CONTENT};
 use crate::geometry::{Constraints, Size};
 use crate::measure::{DEFAULT_SWITCH_HEIGHT, DEFAULT_SWITCH_WIDTH, Measure};
-use crate::ui::{FontWeight, ImageProps, ImageSource, TextProps};
+use crate::ui::{ImageProps, ImageSource, TextProps};
+use crate::widgets::TextMeasureKey;
 use jni::errors::Result as JniResult;
 use jni::objects::JObject;
 use jni::refs::Global;
@@ -30,12 +31,9 @@ pub(crate) struct AndroidMeasure {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct MeasureKey {
-    pub(crate) content: String,
-    pub(crate) size: u32,
-    pub(crate) bold: bool,
+    /// Everything about the text that decides its size.
+    pub(crate) text: TextMeasureKey,
     pub(crate) max_width: Option<u32>,
-    pub(crate) max_lines: Option<u32>,
-    pub(crate) ellipsis: bool,
 }
 
 impl AndroidMeasure {
@@ -92,17 +90,13 @@ impl AndroidMeasure {
     ) -> JniResult<Size> {
         let view = self.text_view.as_obj();
 
-        let string = jcall!(env, env.new_string(&text.content))?;
         let ids = jni_handles(env)?;
-        ids.set_text
-            .call_void(env, view, &[JValue::Object(string.as_ref())])?;
         ids.set_text_size.call_void(
             env,
             view,
             &[JValue::Int(COMPLEX_UNIT_SP), JValue::Float(text.size)],
         )?;
-        let bold = matches!(text.weight, FontWeight::Bold);
-        apply_typeface(env, view, bold)?;
+        apply_text(env, view, &text.content, TextLook::of(text), &text.runs())?;
         apply_text_limits(env, view, (text.max_lines, text.ellipsis))?;
 
         let width = match constraints.max_width {
@@ -180,12 +174,8 @@ impl AndroidMeasure {
 impl Measure for AndroidMeasure {
     fn measure(&self, text: &TextProps, constraints: Constraints) -> Size {
         let key = MeasureKey {
-            content: text.content.clone(),
-            size: text.size.to_bits(),
-            bold: matches!(text.weight, FontWeight::Bold),
+            text: text.measure_key(),
             max_width: constraints.max_width.map(f32::to_bits),
-            max_lines: text.max_lines,
-            ellipsis: text.ellipsis,
         };
 
         if let Some(cached) = self

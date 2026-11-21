@@ -133,6 +133,7 @@ impl Controller<Android> for AndroidController {
                 JValue::Bool(bar.is_none()),
                 JValue::Object(&action_labels),
                 JValue::Object(&action_icons),
+                JValue::Long(crate::scaffold::menu_mask(actions) as jni::sys::jlong),
             ],
         )?;
 
@@ -332,7 +333,7 @@ impl Handles {
                 env,
                 &class,
                 "setToolbar",
-                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z[Ljava/lang/String;[Ljava/lang/String;)V",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z[Ljava/lang/String;[Ljava/lang/String;J)V",
                 VOID
             ),
             set_bottom_navigation: method!(

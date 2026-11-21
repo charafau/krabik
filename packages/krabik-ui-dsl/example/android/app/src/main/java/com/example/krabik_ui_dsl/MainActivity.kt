@@ -11,6 +11,8 @@ class MainActivity : KrabikActivity() {
     }
 
     override fun installApp() {
+        // The views of this application's own, before any screen asks for one.
+        NativeViews.register()
         ExampleBridge.install()
     }
 }

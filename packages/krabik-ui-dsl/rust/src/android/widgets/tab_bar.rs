@@ -3,7 +3,7 @@
 use crate::android::TAB_BAR_CLASS;
 use crate::android::handles::{Method, VOID, class, get as jni_handles, method, widget_ctor};
 use crate::android::widgets::{Ctor, Site};
-use crate::ui::{FontWeight, TabBarProps};
+use crate::ui::TabBarProps;
 use jni::errors::Result as JniResult;
 use jni::jni_sig;
 use jni::objects::{JClass, JObject};
@@ -36,7 +36,8 @@ pub(crate) fn update_tab_bar(
             JValue::Int(props.selected as jint),
             JValue::Float(props.size),
             JValue::Int(props.color.argb() as jint),
-            JValue::Bool(matches!(props.weight, FontWeight::Bold)),
+            // the control only knows regular and bold
+            JValue::Bool(props.weight.is_bold()),
         ],
     )
 }

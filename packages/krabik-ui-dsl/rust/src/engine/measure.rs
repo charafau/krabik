@@ -40,7 +40,8 @@ pub trait Measure: Send + Sync {
 /// A cheap text measurement that does not need a platform.
 ///
 /// It assumes an average glyph width of `0.55 * font size` and a line height of
-/// `1.25 * font size`. Real platforms must replace it with native measurement.
+/// `1.25 * font size`, and honours the text's letter spacing and line height.
+/// Real platforms must replace it with native measurement.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ApproximateMeasure;
 
@@ -50,8 +51,8 @@ impl Measure for ApproximateMeasure {
             return Size::ZERO;
         }
 
-        let glyph_width = text.size * 0.55;
-        let line_height = text.size * 1.25;
+        let glyph_width = (text.size * 0.55 + text.letter_spacing).max(0.0);
+        let line_height = text.line_height.unwrap_or(text.size * 1.25);
         let natural_width = text.content.chars().count() as f32 * glyph_width;
 
         let width = constraints
@@ -102,6 +103,19 @@ mod tests {
 
         assert_eq!(measured.width, 22.0);
         assert_eq!(measured.height, 40.0);
+    }
+
+    #[test]
+    fn letter_spacing_and_line_height_change_the_size() {
+        let mut styled = text("Hello");
+        styled.letter_spacing = 1.0;
+        styled.line_height = Some(30.0);
+
+        // 5 glyphs * (8.8 + 1.0) wide, one line of 30 high
+        assert_eq!(
+            ApproximateMeasure.measure(&styled, Constraints::UNBOUNDED),
+            Size::new(49.0, 30.0)
+        );
     }
 
     #[test]

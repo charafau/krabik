@@ -2,14 +2,14 @@
 
 use crate::geometry::{Constraints, Size};
 use crate::ios::images::load_asset;
-use crate::ios::system_font;
+use crate::ios::widgets::text::set_label_text;
 use crate::measure::{DEFAULT_SWITCH_HEIGHT, DEFAULT_SWITCH_WIDTH, Measure};
-use crate::ui::{FontWeight, ImageProps, ImageSource, TextProps};
+use crate::ui::{ImageProps, ImageSource, TextProps};
+use crate::widgets::TextMeasureKey;
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_core_foundation::CGSize;
-use objc2_foundation::NSString;
-use objc2_ui_kit::{NSLineBreakMode, UILabel, UISwitch};
+use objc2_ui_kit::{UILabel, UISwitch};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -31,12 +31,9 @@ unsafe impl Sync for IosMeasure {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct MeasureKey {
-    pub(crate) content: String,
-    pub(crate) size: u32,
-    pub(crate) bold: bool,
+    /// Everything about the text that decides its size.
+    pub(crate) text: TextMeasureKey,
     pub(crate) max_width: Option<u32>,
-    pub(crate) max_lines: Option<u32>,
-    pub(crate) ellipsis: bool,
 }
 
 impl IosMeasure {
@@ -57,12 +54,8 @@ impl IosMeasure {
         }
 
         let key = MeasureKey {
-            content: text.content.clone(),
-            size: text.size.to_bits(),
-            bold: matches!(text.weight, FontWeight::Bold),
+            text: text.measure_key(),
             max_width: constraints.max_width.map(f32::to_bits),
-            max_lines: text.max_lines,
-            ellipsis: text.ellipsis,
         };
 
         if let Some(cached) = self
@@ -76,16 +69,7 @@ impl IosMeasure {
         }
 
         let label = &self.label;
-        label.setText(Some(&NSString::from_str(&text.content)));
-        let font = system_font(text.size, text.weight);
-        // SAFETY: the font is retained by the label for as long as it is set.
-        unsafe { label.setFont(Some(&font)) };
-        label.setNumberOfLines(text.max_lines.map_or(0, |lines| lines.max(1) as isize));
-        label.setLineBreakMode(if text.ellipsis {
-            NSLineBreakMode::ByTruncatingTail
-        } else {
-            NSLineBreakMode::ByWordWrapping
-        });
+        set_label_text(label, text);
 
         let max_width = constraints.max_width.map_or(f64::MAX, f64::from);
         let measured = label.sizeThatFits(CGSize::new(max_width, f64::MAX));

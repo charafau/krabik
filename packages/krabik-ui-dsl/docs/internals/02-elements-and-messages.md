@@ -228,7 +228,7 @@ The rest of the API is small:
 - `Handler::none()`: the widget does not report this event.
 - `is_set()`: whether there is a function.
 - `message(payload)`: call the function, if any. `pub(crate)`: only the session calls it.
-- `map(&Wrap)`: wrap the function in another one (see `Element::map` below).
+- `map(&MessageMap)`: wrap the function in another one (see `Element::map` below).
 
 ### The trace, first half: from builder call to `RawElement`
 
@@ -325,7 +325,7 @@ the new closures. `Runtime::update` does that, and a test pins it down
 
 `Debug` for a handler prints `Handler(set)` or `Handler(none)`, for the same reason.
 
-## `Element::map` and `Wrap`
+## `Element::map` and `MessageMap`
 
 A child component has its own message type. To place its view inside a parent's, the child's
 messages must become the parent's:
@@ -345,7 +345,7 @@ where
     M: 'static,
 {
     let mut raw = self.raw;
-    let wrap: Wrap = Arc::new(move |message: Message| -> Message {
+    let wrap: MessageMap = Arc::new(move |message: Message| -> Message {
         match message.downcast::<M>() {
             Ok(message) => Box::new(wrap(*message)),
             // Not produced by this subtree; pass it through untouched.
@@ -357,12 +357,12 @@ where
 }
 ```
 
-`Wrap` is `Arc<dyn Fn(Message) -> Message + Send + Sync>` (in `message.rs`). `map_messages` walks
+`MessageMap` is `Arc<dyn Fn(Message) -> Message + Send + Sync>` (in `message.rs`). `map_messages` walks
 the subtree and calls `Handler::map` on every handler it finds:
 
 ```rust,ignore
 // rust/src/message.rs
-pub(crate) fn map(&mut self, wrap: &Wrap) {
+pub(crate) fn map(&mut self, wrap: &MessageMap) {
     if let Some(make) = self.0.take() {
         let wrap = wrap.clone();
         self.0 = Some(Arc::new(move |payload| wrap(make(payload))));
@@ -374,7 +374,7 @@ The walk itself is in `RawElement::map_messages`:
 
 ```rust,ignore
 // rust/src/element.rs
-pub(crate) fn map_messages(&mut self, wrap: &Wrap) {
+pub(crate) fn map_messages(&mut self, wrap: &MessageMap) {
     match &mut self.kind {
         ElementKind::Widget(widget) => widget.map_messages(wrap),
         ElementKind::Pager(props) => props.on_select.map(wrap),
@@ -420,7 +420,7 @@ screens that is negligible next to building the tree.
 
 - `rust/src/element.rs`: `Element`, `RawElement`, `ElementKind`, `style_builder!`,
   `text_builder!`, and two tests that exercise `map` end to end.
-- `rust/src/message.rs`: `Message`, `Handler`, `Wrap`. The whole file is under a hundred lines and
+- `rust/src/message.rs`: `Message`, `Handler`, `MessageMap`. The whole file is under a hundred lines and
   worth reading in full.
 - `rust/src/app.rs`, `impl<A: App> AnyApp for A`: where `into_raw` and `downcast` are called.
 - `rust/src/host/events.rs`, `Actions`: where handlers are read back out of a node.

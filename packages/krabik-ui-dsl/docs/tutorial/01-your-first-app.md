@@ -31,9 +31,17 @@ module documentation of the crate says it in one paragraph:
 
 (from `rust/src/lib.rs`)
 
-## An empty folder
+## Creating the project
 
-The tutorial builds one app, called Notes. An app has three parts, each in its own directory:
+The tutorial builds one app, called Notes. The `krabik` command line tool creates it. Install the
+tool from a checkout of this repository (see the [CLI's README](../../../krabik-cli/README.md)
+for what it needs), then run this in any directory you like:
+
+```sh
+krabik create notes --with-dsl
+```
+
+An app has three parts, each in its own directory:
 
 ```text
 notes/
@@ -43,16 +51,12 @@ notes/
 ```
 
 For the first nine chapters you only need `rust/`. Everything in it runs and can be tested on your
-development machine. The two host projects come in [chapter 10](10-running-on-android-and-ios.md).
+development machine. The two host projects, and the commands that put the app on an emulator
+(`krabik run`) and reload it while you edit (`krabik watch`), come in
+[chapter 10](10-running-on-android-and-ios.md). Nothing stops you from reading that chapter first
+and watching the app change on a device as you follow the others.
 
-Create the folder next to the existing examples, so the relative paths below are right:
-
-```sh
-cd packages/krabik-ui-dsl
-mkdir -p notes/rust/src
-```
-
-`notes/rust/Cargo.toml`:
+`notes/rust/Cargo.toml` was written for you:
 
 ```toml
 [package]
@@ -61,20 +65,35 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-# The staticlib is linked into the iOS app; the cdylib is loaded by the
-# Android app. Neither matters until chapter 10; `cargo test` works with both.
+# The staticlib is linked into the iOS app, the cdylib is loaded by the
+# Android app.
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-krabik-ui-dsl = { path = "../../rust" }
+# The framework is used from a local krabik checkout. `hot-reload` lets
+# `krabik watch` put new code into the running app during development.
+krabik-ui-dsl = { path = "/path/to/krabik/packages/krabik-ui-dsl/rust", features = ["hot-reload"] }
+jni = "0.22"
 
-# Keeps cargo from adopting a workspace further up the directory tree.
+# The crate is a project of its own. The empty table keeps cargo from
+# adopting a workspace in a directory above.
 [workspace]
 ```
 
-This mirrors `example-todo-minimal/rust/Cargo.toml`. The framework is an ordinary path dependency:
-your crate compiles it in, so the native library that ends up on the phone contains both your app
-and the framework.
+The framework is an ordinary path dependency: your crate compiles it in, so the native library
+that ends up on the phone contains both your app and the framework. The path is the absolute
+location of the krabik checkout on your machine, because the framework is not published anywhere
+yet. `jni` and the `hot-reload` feature are explained in chapter 10; neither matters before.
+
+`notes/rust/src/lib.rs` already contains a small app, a counter. The rest of this chapter explains
+it. Below the counter the file has a few lines this chapter does not cover: `impl Default`, a
+`hot_reload!` line and two install functions. Leave them where they are; chapter 10 explains
+them.
+
+> **Without the CLI.** A crate is all the first nine chapters need. `mkdir -p notes/rust/src`
+> inside `packages/krabik-ui-dsl`, a `Cargo.toml` like the one above with
+> `krabik-ui-dsl = { path = "../../rust" }` as its only dependency, and the counter below as
+> `src/lib.rs` work just as well. `example-todo-minimal/rust/Cargo.toml` is such a file.
 
 ## A component: state, messages, update, view
 
@@ -112,7 +131,8 @@ connects the two.
 request. Nothing in the first ten chapters needs one, so every `update` you will see ends with
 `Command::none()`. Chapter 11 explains what else it can return.
 
-Here is the counter. Put it in `notes/rust/src/lib.rs`:
+Here is the counter, as it stands in `notes/rust/src/lib.rs` (the generated file imports two
+`jni` types as well, for the install functions):
 
 ```rust
 use krabik_ui_dsl::app::{App, Component, set_app_factory};
@@ -314,7 +334,8 @@ How the tree, the identifiers, the layout and the diff work is the subject of
 ## Testing without a device
 
 `update` is an ordinary method on an ordinary struct. Nothing about it needs Android or iOS, so
-the app's logic is tested with plain `cargo test`. Add this at the bottom of `lib.rs`:
+the app's logic is tested with plain `cargo test`. The generated file ends with a `tests` module
+that holds one test; make it look like this:
 
 ```rust,ignore
 #[cfg(test)]
@@ -417,7 +438,8 @@ impl Component for Counter {
 impl App for Counter {}
 ```
 
-plus the `tests` module shown above.
+plus the `tests` module shown above. In a project made by `krabik create`, the file also keeps
+its `impl Default`, the `hot_reload!` line and the two install functions.
 
 ## Where this lives
 

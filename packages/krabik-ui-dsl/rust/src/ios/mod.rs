@@ -8,7 +8,7 @@ use crate::ios::controller::IosSession;
 use crate::ios::entry::states;
 use crate::ios::host::{IosState, ViewHandle};
 use crate::tree::NodeId;
-use crate::ui::{EdgeInsets, FontWeight};
+use crate::ui::EdgeInsets;
 use block2::RcBlock;
 use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
@@ -17,7 +17,7 @@ use objc2::{MainThreadMarker, Message};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGColor;
 use objc2_foundation::NSString;
-use objc2_ui_kit::{UIAction, UIColor, UIControl, UIControlEvents, UIFont, UIView};
+use objc2_ui_kit::{UIAction, UIColor, UIControl, UIControlEvents, UIView};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::ptr::NonNull;
@@ -25,20 +25,17 @@ use std::ptr::NonNull;
 mod controller;
 mod entry;
 mod events;
+mod fonts;
 mod host;
 mod images;
 mod measure;
 mod motion;
 mod rows;
 mod style;
+mod tooltip;
 mod widgets;
 
-pub(crate) fn system_font(size: f32, weight: FontWeight) -> Retained<UIFont> {
-    match weight {
-        FontWeight::Bold => UIFont::boldSystemFontOfSize(f64::from(size)),
-        FontWeight::Normal => UIFont::systemFontOfSize(f64::from(size)),
-    }
-}
+pub(crate) use fonts::{font_of, system_font};
 
 /// The `UIColor` of a colour the engine has resolved.
 pub(crate) fn color(color: crate::style::Color) -> Retained<UIColor> {

@@ -29,9 +29,11 @@ pub(crate) mod check;
 pub(crate) mod container;
 pub(crate) mod date_picker;
 pub(crate) mod image;
+pub(crate) mod native_view;
 pub(crate) mod pager;
 pub(crate) mod progress;
 pub(crate) mod radio_group;
+pub(crate) mod range_slider;
 pub(crate) mod slider;
 pub(crate) mod switch;
 pub(crate) mod tab_bar;
@@ -66,6 +68,13 @@ pub(crate) fn configure_view(
             Ok(())
         }
         NodeKind::Scroll(props) => set_refreshing(env, view, &props.refresh),
+        NodeKind::Widget(Widget::Text(props)) if props.selectable => {
+            update_text(env, view, kind)?;
+            let ids = crate::android::handles::get(env)?;
+            ids.container
+                .set_text_is_selectable
+                .call_void(env, view, &[JValue::Bool(true)])
+        }
         NodeKind::Widget(Widget::Text(_)) | NodeKind::Widget(Widget::Button(_)) => {
             update_text(env, view, kind)
         }
@@ -79,6 +88,12 @@ pub(crate) fn configure_view(
         NodeKind::Container(props) => container::update_container(env, view, props),
         NodeKind::Widget(Widget::DatePicker(props)) => update_date_picker(env, view, props),
         NodeKind::Widget(Widget::Slider(props)) => update_slider(env, view, props),
+        NodeKind::Widget(Widget::NativeView(props)) => {
+            native_view::update_native_view(env, view, props)
+        }
+        NodeKind::Widget(Widget::RangeSlider(props)) => {
+            range_slider::update_range_slider(env, view, props)
+        }
         NodeKind::Widget(Widget::Progress(props)) => update_progress(env, view, props),
         NodeKind::Widget(Widget::Spinner(props)) => progress::update_spinner(env, view, props),
         NodeKind::Widget(Widget::Image(props)) => update_image(env, view, props),
@@ -150,6 +165,8 @@ pub(crate) fn create_widget<'local>(
         Widget::TabBar(_) => tab_bar::create(env, site),
         Widget::DatePicker(_) => date_picker::create(env, site),
         Widget::Slider(_) => slider::create(env, site),
+        Widget::RangeSlider(_) => range_slider::create(env, site),
+        Widget::NativeView(_) => native_view::create(env, site),
         Widget::Progress(_) => progress::create(env, site),
         Widget::Spinner(_) => progress::create_spinner(env, site),
         Widget::Image(_) => image::create(env, site),

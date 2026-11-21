@@ -13,6 +13,11 @@ shells, then drives the rest of the toolchain for you: installing Rust targets,
 listing and booting devices, building native libraries, generating UniFFI
 bindings, and installing and launching the app.
 
+A project is either a UniFFI project, where native Kotlin and Swift UIs call a
+Rust library, or, with `--with-dsl`, a
+[krabik-ui-dsl](../krabik-ui-dsl) app, where the UI itself is written in Rust
+and `krabik watch` hot reloads it.
+
 ## Quick start
 
 ```sh
@@ -87,14 +92,14 @@ krabik --version
 | Command | Description | Run from |
 | --- | --- | --- |
 | `krabik doctor` | Check the development environment. | anywhere |
-| `krabik create <name> [--package <prefix>]` | Scaffold a new project in `./<name>`. | anywhere |
+| `krabik create <name> [--package <prefix>] [--with-dsl [--dsl-path <dir>]]` | Scaffold a new project in `./<name>`. | anywhere |
 | `krabik toolchain` | Install the Rust targets needed for Android and iOS. | anywhere |
 | `krabik devices [-a]` | List devices. `-a`/`--all` also shows offline devices and shutdown simulators. | anywhere |
 | `krabik launch <device> [--platform android\|ios]` | Boot an Android emulator or an iOS simulator. | anywhere |
 | `krabik run [device] [--platform android\|ios] [--abi <abi>]` | Build, install, and launch a debug build. | project root |
 | `krabik release [--platform android\|ios]` | Build release artifacts. | project root |
 | `krabik bindings [--platform android\|ios]` | Generate Kotlin or Swift UniFFI bindings. | project root |
-| `krabik watch [device] [--platform android\|ios\|both]` | Rebuild and relaunch on every Rust change. | project root |
+| `krabik watch [device] [--platform android\|ios\|both]` | Hot reload a krabik-ui-dsl app, or rebuild and relaunch, on every Rust change. | project root |
 | `krabik clean [--purge]` | Remove build artifacts; `--purge` also removes cached Android directories. | project root |
 
 ### Create a project
@@ -113,6 +118,32 @@ only moved into place when every part was generated successfully. A failed
 `create` leaves nothing behind and can simply be retried.
 
 The target directory must not exist yet.
+
+#### A krabik-ui-dsl app
+
+```sh
+krabik create my-app --with-dsl
+krabik create my-app --with-dsl --dsl-path ~/src/krabik/packages/krabik-ui-dsl
+```
+
+`--with-dsl` creates a [krabik-ui-dsl](../krabik-ui-dsl) app instead: a Rust
+crate with a small counter app, and Android and iOS shells that only load it.
+There are no UniFFI bindings, and the `android` CLI is not needed.
+
+The framework is not published yet, so the project refers to a local krabik
+checkout by absolute path: the Rust crate (`rust/Cargo.toml`), the Kotlin host
+(`android/settings.gradle.kts`), and the Swift host and build script
+(`ios/project.yml`, `ios/Sources/Bridging.h`). `--dsl-path` names the
+`krabik-ui-dsl` directory of that checkout; by default it is the checkout the
+CLI was built from. The project only builds on a machine that has the checkout
+at that path. If it moves, change those four files.
+
+If you installed the CLI with `cargo install --git`, pass `--dsl-path` with a
+checkout of your own: the default is then a checkout inside cargo's cache
+(`~/.cargo/git/checkouts`), which cargo may remove.
+
+In such a project `run` and `watch` work as described below, `bindings` and
+`release` are not supported yet.
 
 ### Work with devices
 
@@ -158,6 +189,10 @@ On iOS, `run` builds for the simulator, generates the Swift bindings, creates
 the Xcode project, and installs and launches the app in the simulator.
 `--abi` is only supported on Android.
 
+In a krabik-ui-dsl project Gradle and Xcode build the Rust library themselves,
+so `run` only installs the app with Gradle (for the ABI of the device, or
+`--abi`) or builds it with `xcodebuild`, and launches it.
+
 ### Build a release
 
 ```sh
@@ -192,8 +227,17 @@ headers, and the module map are written to `ios/Generated`.
 
 ### Watch while developing
 
-`watch` keeps the app in sync with your Rust code. It builds once up front, then
-rebuilds, reinstalls, and relaunches on every change.
+`watch` keeps the app in sync with your Rust code. What it does depends on the
+project:
+
+- **Hot reload**, for a krabik-ui-dsl app whose `rust/Cargo.toml` enables the
+  `hot-reload` feature of `krabik-ui-dsl` (projects made with `--with-dsl` do).
+  The crate is rebuilt and the library is handed to the running app, which
+  continues with the new code and keeps its state. This takes a second or
+  three instead of a reinstall.
+- **Rebuild**, for every other project, including a krabik-ui-dsl app without
+  that feature: it builds once up front, then rebuilds, reinstalls, and
+  relaunches on every change.
 
 ```sh
 krabik watch                       # Android (the default)
@@ -201,8 +245,9 @@ krabik watch --platform ios        # iOS simulator
 krabik watch --platform both       # Android and iOS
 ```
 
-- Watched paths: `rust/src`, both bindgen crates' sources, their `Cargo.toml`
-  files, and `rust/build.rs`.
+- Watched paths: `rust/src`, `rust/Cargo.toml` and `rust/build.rs`; in a
+  UniFFI project also both bindgen crates' sources and their `Cargo.toml`
+  files. Paths that do not exist are skipped.
 - The target directory is not watched, so builds do not retrigger themselves.
 - Events from a single save are debounced into one build.
 - A build failure is reported but does not stop the watch; the next save is
@@ -212,6 +257,21 @@ krabik watch --platform both       # Android and iOS
   keep the target stable. On Android the optional argument is a device serial,
   model, or AVD name.
 - Native Android or iOS source changes are not watched. Rebuild those manually.
+
+For hot reload:
+
+- Start the app first with `krabik run`; `watch` does not install or launch it.
+  The first reload after `watch` starts builds the crate for the device, which
+  can take half a minute once.
+- It works on the Android emulator and the iOS simulator, with a debug build.
+  Android needs `adb` and `ANDROID_NDK_HOME`.
+- The state survives as long as the app's state and message types keep their
+  layout. After adding a field or a variant the app refuses the library: this
+  only shows in the app's log (`adb logcat -s krabik`), and `krabik run`
+  restarts the app with the new code.
+- A failing build is reported and the app keeps running the code it has.
+- More about how it works and its limits:
+  [hot-reload.md](../krabik-ui-dsl/docs/design/hot-reload.md).
 
 ### Clean the project
 
@@ -273,25 +333,55 @@ my-app/
 
 Both generated apps call `get_greeting()` from Rust and display the result.
 
+With `--with-dsl`:
+
+```text
+my-app/
+├── rust/                          # The app: a Rust library (cdylib + staticlib)
+│   ├── src/lib.rs                 # A counter, `hot_reload!`, the two install functions
+│   └── Cargo.toml                 # Depends on krabik-ui-dsl by absolute path
+├── android/                       # Gradle app shell
+│   ├── settings.gradle.kts        # Includes the framework's Kotlin library by absolute path
+│   └── app/src/main/java/…/
+│       ├── MainActivity.kt        # Loads the library and installs the app
+│       └── AppBridge.kt           # Declares the install function implemented in Rust
+├── ios/                           # XcodeGen project
+│   ├── project.yml                # Compiles the framework's Swift host, builds ../rust
+│   ├── Sources/                   # <App>App.swift and Bridging.h
+│   └── Signing.xcconfig
+└── rust-toolchain.toml            # Toolchain and required Rust targets
+```
+
+The app is a counter written with krabik-ui-dsl. Gradle and Xcode build the
+Rust library as part of their own build, so there is no `jniLibs` directory and
+no generated bindings. The Xcode project is generated and ignored by git. The
+Gradle wrapper, the manifest and the resources are copied from
+`example-todo-minimal/android` in the checkout. What each file is for is
+explained in
+[the tutorial](../krabik-ui-dsl/docs/tutorial/10-running-on-android-and-ios.md).
+
 Notes:
 
 - The generated `rust-toolchain.toml` declares all Android and iOS targets, so
   `rustup` installs them on the first build. Running `krabik toolchain` first is
   optional.
 - UniFFI crates are pinned to the same git revision because
-  `uniffi-bindgen-kotlin-jni` is not published on crates.io.
+  `uniffi-bindgen-kotlin-jni` is not published on crates.io. A `--with-dsl`
+  project does not use UniFFI.
 - Android builds link against NDK API 24, matching the generated `minSdk`.
   Nothing machine-specific is written into the project; the NDK location is
   read from `ANDROID_NDK_HOME` at build time.
 - The generated project is a single repository. The Rust crate is created with
   `--vcs none`, so `git init` in the project root is all you need.
+- A `--with-dsl` project contains the absolute path of the krabik checkout, so
+  a clone of it on another machine needs the checkout at the same path.
 - iOS projects target iOS 16.0 and use Swift 5.9.
 
 ## Environment variables
 
 | Variable | Purpose |
 | --- | --- |
-| `ANDROID_NDK_HOME` | Path to the Android NDK. Required for Android `run` and `release`. |
+| `ANDROID_NDK_HOME` | Path to the Android NDK. Required for Android `run` and `release`, and for hot reload with `watch`. |
 | `ANDROID_HOME` / `ANDROID_SDK_ROOT` | Android SDK location. `android info` is preferred when available. |
 | `JAVA_HOME` | JDK used by Gradle. Optional, but if set it must point at an existing JDK. |
 | `NO_COLOR` | Disables colored output. Colors are also disabled when stdout is not a terminal. |
@@ -308,6 +398,13 @@ Notes:
 | `no Rust sources found` | Run `watch` from the root of a generated project. |
 | `… already exists` | Choose another name or remove the existing directory. |
 | Gradle cannot find the SDK | Set `ANDROID_HOME` or configure the SDK in the Android CLI. |
+| `krabik-ui-dsl not found at …` or `… is not a krabik-ui-dsl directory` | `create --with-dsl` needs a krabik checkout. Pass its `packages/krabik-ui-dsl` directory with `--dsl-path`. |
+| `the path … contains …, which a project cannot refer to` | The checkout's path has a character that cannot be written into the project's build files. Move the checkout. |
+| `release builds are not supported for krabik-ui-dsl projects yet` | Build the release with Gradle (`./gradlew :app:assembleRelease`) or Xcode. |
+| `a krabik-ui-dsl project has no UniFFI bindings to generate` | Nothing to do: such a project has no bindings. |
+| `watch`: `the library was not delivered` | The app is not installed or not running on that device. Start it with `krabik run` first. |
+| `watch` says `reloaded` but the app does not change | The app refused the library because its state or message type changed (`adb logcat -s krabik`). Restart it with `krabik run`. |
+| A `--with-dsl` project stopped building after the checkout moved | Fix the path in `rust/Cargo.toml`, `android/settings.gradle.kts`, `ios/project.yml` and `ios/Sources/Bridging.h`. |
 
 ## Developing krabik
 
@@ -326,12 +423,16 @@ spawning a process:
 - `src/ios.rs` — iOS project creation, simulators, build, release, and cleanup
 - `src/rust.rs` — Rust crate generation, toolchain checks, and cleanup
 - `src/naming.rs` — project name validation and identifier derivation
-- `src/watch.rs` — the file-watching rebuild loop
+- `src/dsl.rs` — the template of a krabik-ui-dsl project (`create --with-dsl`)
+- `src/hot.rs` — hot reload: building the app's crate and delivering the library to the running app
+- `src/watch.rs` — the file-watching loop, which hot reloads or rebuilds
 - `src/remove.rs` — helpers for removing generated files and directories
 
-Tests live in `tests/`. The `create` tests use a fake `android`/`xcodegen`
-toolchain, so project generation can be verified without a full mobile SDK
-installation.
+Tests live in `tests/`. They use a fake toolchain (`android`, `xcodegen`,
+`cargo`, `adb`, `gradlew` as shell scripts that log their arguments, in
+`tests/common`), so project generation, `run` and `watch` can be verified
+without a full mobile SDK installation. The `--with-dsl` tests create projects
+from a small fake framework directory, and one of them from this checkout.
 
 CI (`.github/workflows/ci.yml`) runs formatting, clippy, and tests on Linux and
 macOS, plus the test suite against the minimum supported Rust version (1.99.1).

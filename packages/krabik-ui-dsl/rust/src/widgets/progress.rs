@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use crate::element::{Element, ElementKind, RawElement, style_builder};
 use crate::engine::geometry::Size;
 use crate::engine::measure::Measure;
-use crate::message::Wrap;
+use crate::message::MessageMap;
 use crate::style::Color;
 use crate::widgets::CONTROL_WIDTH;
 use crate::widgets::IntrinsicSize;
@@ -101,7 +101,7 @@ const PROGRESS_HEIGHT: f32 = 6.0;
 const SPINNER_SIZE: f32 = 24.0;
 
 impl WidgetProps for ProgressProps {
-    fn map_messages(&mut self, _wrap: &Wrap) {}
+    fn map_messages(&mut self, _wrap: &MessageMap) {}
 
     fn resolve_colors(&mut self, scheme: crate::style::ColorScheme) {
         self.color = self.color.resolve(scheme);
@@ -116,7 +116,7 @@ impl IntrinsicSize for ProgressProps {
 }
 
 impl WidgetProps for SpinnerProps {
-    fn map_messages(&mut self, _wrap: &Wrap) {}
+    fn map_messages(&mut self, _wrap: &MessageMap) {}
 
     fn resolve_colors(&mut self, scheme: crate::style::ColorScheme) {
         self.color = self.color.resolve(scheme);

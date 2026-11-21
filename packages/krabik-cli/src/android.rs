@@ -83,7 +83,7 @@ impl Abi {
 }
 
 /// Returns the Rust target for the given Android ABI, e.g. `arm64-v8a`.
-fn target_for_abi(abi: &str) -> Result<&'static AndroidTarget> {
+pub(crate) fn target_for_abi(abi: &str) -> Result<&'static AndroidTarget> {
     ANDROID_TARGETS
         .iter()
         .find(|target| target.jni_folder == abi)
@@ -91,7 +91,7 @@ fn target_for_abi(abi: &str) -> Result<&'static AndroidTarget> {
 }
 
 /// Reads the primary ABI of a device via `adb shell getprop ro.product.cpu.abi`.
-fn device_abi(serial: &str) -> Result<String> {
+pub(crate) fn device_abi(serial: &str) -> Result<String> {
     let output = Command::new("adb")
         .args(["-s", serial, "shell", "getprop", "ro.product.cpu.abi"])
         .output()
@@ -780,7 +780,7 @@ fn get_ndk_toolchain_compilers(
 }
 
 /// Locates the NDK toolchain and returns the map of Cargo linker environment variables.
-fn ndk_linker_env() -> Result<std::collections::HashMap<&'static str, String>> {
+pub(crate) fn ndk_linker_env() -> Result<std::collections::HashMap<&'static str, String>> {
     let ndk_root = std::env::var("ANDROID_NDK_HOME")
         .map_err(|_| anyhow!("ANDROID_NDK_HOME is not set; point it at your Android NDK"))?;
     let prebuilt = find_ndk_prebuilt(&ndk_root)?;
@@ -885,12 +885,26 @@ fn get_android_package_name() -> Result<String> {
         .ok_or_else(|| anyhow!("Could not find Android package name in build.gradle.kts"))
 }
 
+/// Reads `./android/app/build.gradle.kts` and returns the id the app is
+/// installed under. It may differ from the namespace of the sources.
+pub(crate) fn get_application_id() -> Result<String> {
+    let content = fs::read_to_string("./android/app/build.gradle.kts")
+        .context("failed to read ./android/app/build.gradle.kts")?;
+    let (namespace, application_id) = parse_android_packages(&content);
+    application_id
+        .or(namespace)
+        .ok_or_else(|| anyhow!("Could not find applicationId in build.gradle.kts"))
+}
+
 /// Launches the app on a connected Android device or emulator using `adb shell am start`.
 fn launch_android_app(serial: &str) -> Result<()> {
+    // The component is the id the app is installed under and the class of
+    // the activity, which lives in the namespace of the sources.
     let package_name = get_android_package_name()?;
-    println!("\nLaunching app {package_name} via adb...");
+    let application_id = get_application_id()?;
+    println!("\nLaunching app {application_id} via adb...");
 
-    let activity = format!("{package_name}/{package_name}.MainActivity");
+    let activity = format!("{application_id}/{package_name}.MainActivity");
     let mut cmd = Command::new("adb");
     cmd.args(["-s", serial, "shell", "am", "start", "-n", &activity]);
     run_command(&mut cmd, "adb shell am start")
@@ -946,6 +960,10 @@ pub fn build_android_debug(device: &str, abi: Option<Abi>) -> Result<()> {
         None => target_for_abi(&device_abi(&serial)?)?,
     };
 
+    if rust::is_dsl_project() {
+        return install_dsl_android_debug(&serial, target);
+    }
+
     println!(
         "\nBuilding rust lib for {} ({})...",
         target.arch, target.jni_folder
@@ -999,6 +1017,38 @@ pub fn build_android_debug(device: &str, abi: Option<Abi>) -> Result<()> {
     launch_android_app(&serial)?;
 
     Ok(())
+}
+
+/// Installs and launches a krabik-ui-dsl app.
+///
+/// The Gradle build of such a project builds the Rust library itself, and
+/// there are no bindings to generate.
+fn install_dsl_android_debug(serial: &str, target: &AndroidTarget) -> Result<()> {
+    println!(
+        "\nBuilding and installing for {} ({})...",
+        target.arch, target.jni_folder
+    );
+
+    let mut gradle = Command::new("./android/gradlew");
+    gradle
+        .args(dsl_gradle_args(target.jni_folder))
+        .env("ANDROID_SERIAL", serial);
+    run_command(&mut gradle, "gradlew app:installDebug")?;
+
+    println!("\nAndroid build done.");
+
+    launch_android_app(serial)
+}
+
+/// The Gradle arguments that install a krabik-ui-dsl app built for one ABI.
+fn dsl_gradle_args(abi: &str) -> Vec<String> {
+    vec![
+        "-p".to_string(),
+        "android".to_string(),
+        "app:installDebug".to_string(),
+        // the Rust Gradle task builds for the host's architecture otherwise
+        format!("-PkrabikAbis={abi}"),
+    ]
 }
 
 /// Builds release Rust shared libraries for all Android targets, generates bindings, and assembles the release APK.
@@ -1059,6 +1109,19 @@ pub fn generate_android_bindings() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_dsl_gradle_args() {
+        assert_eq!(
+            dsl_gradle_args("arm64-v8a"),
+            [
+                "-p",
+                "android",
+                "app:installDebug",
+                "-PkrabikAbis=arm64-v8a"
+            ]
+        );
+    }
 
     #[test]
     fn test_target_for_abi() {

@@ -10,7 +10,7 @@ use block2::RcBlock;
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_foundation::{NSBundle, NSData, NSError, NSString, NSURL, NSURLResponse, NSURLSession};
-use objc2_ui_kit::{UIImage, UIImageView, UIViewContentMode};
+use objc2_ui_kit::{UIImage, UIImageRenderingMode, UIImageView, UIViewContentMode};
 use std::collections::{HashMap, HashSet};
 
 /// Remote image state for one root view.
@@ -63,7 +63,18 @@ impl IosState {
                 view.setImage(load_asset(path).as_deref());
             }
             ImageSource::Url(url) => self.load_remote_image(id, view, url),
+            ImageSource::Icon(icon) => {
+                self.images.expected.remove(&id);
+                #[cfg(feature = "svg")]
+                self.images.svgs.remove(&id);
+                view.setContentMode(UIViewContentMode::ScaleAspectFit);
+                view.setImage(load_icon(icon.ios_name().unwrap_or_default()).as_deref());
+            }
         }
+        // Only a template image, which an icon is, is drawn in the tint.
+        let tint = props.tint.map(crate::ios::color);
+        // SAFETY: the color is retained by the view for as long as it is set.
+        unsafe { view.setTintColor(tint.as_deref()) };
     }
 
     /// Shows a remote image, downloading it only once per URL.
@@ -140,7 +151,7 @@ impl IosState {
 }
 
 /// The path of a bundled asset, which is a file at the root of the bundle.
-fn asset_path(path: &str) -> Option<Retained<NSString>> {
+pub(crate) fn asset_path(path: &str) -> Option<Retained<NSString>> {
     let (stem, extension) = match path.rsplit_once('.') {
         Some((stem, extension)) => (stem, Some(NSString::from_str(extension))),
         None => (path, None),
@@ -153,6 +164,31 @@ fn asset_path(path: &str) -> Option<Retained<NSString>> {
 #[cfg(feature = "svg")]
 pub(crate) fn asset_bytes(path: &str) -> Option<Vec<u8>> {
     std::fs::read(asset_path(path)?.to_string()).ok()
+}
+
+/// An icon by name: an SF Symbol, or else an image of the asset catalog,
+/// which is then drawn in one color as a symbol is. A name that is neither
+/// is logged once.
+pub(crate) fn load_icon(name: &str) -> Option<Retained<UIImage>> {
+    static MISSING: std::sync::Mutex<Option<HashSet<String>>> = std::sync::Mutex::new(None);
+    if name.is_empty() {
+        return None;
+    }
+    let ns_name = NSString::from_str(name);
+    let image = UIImage::systemImageNamed(&ns_name).or_else(|| {
+        UIImage::imageNamed(&ns_name)
+            .map(|image| image.imageWithRenderingMode(UIImageRenderingMode::AlwaysTemplate))
+    });
+    if image.is_none() {
+        let mut missing = MISSING.lock().expect("missing icons");
+        if missing
+            .get_or_insert_with(HashSet::new)
+            .insert(name.to_owned())
+        {
+            crate::log::error(&format!("no symbol or image named \"{name}\" for an icon"));
+        }
+    }
+    image
 }
 
 pub(crate) fn load_asset(path: &str) -> Option<Retained<UIImage>> {

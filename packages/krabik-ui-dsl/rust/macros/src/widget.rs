@@ -24,6 +24,9 @@ struct FieldConfig {
     setter: Option<Setter>,
     /// The field holds a colour that is not resolved for dark mode.
     fixed_color: bool,
+    /// The field is a list whose items have colours of their own and a
+    /// `resolve_colors` method.
+    colors: bool,
 }
 
 #[derive(Default)]
@@ -76,7 +79,13 @@ pub(crate) fn expand(input: TokenStream) -> syn::Result<TokenStream> {
         let ident = field.ident.as_ref().expect("named field");
         let field_config = field_config(field)?;
         let docs = doc_attributes(&field.attrs);
-        if !field_config.fixed_color {
+        if field_config.colors {
+            colors.push(quote! {
+                for item in &mut self.#ident {
+                    item.resolve_colors(scheme);
+                }
+            });
+        } else if !field_config.fixed_color {
             // Colours are resolved for the appearance wherever they sit.
             if is_color(&field.ty) {
                 colors.push(quote! { self.#ident = self.#ident.resolve(scheme); });
@@ -213,7 +222,7 @@ pub(crate) fn expand(input: TokenStream) -> syn::Result<TokenStream> {
         #text_builder
 
         impl crate::widgets::WidgetProps for #props {
-            fn map_messages(&mut self, wrap: &crate::message::Wrap) {
+            fn map_messages(&mut self, wrap: &crate::message::MessageMap) {
                 let _ = wrap;
                 #(self.#handlers.map(wrap);)*
             }
@@ -305,10 +314,12 @@ fn field_config(field: &Field) -> syn::Result<FieldConfig> {
                 config.setter = Some(setter);
             } else if meta.path.is_ident("fixed_color") {
                 config.fixed_color = true;
+            } else if meta.path.is_ident("colors") {
+                config.colors = true;
             } else {
-                return Err(
-                    meta.error("unknown option; expected `arg`, `default`, `set` or `fixed_color`")
-                );
+                return Err(meta.error(
+                    "unknown option; expected `arg`, `default`, `set`, `fixed_color` or `colors`",
+                ));
             }
             Ok(())
         })?;

@@ -183,6 +183,9 @@ other control. A container usually has one child; more than one are laid out as 
 Without `on_tap` it is only a box, and `.enabled(false)` stops the taps. On Android the box shows
 the theme's press ripple; iOS shows no highlight.
 
+`.on_long_press(Msg::Select(note.id))` reports a press that is held, apart from the tap. A
+container may have both.
+
 ### Stack: children on top of each other
 
 Rows and columns never overlap their children. `Stack` does: every child takes the same area, the
@@ -205,6 +208,45 @@ A stack is as large as its largest child unless it has a size of its own. Each c
 a column in a stack can push its content to an edge with a `Spacer`, as above. With
 `.align_items(Align::Center)` (or `Start`, `End`) the children keep their own size and are placed
 there on both axes. Like a row or a column, a stack has no native view unless it paints something.
+
+A child can also be held at distances from the stack's edges. It then lies on top of the others
+and does not count for the stack's size:
+
+```rust,ignore
+Stack::new()
+    .child(Image::new(ImageSource::asset("cover.webp")))
+    .child(Text::new("NEW").positioned(Inset::new().top(8).right(8)))
+    .child(caption.positioned(Inset::new().left(0).right(0).bottom(0)))
+```
+
+A side that is not set does not hold the child; two opposite sides stretch it between them.
+`.positioned` only means something on a direct child of a `Stack`.
+
+### Wrap: a row that continues on the next line
+
+```rust,ignore
+Wrap::new()
+    .spacing(8)       // between children on a line
+    .run_spacing(8)   // between lines
+    .child(Chip::new("Rust"))
+    .child(Chip::new("Kotlin"))
+    .child(Chip::new("Swift"))
+```
+
+A `Wrap` needs a width to wrap at, which it has wherever a column stretches it. Each line is as
+tall as its tallest child.
+
+### Limits on a size
+
+`.min_width(..)`, `.max_width(..)`, `.min_height(..)` and `.max_height(..)` bound a size that is
+otherwise decided by the content or the parent: a button that is at least 220 points wide, a
+text that wraps at 160 points whatever room it has.
+
+### Sharing out the free space
+
+`justify_content` takes `Justify::Start`, `Center`, `End`, `SpaceBetween` (free space between the
+children, none at the edges), `SpaceAround` (half a gap at each edge) and `SpaceEvenly` (a full
+gap at each edge).
 
 ## Scrolling
 
@@ -281,27 +323,96 @@ and their curves). This tutorial does not use them; the showcase pages `animatio
 ## Text styling
 
 Widgets that show text (`Text`, `Button`, `TextField`, `Checkbox`, `RadioButton`, `RadioGroup`)
-share three more methods, from the `text_builder!` macro in `rust/src/element.rs`:
+share four more methods, from the `text_builder!` macro in `rust/src/element.rs`:
 
 ```rust,ignore
 Text::new("Notes").size(30).bold().color(Color::TEXT)
+Text::new("Subtitle").weight(FontWeight::Medium)
 ```
 
-`size` is in logical points and defaults to 16. `color` defaults to `Color::TEXT`. There are two
-weights, normal and bold (`FontWeight` in `rust/src/style.rs`); there is no font family setting.
+`size` is in logical points and defaults to 16. `color` defaults to `Color::TEXT`. `weight`
+takes one of nine weights, `FontWeight::Thin` (100) to `FontWeight::Black` (900), with `Normal`
+(400) the default; `.bold()` is short for `.weight(FontWeight::Bold)` (`FontWeight` is in
+`rust/src/style.rs`). The font is the system's, and it decides which weights it really has: a
+weight it lacks is drawn with the nearest one. The controls that only know regular and bold
+(`RadioGroup`, `TabBar`, `DatePicker` on Android) show semi-bold and heavier as bold.
 
-`Text` alone has three more, declared on `TextProps` in `rust/src/widgets/text.rs`:
+`Text` alone has more, declared on `TextProps` in `rust/src/widgets/text.rs`:
 
 ```rust,ignore
 Text::new(long_paragraph)
     .text_align(TextAlign::Center)   // Start, Center or End, inside the text's own frame
     .max_lines(2)
     .ellipsis()                      // "…" on the last visible line
+
+Text::new("SECTION")
+    .italic()
+    .underline()                     // and .strikethrough()
+    .letter_spacing(1.5)             // extra points between characters; may be negative
+    .line_height(24)                 // points per line, instead of the font's own
 ```
 
 Text wraps to the width it is given. `text_align` only has a visible effect when the text's frame
 is wider than the text, so it usually goes together with `.width_percent(1.0)` or a stretching
 parent.
+
+`line_height` applies to every line, including the first and the last, and to a text of one
+line: `Text::new("Title").size(16).line_height(40)` is 40 points tall with the text in the
+middle. That makes it the way to get the line rhythm of a design.
+
+Italics come in two weights on iOS, regular and bold; an italic text in another weight is drawn
+with the nearer of the two. Android synthesises the slant for any weight.
+
+Text follows the text size the user chose in the system settings, on both platforms: a `size`
+of 16 is 16 points at the default setting and larger when the user asked for larger text, and
+`letter_spacing` and `line_height` grow with it. Leave room for that: give a text's container a
+width and let the height follow, instead of fixing a height around a line of text.
+
+### A font from a file
+
+The font is the system's unless you name a file. `Text` and `Button` take one, and so does a
+`Span`:
+
+```rust,ignore
+Text::new("Notes").size(30).font(Font::asset("Display-Bold.ttf"))
+```
+
+The file is a `.ttf` or `.otf` that ships with each platform's app, in the same place an image
+asset goes: `android/app/src/main/assets/` on Android, and a resource of the app target on iOS
+(the examples list a `Resources` folder in `project.yml`). Nothing has to be registered, and no
+`Info.plist` entry is needed.
+
+A font file is one face. Its weight and slant are the file's own, so `.bold()` and `.italic()`
+do nothing to a text in a font file: an app with a regular and a bold file names the one it
+wants. If the file cannot be loaded the text is drawn in the system font and the app's log says
+so once. The other text-bearing widgets (`TextField`, `Checkbox`, `RadioGroup`, `TabBar`,
+`DatePicker`) use the system font.
+
+### Several styles in one text
+
+A sentence with one bold word is still one text: it wraps as a whole. `Text::rich` takes the
+parts, and each `Span` says only what differs from the text around it:
+
+```rust,ignore
+Text::rich([
+    Span::new("By continuing you accept the "),
+    Span::new("terms").bold().underline().color(Color::ACCENT),
+    Span::new("."),
+])
+.size(14)
+.color(Color::TEXT)
+```
+
+A span can set `size`, `color`, `weight` (or `bold`), `italic`, `underline`, `strikethrough`
+and `font`. Everything it does not set comes from the `Text`: here every part is 14 points,
+and the first and the last have the text's colour. A string converts into a plain span, so
+`"Total: ".into()` works in the list. Alignment, the line limit, letter spacing and the line
+height belong to the whole text.
+
+A rich text is one native view (a `TextView` with a spanned string, a `UILabel` with an
+attributed string), and `content` of its properties is all the parts joined, which is what a
+screen reader says and what a test finds. A span cannot be tapped; a link inside a sentence is
+not available yet.
 
 ## The widgets
 
@@ -316,26 +427,135 @@ field, such as `Draft(String)`, *is* such a function, which is why you rarely wr
 | ------ | ----------- | ------ | ---- |
 | `Text` | `Text::new("...")` | none | `text.rs` |
 | `Button` | `Button::new("label")` | `on_click(msg)` | `button.rs` |
-| `Container` | `Container::new()` plus `child` | `on_tap(msg)` | `containers.rs` |
+| `Container` | `Container::new()` plus `child` | `on_tap(msg)`, `on_long_press(msg)` | `containers.rs` |
 | `TextField` | `TextField::new(value)` | `on_change(\|String\| msg)`, `on_submit(msg)`, `on_focus(\|bool\| msg)` | `text_field.rs` |
 | `Switch` | `Switch::new(checked)` | `on_toggle(\|bool\| msg)` | `switch.rs` |
 | `Checkbox` | `Checkbox::new("label", checked)` | `on_toggle(\|bool\| msg)` | `check.rs` |
 | `RadioButton` | `RadioButton::new("label", checked)` | `on_toggle(\|bool\| msg)` | `check.rs` |
 | `RadioGroup` | `RadioGroup::new(["A", "B"])` | `on_select(\|usize\| msg)` | `radio_group.rs` |
 | `Slider` | `Slider::new(value)` | `on_change(\|f32\| msg)` | `slider.rs` |
+| `RangeSlider` | `RangeSlider::new(low, high)` | `on_change(\|(f32, f32)\| msg)` | `range_slider.rs` |
+| `NativeView` | `NativeView::new("name")` plus `prop(key, value)` | `on_event(\|String\| msg)` | `native_view.rs` |
+| `WebView` | `WebView::new(url)` | `on_navigate(\|String\| msg)` | `native_view.rs` |
 | `ProgressIndicator` | `::new(fraction)`, `::indeterminate()` | none | `progress.rs` |
-| `Image` | `Image::new(ImageSource::asset("x.webp"))` | none | `image.rs` |
+| `Image` | `Image::new(ImageSource::asset("x.webp"))`, `Image::icon(icon)` | none | `image.rs` |
 | `DatePicker` | `::new(date)`, `::time(time)`, `::date_time(date, time)` | `on_change(\|DatePickerValue\| msg)` | `date_picker.rs` |
 | `TabBar` | `TabBar::new(["Day", "Week"])` | `on_select(\|usize\| msg)` | `tab_bar.rs` |
 | `Pager` | `Pager::new()` plus one `child` per page | `on_select(\|usize\| msg)` | `pager.rs` |
-| `List` | `List::new(items)` | none of its own; rows carry theirs | `list.rs` |
+| `List` | `List::new(items)` | rows carry theirs; a recycled list has `on_dismiss(\|&T\| msg)` and `on_reorder(\|usize, usize\| msg)` | `list.rs` |
+
+### Menus
+
+A menu is the platform's own: a `PopupMenu` on Android, a `UIMenu` on iOS. In Rust it is a list
+of lines, each with the message it sends:
+
+```rust,ignore
+let menu = Menu::new()
+    .item("Rename", Msg::Rename(id))
+    .item_with_icon("Share", Icon::new().drawable("ic_share").sf("square.and.arrow.up"), Msg::Share(id))
+    .destructive("Delete", Msg::Delete(id));
+```
+
+Three things open one:
+
+```rust,ignore
+MenuButton::new("Sort", menu)                      // a button with a text and an arrow
+MenuButton::icon(Icon::more(), "More actions", menu)   // a button that is an icon
+Container::new().context_menu(menu).child(row)     // a long press on anything
+```
+
+`Container::menu(menu)` opens the menu on a tap, which is what the two buttons are made of. A
+container with a menu for a gesture does not also report that gesture: a tap menu replaces
+`on_tap`, a context menu replaces `on_long_press`. On iOS the context menu is the system's, which
+lifts the container while the menu is open.
+
+An app bar has a menu of its own for the actions that do not deserve a button:
+`AppBar::new("Notes").action("Add", Msg::Add).menu_item("Settings", Msg::Settings)`. Android shows
+them behind the toolbar's three dots, iOS behind an ellipsis button.
+
+### Tooltips
+
+`.tooltip("Search every note")` on any widget explains it while it is pressed and held: Android
+shows its own tooltip, iOS a small label above the widget for a moment. It is for controls whose
+meaning is not written on them. A widget with a tooltip should not also react to a long press.
+
+### Icons
+
+An icon is an `Image` whose source is a name the platform knows, drawn in one color:
+
+```rust,ignore
+Image::icon(Icon::new().drawable("ic_share").sf("square.and.arrow.up"))
+    .size(20)
+    .tint(Color::ACCENT)
+```
+
+`drawable` names a drawable resource of the Android app, `sf` an SF Symbol or an image of the
+iOS asset catalog; `Icon::new().shared("name")` uses one name on both. An icon is 24 points
+square and in the text color unless told otherwise, and a name the platform does not have shows
+nothing (and is logged once). The framework brings a few itself: `Icon::add()`, `remove()`,
+`close()`, `check()`, `search()`, `chevron_down()`, `chevron_up()`, `chevron_right()` and
+`more()`.
+
+### Widgets assembled from others
+
+These are builders that return containers, texts and images, so they cost no native code and
+look the same on both platforms. Their state is the application's, as with every widget: a chip
+does not remember that it is selected, the application says so. Each has the usual style
+methods, which replace the look it comes with.
+
+| Widget | What it is | Events | File |
+| ------ | ---------- | ------ | ---- |
+| `Divider` | a thin line; `.vertical()`, `.indent(16)` | none | `divider.rs` |
+| `Card` | a rounded, raised surface; `child`, `spacing` | `on_tap(msg)` | `card.rs` |
+| `ListTile` | a row: `leading`, title, `subtitle`, `trailing` | `on_tap(msg)` | `list_tile.rs` |
+| `Avatar` | a circle: `Avatar::image(source)` or `Avatar::initials("RW")` | none | `avatar.rs` |
+| `Badge` | `Badge::new(child).count(n)`, `.label("new")`, `.dot(true)` | none | `badge.rs` |
+| `Chip` | a rounded label; `.selected(bool)`, `.icon(..)` | `on_tap(msg)`, `on_delete(msg)` | `chip.rs` |
+| `IconButton` | `IconButton::new(icon, "what it does")`; `.text("Find")` | `on_tap(msg)` | `icon_button.rs` |
+| `Button::filled`, `Button::outlined` | looks of the native `Button` | `on_click(msg)` | `button.rs` |
+| `ExpansionTile` | a header that shows its children while `.expanded(bool)` | `on_toggle(msg)` | `expansion_tile.rs` |
+| `Stepper` | numbered steps, the `.current(i)` one open | `on_step(\|usize\| msg)` | `stepper.rs` |
+| `NumberStepper` | a number between minus and plus; `min`, `max`, `step` | `on_change(\|f32\| msg)` | `number_stepper.rs` |
+| `SearchBar` | a rounded field with a search icon and a clear button | `on_change(\|String\| msg)`, `on_submit(msg)` | `search_bar.rs` |
+| `Autocomplete` | a field with the matching options under it | `on_change(\|String\| msg)`, `on_select(\|String\| msg)` | `autocomplete.rs` |
+| `Grid` | a `List` with `.columns(n)` equal cells on a line | none of its own | `grid.rs` |
+
+| `MenuButton` | a button that opens a `Menu`; `MenuButton::icon(icon, "what it is for", menu)` | the menu's lines | `menu.rs` |
+| `Dropdown` | a field that shows one option and opens a menu of all; `.selected(Some(i))`, `.placeholder(..)` | `on_select(\|usize\| msg)` | `menu.rs` |
+| `SegmentedControl` | a few options side by side; `.selected(i)` | `on_select(\|usize\| msg)` | `segmented_control.rs` |
+
+What to know before using them:
+
+- The second argument of `IconButton::new` says what the button does. It is not shown; a screen
+  reader announces it and UI tests find the button by it.
+- A `Badge` is as large as its child and its mark lies a little outside. In a column, which
+  stretches its children, wrap the badge in a `Row`.
+- Several `Chip`s in a `Wrap` are how a choice of several is offered.
+- The suggestions of an `Autocomplete` are part of the layout: they push what follows down.
+  Nothing can float over other content yet.
+- A `Grid` is a list whose rows are lines of cells, so it takes `key`, `cell` (in place of
+  `row`), `recycled()` and `cell_height(..)`, and needs a bounded area as a list does. A line is
+  as tall as its tallest cell.
+- A `NumberStepper` button that would leave the range is dimmed and does nothing.
 
 A few notes that save a trip to the source:
 
 - `TextField` has the setters `placeholder("...")`, `multiline(true)`, `secure(true)`,
   `keyboard(KeyboardType::Email)` and `ime_action(ImeAction::Done)`. `on_submit` fires when the
   user presses the action key on the keyboard.
-- `Slider` has `min`, `max`, `step` and `color`. The default range is 0 to 1.
+- `Slider` has `min`, `max`, `step` and `color`. The default range is 0 to 1. `RangeSlider` has
+  the same and two thumbs; its handler receives both values as one pair, lower first, so the
+  message is `Price((f32, f32))` or a closure `|(low, high)| ..`.
+- `Text::new(..).selectable()` lets the user copy the text: by selecting any part of it on
+  Android, by holding it and choosing "Copy" on iOS, where the whole text is copied.
+- A `List` that is `.recycled()` takes three more things. `.on_dismiss(|item| Msg::Delete(item.id))`
+  lets a row be swiped away; `.on_reorder(|from, to| Msg::Move(from, to))` lets it be dragged
+  after a long press; `.sticky_header(|item| item.is_header)` keeps those rows at the top while
+  their section scrolls. The list is your state: a row comes back, or returns to its place,
+  unless `update` removes or moves the item.
+- `NativeView` shows a view the application's own Kotlin and Swift code makes, such as a map;
+  [the recipe](../recipes/embed-a-native-view.md) has the three steps. `WebView` is the one the
+  framework brings.
 - `RadioGroup`, `TabBar`, `Pager` take `.selected(index)`.
 - `Tabs` (a tab bar above one child) and `TabsView` (a tab bar above a swipeable pager) are
   compositions of the widgets above, in `tab_bar.rs` and `pager.rs`.
@@ -369,7 +589,9 @@ leave out `on_change`, the field cannot be edited in any lasting way.
 ## Starting the Notes app
 
 Replace the counter with the first version of Notes. The state is the list of notes and the text
-being typed:
+being typed. In a project made by `krabik create`, keep the lines below `impl App` and change
+`Counter` to `NotesApp` in them: `impl Default`, `krabik_ui_dsl::hot_reload!(NotesApp);` and the
+two install functions.
 
 ```rust,ignore
 pub struct NotesApp {
@@ -597,7 +819,8 @@ mod tests {
 ## Where this lives
 
 - `rust/src/element.rs`: `style_builder!` (every layout and decoration method) and
-  `text_builder!` (`size`, `color`, `bold`).
+  `text_builder!` (`size`, `color`, `bold`, `weight`).
+- `rust/src/widgets/text.rs`: `TextProps`, `Span` and `Text::rich`.
 - `rust/src/style.rs`: `Style`, `Length`, `EdgeInsets`, `Align`, `Justify`, `Color`.
 - `rust/src/widgets/containers.rs` and `scroll.rs`: `Column`, `Row`, `Spacer`, `ScrollView`.
 - `rust/src/widgets/*.rs`: one file per widget; the properties struct at the top of each file is

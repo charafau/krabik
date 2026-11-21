@@ -268,9 +268,40 @@ Two things were left as they are, with the reason recorded in `TODO.md`: `UIDate
 API for the size, weight or colour of its text, and a UIKit alert cannot be dismissed by tapping
 outside it.
 
+## Gaps an application rewrite found
+
+Rewriting a real application on the framework produced a list of things it had to work around
+(`MISSING.md`). They were closed one commit each: `d6a75a8` `App::init` returns the command an
+application starts with; `571ed47` `Container`, a box that can be tapped; `a9a1249` and `5b92fd1`
+the application is told the device's language and appearance and can choose light or dark;
+`1753175` pull to refresh; `cddf0af` `Stack`, and SVG assets drawn in Rust. A blur style was
+prototyped and removed (`536eb95`, decision 12).
+
+## Hot reload and the command line
+
+### `59d0350`, `ca01df8` Hot reload
+
+A rebuilt application library is loaded into the running app, which hands its state over to the
+new code. The plumbing was first proven on the host with a fake platform (`59d0350`) and then on
+the Android emulator and the iOS simulator (`ca01df8`), driven by a shell script. The design, the
+measurements and the limits are in [`hot-reload.md`](hot-reload.md).
+
+### The `krabik` CLI learns krabik-ui-dsl projects
+
+The CLI in `packages/krabik-cli` only knew projects with UniFFI bindings. It now has three things
+for an app of this framework. `krabik create <name> --with-dsl` writes the app's crate and the
+two shells from a template; the shells point at a krabik checkout by absolute path, because the
+framework is not published. `krabik run` lets Gradle or Xcode build the Rust library, as
+decision 10 arranged, instead of building it itself. `krabik watch` replaced the shell script:
+when the app's crate enables the `hot-reload` feature it rebuilds the crate on every save and
+delivers the library to the running app. It was tried end to end with a new project on the
+emulator (state kept across reloads, a broken build survived) and on the simulator.
+
 ## What is still open
 
 - Run the CI workflow for the first time and fix whatever the runner disagrees with.
 - Run on a physical iPhone.
-- Let a view read the current appearance, for the cases adaptive colours do not cover.
+- Publish the framework, so that an app does not depend on the location of a checkout, and
+  support release builds of such an app in the CLI.
+- The gaps next to Flutter, ranked, are in [`MISSING.md`](../../MISSING.md).
 - The remaining backlog is in [`TODO.md`](../../TODO.md).

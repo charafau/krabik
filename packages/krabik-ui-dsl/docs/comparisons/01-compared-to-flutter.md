@@ -474,8 +474,14 @@ is a `HashMap<NodeId, Rect>` of frames in logical points (dp on Android, points 
 | `Column` / `Row` | `RenderFlex` | flex container; `Row` and `Column` exist with the same meaning |
 | `Expanded(flex: 1)` | parent data on the child | `.grow(1.0)` on the child |
 | `Padding` widget | its own render object | `.padding(…)` on any element |
-| `SizedBox`, `ConstrainedBox` | render objects | `.width(…)`, `.height(…)`, `.width_percent(…)` on the element |
-| `Stack` / `Positioned` | `RenderStack` | no general equivalent in the engine |
+| `SizedBox`, `ConstrainedBox` | render objects | `.width(…)`, `.height(…)`, `.width_percent(…)`, `.min_width(…)`, `.max_width(…)` and the two for height, on the element |
+| `Stack` / `Positioned` | `RenderStack` | `Stack` lays its children over each other in one box; `.positioned(Inset::new().top(8).right(8))` holds a child at distances from its edges |
+| `Wrap` | `RenderWrap` | `Wrap`, a row with flexbox wrapping |
+| `GridView` | slivers | `Grid`, a `List` whose rows are lines of equal cells |
+| `Card`, `ListTile`, `Chip`, `Badge`, `CircleAvatar`, `Divider`, `IconButton`, `ExpansionTile`, `Stepper`, `SearchBar`, `Autocomplete` | Material widgets | builders of the same names (`Avatar` for the circle) that return containers, texts and icons; their state is the application's |
+| `PopupMenuButton`, `DropdownButton`, `SegmentedButton`, `Tooltip` | Material widgets drawn by Flutter | `MenuButton`, `Dropdown` and context menus open the platform's own menu; `SegmentedControl` is assembled from containers; `.tooltip(..)` |
+| Platform views (`AndroidView`, `UiKitView`), `webview_flutter` | a native view composited into Flutter's own surface | `NativeView::new("name")`: the application's Kotlin and Swift view is an ordinary child of the native hierarchy; `WebView` is built in |
+| `Icon(Icons.add)` | a glyph of an icon font | `Image::icon(Icon::add())`: a drawable resource on Android, an SF Symbol on iOS |
 | Custom layout | `CustomMultiChildLayout`, your own `RenderBox` | none |
 | Incremental layout | yes, relayout boundaries | no; all or nothing, per host |
 | Where the tree lives | in the render objects, between frames | created and dropped inside `compute` |
@@ -503,8 +509,25 @@ on iOS it asks an off-screen `UILabel` for `sizeThatFits`. Both cache results. I
 `ApproximateMeasure` stands in, which is why the engine's layout can be tested on a laptop.
 
 Two consequences for a Flutter developer: text looks exactly like the rest of the platform
-(fonts, shaping, emoji, dynamic type are the system's), and the same string can have slightly
-different sizes on the two platforms.
+(fonts, shaping, emoji are the system's), and the same string can have slightly different sizes
+on the two platforms.
+
+What `TextStyle` and `RichText` do is spread over the `Text` builder here:
+
+| Flutter | Here |
+|---|---|
+| `TextStyle(fontSize, color)` | `.size(…)`, `.color(…)` |
+| `fontWeight: FontWeight.w500` | `.weight(FontWeight::Medium)`; nine weights, `.bold()` for 700 |
+| `fontStyle: FontStyle.italic` | `.italic()` |
+| `decoration: TextDecoration.underline` / `lineThrough` | `.underline()`, `.strikethrough()` |
+| `letterSpacing` | `.letter_spacing(…)`, in points |
+| `height` (a multiple of the font size) | `.line_height(…)`, in points |
+| `RichText` / `Text.rich` with `TextSpan`s | `Text::rich([Span::new("…").bold(), …])`; spans are flat, not nested |
+| `TapGestureRecognizer` on a span | none |
+| `fontFamily` with fonts declared in `pubspec.yaml` | `.font(Font::asset("Name.ttf"))`; one file is one face, there are no families |
+| text shadows, `fontFeatures` | none |
+| `DefaultTextStyle`, `Theme.of(context).textTheme` | none; write a function that returns a styled `Text` |
+| `MediaQuery.textScalerOf(context)` | applied for you on both platforms; the application cannot read the factor or opt a text out |
 
 ### How the result reaches the views
 
@@ -744,16 +767,22 @@ compared by a test. More:
 
 ### Build
 
-`flutter build` hides the native toolchains. Here you use them directly: Gradle runs `cargo build`
+`flutter build` hides the native toolchains. Here they stay in charge: Gradle runs `cargo build`
 for each Android ABI through a shared script (`shared/android/rust.gradle.kts`), and Xcode runs a
-pre-build script (`shared/build-rust-ios.sh`). There is no CLI that wraps both. More:
+pre-build script (`shared/build-rust-ios.sh`). The `krabik` CLI is a thin layer over them for
+development: `krabik run` starts the Gradle or Xcode build for the device you picked, installs
+the app and launches it. Release builds are made with Gradle and Xcode directly. More:
 [Building and CI](../platforms/06-building-and-ci.md).
 
 ### Tooling
 
 | Flutter | Here |
 |---|---|
-| Hot reload, hot restart | hot reload of `view` and `update` code on the emulator and the simulator ([how](../design/hot-reload.md)); anything else is a native rebuild and reinstall |
+| `flutter create` | `krabik create <name> --with-dsl`; the project refers to a local checkout of the framework, which is not published yet |
+| `flutter run` | `krabik run` (debug build, install, launch); it does not stay attached |
+| `flutter build apk` / `ipa` | Gradle and Xcode directly |
+| `flutter doctor` | `krabik doctor` |
+| Hot reload, hot restart | `krabik watch`: hot reload of `view` and `update` code on the emulator and the simulator ([how](../design/hot-reload.md)); anything else is `krabik run` again |
 | DevTools: widget inspector, performance overlay | none; the platform's own tools (Layout Inspector, Xcode view debugger) show the real native views |
 | `debugPrint`, `flutter logs` | `adb logcat -s krabik`; the Xcode console |
 | Widget tests (`pumpWidget`, `find`, `tap`) | Rust tests that build a session with a fake platform, send events and assert on the operations and messages |
@@ -782,11 +811,12 @@ engine never touches a view, only ids, so the whole pipeline in
 **Give up**
 
 - Hot reload as complete as Flutter's. Here it covers `view` and `update` code on the emulator
-  and the simulator; a change to the shape of the state, or a device, means a reinstall.
+  and the simulator; a change to the shape of the state means starting the app again with
+  `krabik run`, and a device does not reload at all.
 - Pixel-identical UI across platforms, custom painting, shaders, free-form transforms and clips.
-- Explicit animations, `Hero`, gesture recognisers.
+- Explicit animations, `Hero`, gesture recognisers beyond tap and long press.
 - Local widget state, `InheritedWidget`, `GlobalKey`, lifecycle callbacks.
-- A layout system you can extend; `Stack`-style overlap inside content.
+- A layout system you can extend.
 - Partial rebuilds. You keep `view` cheap yourself.
 - A second thread for smoothness: slow `update` or `view` blocks the UI.
 - The ecosystem, the tooling and the maturity.

@@ -9,7 +9,7 @@ edition = "2024"
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-# `hot-reload` lets `shared/hot-reload.sh` put new code into the running app
+# `hot-reload` lets `krabik watch` put new code into the running app
 # during development; see `krabik_ui_dsl::hot`.
 krabik-ui-dsl = { path = "../../rust", features = ["hot-reload"] }
 jni = "0.22"
