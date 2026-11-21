@@ -215,21 +215,21 @@ fn create_help_documents_package_flag() {
 
 #[test]
 fn lib_run_doctor_errors_when_checks_fail() {
-    let args = krabik::Args {
-        command: krabik::Commands::Doctor,
+    let args = krabik_cli::Args {
+        command: krabik_cli::Commands::Doctor,
     };
-    if let Err(err) = krabik::run(args) {
+    if let Err(err) = krabik_cli::run(args) {
         assert!(err.to_string().contains("checks failed"));
     }
 }
 
 #[test]
 fn lib_run_launch_unknown_simulator_errors() {
-    let args = krabik::Args {
-        command: krabik::Commands::Launch {
+    let args = krabik_cli::Args {
+        command: krabik_cli::Commands::Launch {
             emulator: "NoSuchSimulator".to_string(),
-            platform: krabik::Platform::Ios,
+            platform: krabik_cli::Platform::Ios,
         },
     };
-    assert!(krabik::run(args).is_err());
+    assert!(krabik_cli::run(args).is_err());
 }
